@@ -1,6 +1,6 @@
 ---
 name: maestro-analyze
-description: Multi-dimensional analysis with CLI exploration, decision extraction, and intent tracking
+description: Use when a topic needs structured multi-dimensional investigation before planning or decision-making
 argument-hint: "[phase|topic] [-y] [-c] [-q] [--gaps [ISS-ID]]"
 allowed-tools:
   - Read
@@ -41,6 +41,9 @@ $ARGUMENTS -- phase number for milestone-scoped, topic text for adhoc/standalone
 - `--gaps [ISS-ID]`: Issue root cause analysis mode. If ISS-ID provided, analyze single issue. If omitted, analyze all open/registered issues from issues.jsonl.
 
 Scope routing, output directory format, artifact registration schema, and output artifact listing are defined in workflow analyze.md (Scope Routing and Output Structure sections).
+
+### Role Knowledge
+`maestro wiki list --category debug` → select relevant → `maestro wiki load`
 </context>
 
 <execution>
@@ -76,7 +79,7 @@ Phase 4: Output context.md for downstream plan --gaps
 **Next-step routing on completion:**
 
 Phase/Milestone scope:
-- Go recommendation, UI work needed → `/maestro-ui-design {phase}`
+- Go recommendation, UI work needed → `/maestro-impeccable build {target}`
 - Go recommendation, ready to plan → `/maestro-plan` or `/maestro-plan {phase}`
 - No-Go recommendation → revisit requirements or `/maestro-brainstorm {topic}`
 
@@ -108,6 +111,10 @@ Full mode:
 - [ ] analysis.md written with all 6 dimensions scored with evidence
 - [ ] conclusions.json created with recommendations and decision trail
 - [ ] Intent Coverage tracked and verified (no unresolved ❌ items)
+- [ ] Confidence tracking initialized (Step 4.6) and re-scored each round (Step 5.8)
+- [ ] Readiness gate checked before synthesis (Step 5.10)
+- [ ] Pressure pass completed ≥ 1 time before Step 6
+- [ ] Confidence summary with factor decomposition written to analysis.md
 
 Gaps mode:
 - [ ] Issues loaded from issues.jsonl (all open/registered, or single ISS-ID)
@@ -122,5 +129,5 @@ Both modes (full + quick):
 - [ ] Scope creep redirected to Deferred section
 - [ ] Deferred items auto-created as issues (if any)
 - [ ] Artifact registered in state.json with correct scope/milestone/phase
-- [ ] Next step routed (ui-design/plan for Go, brainstorm for No-Go)
+- [ ] Next step routed (impeccable/plan for Go, brainstorm for No-Go)
 </success_criteria>

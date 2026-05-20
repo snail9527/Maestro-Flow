@@ -1,6 +1,6 @@
 ---
 name: maestro-quick
-description: Execute a quick task with workflow guarantees but skip optional agents
+description: Quick task execution, skip optional agents
 argument-hint: "[description] [--full] [--discuss]"
 allowed-tools:
   - Read
@@ -9,7 +9,7 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
-  - Task
+  - Agent
   - AskUserQuestion
 ---
 <purpose>
@@ -27,6 +27,15 @@ Parse for:
 - `--full` flag -- Enables plan-checking (max 2 iterations) and post-execution verification
 - `--discuss` flag -- Decision extraction before planning (gray areas, Locked/Free/Deferred classification)
 - Remaining text as task description
+
+### Pre-load context
+
+1. **Coding specs + tools**: Run `maestro spec load --category coding` to load coding conventions and discoverable tools. Apply to implementation.
+2. **UI specs (conditional)**: If the task involves frontend/UI work (description contains component, page, style, layout, CSS, HTML, frontend), also run `maestro spec load --category ui`.
+3. **Role Knowledge**:
+   - Browse: `maestro wiki list --category coding`
+   - Load task-relevant entries: `maestro wiki load <id1> [id2...]`
+3. All are optional — proceed without if unavailable.
 </context>
 
 <execution>

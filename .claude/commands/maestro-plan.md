@@ -1,7 +1,7 @@
 ---
 name: maestro-plan
-description: Explore, clarify, plan, check, and confirm a phase execution plan
-argument-hint: "[phase] [--collab] [--spec SPEC-xxx] [-y] [--gaps] [--dir <path>] [--revise [instructions]] [--check <plan-dir>]"
+description: Use when creating, revising, or verifying an execution plan for a phase or task
+argument-hint: "[phase] [--collab] [--spec SPEC-xxx] [-y] [--gaps] [--tdd] [--dir <path>] [--revise [instructions]] [--check <plan-dir>]"
 allowed-tools:
   - Read
   - Write
@@ -45,6 +45,9 @@ Scope routing, base flags (`--collab`, `--spec`, `-y`, `--gaps`, `--dir`), outpu
 **Upstream context:**
 - Reads `context.md` from prior analyze artifact (auto-discovered from state.json or via --dir)
 - Reads `conclusions.json` if available (implementation_scope seeds task generation)
+
+### Role Knowledge
+`maestro wiki list --category arch` → select relevant → `maestro wiki load`
 </context>
 
 <execution>
@@ -57,6 +60,18 @@ Bash("maestro collab preflight --phase <phase-number>")
 If exit code is 1, present warnings and ask whether to proceed.
 
 Follow '~/.maestro/workflows/plan.md' completely.
+
+### Codebase Docs Loading (P1 addition)
+
+During P1 Context Collection, after loading context files, load codebase documentation if available:
+
+```
+IF exists(.workflow/codebase/doc-index.json):
+  codebase_ctx = Read(.workflow/codebase/ARCHITECTURE.md) + Read(.workflow/codebase/FEATURES.md)
+  Pass codebase_ctx to planner agent as structural context
+ELSE:
+  display "W004: Codebase docs unavailable, continuing with code exploration only"
+```
 
 ### Wiki Knowledge Search (P1 addition)
 
@@ -107,6 +122,19 @@ Next steps:
   /maestro-plan {phase}         -- Re-plan with modifications
 ```
 
+**Completion status:**
+```
+--- COMPLETION STATUS ---
+STATUS: DONE|NEEDS_CONTEXT
+CONCERNS: {description if applicable}
+NEXT: /maestro-execute
+--- END STATUS ---
+```
+
+Status mapping:
+- **DONE** — Plan created/revised and confirmed → NEXT: /maestro-execute
+- **NEEDS_CONTEXT** — Ambiguous requirements, insufficient context to produce plan
+
 ### Mode: Revise / Check
 
 Follow workflow plan.md § "Revise Mode" and § "Check Mode" respectively. These modes bypass the standard P1-P5 create pipeline.
@@ -131,8 +159,12 @@ Follow workflow plan.md § "Revise Mode" and § "Check Mode" respectively. These
 - [ ] Every task has `read_first[]` with at least the file being modified + source of truth files
 - [ ] Every task has `convergence.criteria[]` with grep-verifiable conditions (no subjective language)
 - [ ] Every task `action` and `implementation` contain concrete values (no "align X with Y")
+- [ ] Plan confidence scored in P4 with 5-dimension factor model
+- [ ] Plan readiness gate checked before P4.5 collision detection
+- [ ] Pressure pass completed on highest-complexity task
+- [ ] plan.json includes confidence section (overall, dimensions, pressure_pass)
 - [ ] Collision detection executed against same-milestone plans (non-blocking)
 - [ ] Plan-checker passed (or minor issues acknowledged)
-- [ ] User confirmation captured (execute/modify/cancel)
+- [ ] User confirmation captured (execute/modify/cancel) with confidence displayed
 - [ ] Artifact registered in state.json with correct scope/milestone/phase/depends_on
 </success_criteria>

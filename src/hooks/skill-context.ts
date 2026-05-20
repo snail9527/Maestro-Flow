@@ -82,6 +82,7 @@ export interface SkillContextInput {
   user_prompt?: string;
   cwd?: string;
   session_id?: string;
+  hook_event_name?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -277,7 +278,7 @@ export function evaluateSkillContext(data: SkillContextInput): HookOutput | null
 
   return {
     hookSpecificOutput: {
-      hookEventName: 'UserPromptSubmit',
+      hookEventName: data.hook_event_name || 'UserPromptSubmit',
       additionalContext: sections.join('\n\n'),
     },
   };

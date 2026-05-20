@@ -105,7 +105,7 @@ Add entries with: \`/spec-add learning <description>\`
       title: 'Quality Rules',
       readMode: 'required',
       priority: 'medium',
-      category: 'quality',
+      category: 'review',
       keywords: ['quality', 'lint', 'rule', 'enforcement'],
     },
     body: `# Quality Rules
@@ -147,6 +147,31 @@ Add entries with: \`/spec-add learning <description>\`
 ## Naming Conventions
 
 ## Patterns
+
+## Entries
+
+`,
+  },
+  {
+    filename: 'ui-conventions.md',
+    frontmatter: {
+      title: 'UI Conventions',
+      readMode: 'optional',
+      priority: 'medium',
+      category: 'ui',
+      keywords: ['ui', 'design', 'color', 'typography', 'layout', 'animation', 'component'],
+    },
+    body: `# UI Conventions
+
+## Color & Theme
+
+## Typography
+
+## Layout & Spacing
+
+## Motion & Animation
+
+## Component Patterns
 
 ## Entries
 

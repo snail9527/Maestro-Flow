@@ -1,6 +1,6 @@
 ---
 name: wiki-connect
-description: Wiki knowledge graph link discovery and health improvement. Finds orphaned entries, missing connections, transitive gaps. Scores candidates and optionally auto-applies new related links via --fix.
+description: Find and link hidden connections in wiki graph
 argument-hint: "[--scope <type>] [--min-similarity N] [--fix] [--max N]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
@@ -15,12 +15,12 @@ optionally auto-applies new `related` links to improve graph connectivity.
 $ARGUMENTS — optional flags.
 
 **Flags:**
-- `--scope <type>` — Limit to wiki type (spec, knowhow, note, lesson, issue). Default: all.
+- `--scope <type>` — Limit to wiki type (spec, knowhow, note, issue). Default: all.
 - `--min-similarity N` — Threshold 0.0-1.0 (default: 0.3)
 - `--fix` — Auto-apply top suggestions
 - `--max N` — Max suggestions (default: 20)
 
-**Output**: `.workflow/learning/wiki-connections-{date}.md`
+**Output**: `.workflow/knowhow/KNW-wiki-connections-{date}.md`
 </context>
 
 <execution>
@@ -47,7 +47,7 @@ For each suggestion: get entry → append target to `related` → update via `ma
 Re-run `maestro wiki health` for delta.
 
 ### Stage 6: Persist
-Write `wiki-connections-{date}.md`. Append graph insights to `lessons.jsonl` (source: "wiki-connect").
+Write `KNW-wiki-connections-{date}.md`. Append graph insights to `specs/learnings.md` (source: "wiki-connect").
 
 **Next steps:** `/wiki-digest <topic>`, `/manage-wiki health`, `/learn-follow <wiki-id>`, `maestro wiki graph`
 </execution>
@@ -68,6 +68,6 @@ Write `wiki-connections-{date}.md`. Append graph insights to `lessons.jsonl` (so
 - [ ] Candidates scored and ranked
 - [ ] Suggestions displayed with scores and reasons
 - [ ] If --fix: entries updated, new health score reported
-- [ ] Report written to `wiki-connections-{date}.md`
-- [ ] Graph insights appended to `lessons.jsonl`
+- [ ] Report written to `KNW-wiki-connections-{date}.md`
+- [ ] Graph insights appended to `specs/learnings.md`
 </success_criteria>

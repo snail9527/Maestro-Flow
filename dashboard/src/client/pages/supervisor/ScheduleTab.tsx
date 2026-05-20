@@ -66,7 +66,7 @@ export function ScheduleTab() {
           <button
             type="button"
             onClick={() => setShowForm(!showForm)}
-            style={{ fontSize: 12, fontWeight: 600, padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'var(--color-text-primary)', color: '#fff' }}
+            style={{ fontSize: 12, fontWeight: 600, padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'var(--color-text-primary)', color: 'var(--color-text-inverse)' }}
           >
             {showForm ? t('supervisor.schedule.cancel') : t('supervisor.schedule.new')}
           </button>
@@ -80,7 +80,7 @@ export function ScheduleTab() {
             <select value={formType} onChange={(e) => setFormType(e.target.value as ScheduledTaskType)} style={{ ...inputStyle }}>
               {TASK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-            <button type="button" onClick={handleCreate} disabled={!formName.trim() || !formCron.trim()} style={{ fontSize: 12, fontWeight: 600, padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'var(--color-accent-green)', color: '#fff', opacity: (!formName.trim() || !formCron.trim()) ? 0.4 : 1 }}>
+            <button type="button" onClick={handleCreate} disabled={!formName.trim() || !formCron.trim()} style={{ fontSize: 12, fontWeight: 600, padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'var(--color-accent-green)', color: 'var(--color-text-inverse)', opacity: (!formName.trim() || !formCron.trim()) ? 0.4 : 1 }}>
               {t('supervisor.schedule.create')}
             </button>
           </div>

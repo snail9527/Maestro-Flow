@@ -25,6 +25,8 @@ import { createDefaultDelegateBroker, type DelegateBrokerApi } from '../async/de
 import { HookManager } from '../hooks/hook-manager.js';
 import { TelemetryPlugin } from '../hooks/plugins/telemetry-plugin.js';
 import { SpecInjectionPlugin } from '../hooks/plugins/spec-injection-plugin.js';
+import { DecisionLogPlugin } from '../hooks/plugins/decision-log-plugin.js';
+import { SpecAnalyticsPlugin } from '../hooks/plugins/spec-analytics-plugin.js';
 import { randomBytes } from 'node:crypto';
 
 const execFileAsync = promisify(execFile);
@@ -168,6 +170,8 @@ async function createWalker(
   const hookManager = new HookManager();
   hookManager.applyPlugin(new TelemetryPlugin());
   hookManager.applyPlugin(new SpecInjectionPlugin(workflowRoot));
+  hookManager.applyPlugin(new DecisionLogPlugin(join(sessionDir, 'decisions.ndjson')));
+  hookManager.applyPlugin(new SpecAnalyticsPlugin(workflowRoot));
 
   const walker = new GraphWalker(
     loader, assembler, executor,

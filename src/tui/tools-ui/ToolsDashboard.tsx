@@ -12,6 +12,7 @@ import { RoleMappings } from './RoleMappings.js';
 import { RegisterSettings } from './RegisterSettings.js';
 import { CommandReference } from './CommandReference.js';
 import { ConfigSources } from './ConfigSources.js';
+import { C, SP, BORDER, SYM, pad, KeyHints, SectionHeader, StatusBadge } from '../shared/index.js';
 
 type View = 'dashboard' | 'tools' | 'roles' | 'register' | 'reference' | 'sources' | 'reset-confirm';
 
@@ -79,16 +80,15 @@ export function ToolsDashboard({ workDir, initialView }: ToolsDashboardProps) {
 
   if (view === 'reset-confirm') {
     return (
-      <Box flexDirection="column" paddingX={1}>
-        <Box borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={2} paddingY={1}>
-          <Text bold color="yellow">Reset CLI tools to defaults?</Text>
+      <Box flexDirection="column" paddingX={SP.detailPadX}>
+        <Box {...BORDER.warning} flexDirection="column" paddingX={SP.panelPadX} paddingY={SP.panelPadY}>
+          <Text bold color={C.warning}>Reset CLI tools to defaults?</Text>
           <Text> </Text>
           <Text>This will overwrite ~/.maestro/cli-tools.json with default</Text>
           <Text>tool definitions and re-detect CLI availability.</Text>
           <Text>Custom roles and aliases will be lost.</Text>
-          <Text> </Text>
-          <Text dimColor>[y] Confirm  [n/Esc] Cancel</Text>
         </Box>
+        <KeyHints hints="[y] Confirm  [n/Esc] Cancel" />
       </Box>
     );
   }
@@ -97,22 +97,22 @@ export function ToolsDashboard({ workDir, initialView }: ToolsDashboardProps) {
   const toolEntries = Object.entries(config.tools);
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="cyan">MAESTRO TOOLS</Text>
+    <Box flexDirection="column" paddingX={SP.detailPadX}>
+      <Box {...BORDER.primary} flexDirection="column" paddingX={SP.panelPadX} paddingY={SP.panelPadY}>
+        <SectionHeader title="MAESTRO TOOLS" />
         <Text> </Text>
 
         {toolEntries.length === 0 ? (
           <Text dimColor>  No tools configured in cli-tools.json</Text>
         ) : (
           toolEntries.map(([name, entry]) => (
-            <Box key={name} gap={1}>
-              <Text color={entry.enabled ? 'green' : 'red'}>
-                {entry.enabled ? '  ✓' : '  ✗'}
-              </Text>
-              <Text bold>{padRight(name, 12)}</Text>
-              <Text dimColor>{padRight(entry.primaryModel || '—', 24)}</Text>
-              <Text color="yellow">
+            <Box key={name} gap={SP.inlineGap}>
+              <Text>  </Text>
+              <StatusBadge enabled={entry.enabled} />
+              <Text bold>{pad(name, 12)}</Text>
+              <Text dimColor>{pad(entry.primaryModel || '—', 24)}</Text>
+              <Text color={C.accent}>{pad(entry.reasoningEffort ?? '—', 8)}</Text>
+              <Text color={C.warning}>
                 {entry.tags?.length ? `[${entry.tags.join(', ')}]` : '—'}
               </Text>
             </Box>
@@ -120,20 +120,16 @@ export function ToolsDashboard({ workDir, initialView }: ToolsDashboardProps) {
         )}
 
         <Text> </Text>
-        <Box gap={2}>
-          <Text color="cyan">[1]</Text><Text>Tools</Text>
-          <Text color="cyan">[2]</Text><Text>Roles</Text>
-          <Text color="cyan">[3]</Text><Text>Register</Text>
-          <Text color="cyan">[4]</Text><Text>Ref</Text>
-          <Text color="cyan">[5]</Text><Text>Config</Text>
-          <Text color="cyan">[6]</Text><Text>Reset</Text>
+        <Box gap={SP.tabGap}>
+          <Text color={C.primary}>[1]</Text><Text>Tools</Text>
+          <Text color={C.primary}>[2]</Text><Text>Roles</Text>
+          <Text color={C.primary}>[3]</Text><Text>Register</Text>
+          <Text color={C.primary}>[4]</Text><Text>Ref</Text>
+          <Text color={C.primary}>[5]</Text><Text>Config</Text>
+          <Text color={C.primary}>[6]</Text><Text>Reset</Text>
         </Box>
-        <Text dimColor>  [q] Quit</Text>
       </Box>
+      <KeyHints hints="[1-6] Select  [q] Quit" />
     </Box>
   );
-}
-
-function padRight(s: string, width: number): string {
-  return s.length >= width ? s : s + ' '.repeat(width - s.length);
 }

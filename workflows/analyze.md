@@ -252,6 +252,10 @@ Re-read original User Intent from discussion.md header. Check each intent item a
 
 Append initial Intent Coverage Check to discussion.md.
 
+**Step 4.6: Baseline Confidence Scoring**
+
+Dimensions = the 6 analysis dimensions. Factors (weights): findings_depth(.30), evidence_strength(.25), coverage_breadth(.20), user_validation(.15), consistency(.10). Score each factor per dimension from Round 1 results. Append baseline confidence table to discussion.md. Thresholds: <60% 继续深入 | 60-80% 可选 | 80-95% 接近收敛 | >95% 建议收敛.
+
 ### Step 5: Interactive Discussion Loop
 
 Max 5 rounds. Each round follows this sequence:
@@ -301,7 +305,19 @@ Re-read original User Intent. Check each item:
 
 If ❌ or ⚠️ items exist → proactively surface to user at start of next round.
 
-**Auto mode (-y)**: auto-deepen for up to 3 rounds, then synthesize.
+**5.8: Re-score Confidence** (every round):
+Re-evaluate factors per dimension. Show delta: `Confidence: {prev}% → {current}% ({±N%}), {weakest_dim} 仍需深入`
+
+**5.9: Quality Mechanisms**:
+- **Pressure Pass** (mandatory ≥1 before Step 6): highest-confidence finding → pressure ladder (evidence demand → assumption probe → boundary/tradeoff → root cause check). Record under `#### 压力测试`.
+- **Devil's Advocate**: dimension > 0.7 → challenge "如果 [finding] 不成立？" (once per dimension)
+- **Scope Minimizer**: findings > 5 + scope expanding → "最小可行结论集？"
+- **Stall Detection**: delta < 5% for 2 consecutive rounds → "分析可能停滞，建议切换方向或收敛"
+
+**5.10: Pre-Synthesis Readiness Gate** (on "分析完成"):
+Block if: ❌ items without deferral | any dimension < 40% | no pressure pass | unresolved contradictions. If blocked → AskUserQuestion: 补充后继续 or 忽略风险并继续 (record `residual_risks[]`).
+
+**Auto mode (-y)**: auto-deepen ≤3 rounds, readiness gate auto-overrides with residual risk recording.
 
 ### Step 6: Six-Dimension Scoring
 
@@ -318,9 +334,11 @@ Using all exploration findings, discussion insights, and user feedback, score ac
 
 Each dimension scored with specific evidence (code refs, data points from exploration).
 
+Each 1-5 score justified by confidence factors from Step 4.6/5.8. Include per-dimension confidence % alongside the score.
+
 Build probability-impact risk matrix from identified risks.
 
-Formulate Go/No-Go/Conditional recommendation with confidence level.
+Formulate Go/No-Go/Conditional recommendation with overall confidence %. Write confidence summary (per-dimension scores + overall + pressure pass result + residual risks) to analysis.md.
 
 ### Step 7: Synthesis & Conclusion
 
@@ -673,6 +691,10 @@ Replaceable blocks (overwritten each round):
 - At least 2 alternatives compared with tradeoffs
 - Go/No-Go/Conditional recommendation with confidence level
 - Code references included where relevant (file paths, line numbers)
+- Confidence tracking initialized and re-scored each round
+- Readiness gate checked before synthesis (Step 5.10)
+- Pressure pass completed ≥ 1 time before Step 6
+- Confidence summary with factor decomposition in analysis.md
 
 **Both modes (full + quick):**
 - context.md written with all decisions classified as Locked/Free/Deferred

@@ -1,8 +1,8 @@
 ---
 name: maestro-init
-description: Initialize project with auto state detection — creates .workflow/ directory, project.md, state.json, config.json, and specs/
+description: Initialize project with auto state detection
 argument-hint: "[-y] [--from-brainstorm SESSION-ID]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -57,21 +57,26 @@ Classify as:
 
 **If `--from-brainstorm`**:
 - Read `.workflow/.brainstorm/{SESSION-ID}/guidance-specification.md`
-- Extract: vision, goals, constraints, terminology, tech decisions
-- Skip interactive questioning
+- Extract these fields from the document (match by heading or frontmatter key):
+  - `## Vision` or `vision:` → project.md Core Value Proposition
+  - `## Goals` or `goals:` → project.md Requirements (Validated)
+  - `## Constraints` or `constraints:` → project.md Constraints section
+  - `## Terminology` or `terminology:` → project.md Glossary section
+  - `## Tech Decisions` or `tech_stack:` → project.md Tech Stack section
+- Skip interactive questioning — all project info comes from the document
 
 **If `-y`**:
 - Extract project info from provided document/@ reference
 - Minimal interactive questions (confirm core value only)
 
 **Otherwise (interactive)**:
-- Deep questioning flow:
-  1. What is the core value proposition?
-  2. Who are the target users?
-  3. What are the key requirements? (follow threads, don't rush)
-  4. What are known constraints/limitations?
-  5. What tech stack preferences exist?
-- Follow each thread with clarifying questions until satisfied
+- Deep questioning flow (ask via `request_user_input`, follow each thread with clarifying questions until satisfied):
+  1. "What problem does this project solve? Who feels the pain today?" — core value proposition
+  2. "Who are the target users? How do they currently work around this problem?" — user personas
+  3. "What are the must-have features for a first usable version?" — key requirements (follow threads, don't rush)
+  4. "What are known constraints — budget, timeline, team size, tech mandates, compliance?" — constraints/limitations
+  5. "What tech stack preferences or existing infrastructure must be used?" — tech stack decisions
+- For each answer, probe deeper: "Why?", "What happens if not?", "Can you give an example?"
 
 ### Step 4: Read Templates
 
@@ -94,17 +99,36 @@ Initialize from template with `current_milestone: null`, `status: "initialized"`
 
 ### Step 8: Write config.json
 
-Configuration questions (or defaults for -y): granularity (fine/medium/coarse), workflow agents (enable/disable), gate preferences. Write to `.workflow/config.json`.
+Configuration questions (or defaults for -y). Ask via `request_user_input`:
+
+**Granularity** — task decomposition detail level:
+```json
+{ "questions": [{ "id": "granularity", "header": "Task Granularity", "question": "How granular should task breakdowns be?", "options": [{ "label": "medium (Recommended)", "description": "Balanced: one task per logical feature" }, { "label": "fine", "description": "Detailed: one task per function/component" }, { "label": "coarse", "description": "High-level: one task per epic/module" }] }] }
+```
+
+**Workflow agents** — enable parallel research agents during analyze/plan:
+```json
+{ "questions": [{ "id": "workflow_agents", "header": "Workflow Agents", "question": "Enable parallel research agents for analysis and planning phases?", "options": [{ "label": "enabled (Recommended)", "description": "Spawn parallel agents for research, patterns, risks" }, { "label": "disabled", "description": "Sequential single-agent flow only" }] }] }
+```
+
+**Gate preferences** — milestone completion gates:
+```json
+{ "questions": [{ "id": "gate_preferences", "header": "Quality Gates", "question": "What quality gates should be enforced at milestone boundaries?", "options": [{ "label": "standard (Recommended)", "description": "Audit report required, all tasks completed" }, { "label": "strict", "description": "Audit + code review + test coverage threshold" }, { "label": "relaxed", "description": "Manual approval only, no automated checks" }] }] }
+```
+
+Write collected configuration to `.workflow/config.json`.
 
 ### Step 9: Initialize specs/
 
 Run `Bash("maestro spec init")` to create empty seed files in `.workflow/specs/`.
 
-If project state is **code** (existing source files detected):
-- Auto-trigger `Skill({ skill: "spec-setup" })` to scan codebase and populate specs with detected conventions.
+If project state is **code** (existing source files detected in Step 2):
+- Auto-trigger `Skill({ skill: "spec-setup" })` to scan codebase and populate specs with detected conventions
+- This runs unconditionally for `code` state — existing source means conventions can be extracted
 
-If project state is **empty** (greenfield):
-- Skip spec-setup. Specs are populated progressively by analyze, plan, and execute stages via `maestro spec add`.
+If project state is **empty** (greenfield, no source files found in Step 2):
+- Skip spec-setup entirely — no code to scan
+- Specs are populated progressively by analyze, plan, and execute stages via `maestro spec add`
 
 ### Step 10: Completion Report
 

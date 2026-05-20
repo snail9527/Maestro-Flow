@@ -1,9 +1,8 @@
 ---
 name: quality-auto-test
-description: Unified automated testing via CSV layer pipeline — generates, executes, and iterates tests from PRD specs, coverage gaps, or code exploration
-argument-hint: "<phase> [-y] [-c N] [--max-iter <N>] [--layer <L0-L3>] [--strategy <name>] [--dry-run] [--re-run]"
+description: Use when test coverage needs automated expansion or existing tests need iterative convergence
+argument-hint: "<phase> [-y] [-c N] [--max-iter N] [--layer L0|L1|L2|L3] [--dry-run] [--re-run]"
 allowed-tools:
-  - spawn_agents_on_csv
   - Read
   - Write
   - Edit
@@ -50,6 +49,15 @@ Phase or task: $ARGUMENTS (required — phase number)
 | 5 | Default | code | quality-integration-test |
 
 Flags, artifact context resolution, and output formats defined in workflow auto-test.md.
+
+### Pre-load context (before test generation)
+
+1. **Test specs + tools**: Run `maestro spec load --category test` to load test conventions (framework, patterns, naming). Apply to all generated tests.
+2. **Coding specs**: Run `maestro spec load --category coding` to understand coding patterns for accurate test targeting.
+3. **Role Knowledge**:
+   - Browse: `maestro wiki list --category test`
+   - Load task-relevant entries: `maestro wiki load <id1> [id2...]`
+4. All are optional — proceed without if unavailable.
 </context>
 
 <execution>
@@ -85,7 +93,7 @@ Append to state.json.artifacts[]:
 **Next-step routing on completion:**
 - Converged (>=95%) → `/maestro-verify {phase}`
 - All requirements verified (spec source) → `/maestro-milestone-audit`
-- Bugs discovered → `/quality-debug --from-auto-test {phase}`
+- Bugs discovered → `/quality-debug --from-uat {phase}`
 - Max iter, >80% → `/quality-test {phase}` for manual UAT
 - Max iter, <80% → `/quality-debug {phase}`
 - Coverage still low → `/quality-auto-test {phase} --layer {missing}`
@@ -116,6 +124,10 @@ Append to state.json.artifacts[]:
 - [ ] Tests executed progressively (L0→L3) with fail-fast on critical
 - [ ] Iteration engine ran (inner: test_defect fix, outer: strategy adjust)
 - [ ] state.json, report.json, reflection-log.md written
+- [ ] Test confidence scored per iteration (Step 7.5) with 5-dimension factor model
+- [ ] Convergence check includes confidence >= 60% alongside pass_rate threshold
+- [ ] Pressure pass completed on highest-pass-rate layer before completion
+- [ ] report.json includes confidence section
 - [ ] index.json updated with auto_test section
 - [ ] If spec source: traceability matrix built, traceability.md written
 - [ ] If failures: issues auto-created in issues.jsonl

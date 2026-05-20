@@ -47,7 +47,7 @@ export function KanbanCenterView({ localIssues, linearIssues, selectedItem, onSe
     <div className="flex flex-col h-full overflow-hidden">
       {/* Stats strip */}
       <div className="flex items-center gap-[var(--spacing-4)] px-[var(--spacing-4)] py-[var(--spacing-2-5)] border-b border-border-divider shrink-0 bg-bg-secondary">
-        <Stat label="Issues" value={totalIssues} sub={`${openIssues.length} open`} color={STATUS_COLORS.pending} />
+        <Stat label="Issues" value={totalIssues} sub={`${openIssues.length} open`} color={STATUS_COLORS.not_started} />
         <div className="w-px h-6 bg-border-divider" />
         <Stat label="In Progress" value={(localIssues ?? []).filter((i) => i.status === 'in_progress').length} sub="active" color={STATUS_COLORS.executing} />
         <div className="w-px h-6 bg-border-divider" />

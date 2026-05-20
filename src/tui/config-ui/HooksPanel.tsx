@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
+import { C, SYM, SP, BORDER, pad, wrapCursor, KeyHints, SectionHeader, StatusBadge } from '../shared/index.js';
 
 interface HookInfo {
   name: string;
@@ -70,8 +71,8 @@ export function HooksPanel({ workDir, onBack }: HooksPanelProps) {
       if (onBack) onBack();
       else exit();
     }
-    if (key.upArrow) setCursor(c => Math.max(0, c - 1));
-    if (key.downArrow) setCursor(c => Math.min(hooks.length - 1, c + 1));
+    if (key.upArrow) setCursor(c => wrapCursor(c, -1, hooks.length));
+    if (key.downArrow) setCursor(c => wrapCursor(c, 1, hooks.length));
   });
 
   if (hooks.length === 0) {
@@ -81,22 +82,19 @@ export function HooksPanel({ workDir, onBack }: HooksPanelProps) {
   const selected = hooks[cursor];
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="cyan">HOOKS STATUS</Text>
+    <Box flexDirection="column" paddingX={SP.detailPadX}>
+      <Box {...BORDER.primary} flexDirection="column" paddingX={SP.panelPadX} paddingY={SP.panelPadY}>
+        <SectionHeader title="HOOKS STATUS" />
         <Text> </Text>
 
-        <Box gap={2}>
+        <Box gap={SP.tabGap}>
           <Text>Statusline:</Text>
-          {statusLine
-            ? <Text bold color="green">installed</Text>
-            : <Text bold color="red">not installed</Text>
-          }
+          <StatusBadge enabled={statusLine} labels={{ on: 'installed', off: 'not installed' }} />
         </Box>
         <Text> </Text>
 
         <Box flexDirection="column">
-          <Box gap={1}>
+          <Box gap={SP.inlineGap}>
             <Text dimColor>{pad('', 2)}</Text>
             <Text dimColor bold>{pad('Hook', 24)}</Text>
             <Text dimColor bold>{pad('Event', 20)}</Text>
@@ -106,16 +104,16 @@ export function HooksPanel({ workDir, onBack }: HooksPanelProps) {
           {hooks.map((h, i) => {
             const isCurrent = i === cursor;
             const icon = h.installed
-              ? (h.enabled ? '✓' : '○')
-              : '✗';
+              ? (h.enabled ? SYM.enabled : SYM.dotEmpty)
+              : SYM.disabled;
             const iconColor = h.installed
-              ? (h.enabled ? 'green' : 'yellow')
-              : 'red';
+              ? (h.enabled ? C.success : C.warning)
+              : C.error;
             const matcher = h.matcher ? ` [${h.matcher}]` : '';
 
             return (
-              <Box key={h.name} gap={1}>
-                <Text color="cyan">{isCurrent ? '›' : ' '}</Text>
+              <Box key={h.name} gap={SP.inlineGap}>
+                <Text color={C.primary}>{isCurrent ? SYM.cursor : ' '}</Text>
                 <Text color={iconColor}>{icon}</Text>
                 <Text bold={isCurrent}>{pad(h.name, 23)}</Text>
                 <Text dimColor={!isCurrent}>{pad(`${h.event}${matcher}`, 20)}</Text>
@@ -128,25 +126,18 @@ export function HooksPanel({ workDir, onBack }: HooksPanelProps) {
           })}
         </Box>
 
-        {selected && (
-          <>
-            <Text> </Text>
-            <Text dimColor>
-              {selected.requiresWorkspace ? '⚑ Requires workspace' : ''}
-            </Text>
-          </>
+        {selected && selected.requiresWorkspace && (
+          <Box marginTop={SP.sectionGap}>
+            <Text dimColor>⚑ Requires workspace</Text>
+          </Box>
         )}
 
         <Text> </Text>
-        <Text dimColor>  ↑/↓ navigate  [q] back</Text>
         <Text dimColor>  CLI: maestro hooks install --level {'<'}minimal|standard|full{'>'}</Text>
       </Box>
+      <KeyHints hints="[↑↓] Navigate  [q] Back" />
     </Box>
   );
-}
-
-function pad(s: string, width: number): string {
-  return s.length >= width ? s : s + ' '.repeat(width - s.length);
 }
 
 function findHook(settings: any, name: string): boolean {

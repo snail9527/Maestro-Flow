@@ -10,14 +10,14 @@ import AlertCircleIcon from 'lucide-react/dist/esm/icons/circle-alert.js';
 // ---------------------------------------------------------------------------
 
 /** The 6 pipeline stages in order */
-const STAGE_ORDER: PhaseStatus[] = ['exploring', 'planning', 'executing', 'verifying', 'testing', 'completed'];
-const STAGE_LABELS = ['Explore', 'Plan', 'Execute', 'Verify', 'Test', 'Done'];
+const STAGE_ORDER: PhaseStatus[] = ['planning', 'executing', 'verifying', 'reviewing', 'completed'];
+const STAGE_LABELS = ['Plan', 'Execute', 'Verify', 'Review', 'Done'];
 
 /** Map a phase's status to which stages are done / current */
 function stageState(status: PhaseStatus, stageIdx: number): 'done' | 'current' | 'future' {
   const statusIdx = STAGE_ORDER.indexOf(status);
   if (status === 'completed') return 'done';
-  if (status === 'pending' || status === 'not_started') return 'future';
+  if (status === 'not_started') return 'future';
   if (stageIdx < statusIdx) return 'done';
   if (stageIdx === statusIdx) return 'current';
   return 'future';

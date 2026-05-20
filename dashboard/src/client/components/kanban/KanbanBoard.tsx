@@ -12,7 +12,7 @@ import { useI18n } from '@/client/i18n/index.js';
 
 /** Column header colors — use the first status color in each group */
 const COLUMN_COLORS: Record<string, string> = {
-  backlog: STATUS_COLORS.pending,
+  backlog: STATUS_COLORS.not_started,
   triage: '#C8863A',
   'in-progress': STATUS_COLORS.executing,
   review: STATUS_COLORS.verifying,
@@ -155,7 +155,7 @@ export function KanbanBoard({ linearIssues, localIssues, selectedItem, onSelectI
           columnId={col.id}
           title={t(COLUMN_LABEL_KEYS[col.id])}
           phases={[]}
-          color={COLUMN_COLORS[col.id] ?? STATUS_COLORS.pending}
+          color={COLUMN_COLORS[col.id] ?? STATUS_COLORS.not_started}
           animationDelay={i * 50}
           onSelectPhase={() => {}}
           linearIssues={groupedLinear.get(col.id)}

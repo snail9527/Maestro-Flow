@@ -1,7 +1,9 @@
 import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { HookLevel } from '../../commands/hooks.js';
+import type { ExtraMcpTargetId } from '../../commands/install-backend.js';
 import { t } from '../../i18n/index.js';
+import { C, BORDER } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // InstallConfirm — summary before execution
@@ -13,6 +15,13 @@ export interface InstallFlowConfig {
   installComponents: boolean;
   installHooks: boolean;
   installMcp: boolean;
+  installCodexHooks: boolean;
+  codexHookLevel: HookLevel;
+  installCodexMcp: boolean;
+  codexMcpTools: string[];
+  codexMcpProjectRoot: string;
+  installExtraMcp: boolean;
+  extraMcpTargetIds: ExtraMcpTargetId[];
   installStatusline: boolean;
   statuslineTheme: string;
   hookLevel: HookLevel;
@@ -53,9 +62,9 @@ export function InstallConfirm({ config, onConfirm, onBack }: InstallConfirmProp
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">{t.install.confirmTitle}</Text>
+      <Text bold color={C.primary}>{t.install.confirmTitle}</Text>
 
-      <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1}>
+      <Box flexDirection="column" {...BORDER.primary} paddingX={1} marginTop={1}>
         <Row label={t.install.confirmLabelMode} value={config.mode} />
         <Row label={t.install.confirmLabelTarget} value={target} />
 
@@ -63,30 +72,60 @@ export function InstallConfirm({ config, onConfirm, onBack }: InstallConfirmProp
           <Row
             label={t.install.confirmLabelComponents}
             value={`${config.componentCount} selected (${t.install.hubFiles.replace('{count}', String(config.fileCount))})`}
-            valueColor="green"
+            valueColor={C.success}
           />
         ) : (
-          <Row label={t.install.confirmLabelComponents} value={t.install.confirmSkipped} valueColor="gray" />
+          <Row label={t.install.confirmLabelComponents} value={t.install.confirmSkipped} valueColor={C.neutral} />
         )}
 
         {config.installHooks ? (
           <Row
             label={t.install.confirmLabelHooks}
             value={`${config.hookLevel} — ${t.install.hooksLevelDescriptions[config.hookLevel]}`}
-            valueColor="green"
+            valueColor={C.success}
           />
         ) : (
-          <Row label={t.install.confirmLabelHooks} value={t.install.confirmSkipped} valueColor="gray" />
+          <Row label={t.install.confirmLabelHooks} value={t.install.confirmSkipped} valueColor={C.neutral} />
         )}
 
         {config.installMcp ? (
           <Row
             label={t.install.confirmLabelMcp}
             value={`${config.mcpToolCount} tools (${config.mcpTools.join(', ')})`}
-            valueColor="green"
+            valueColor={C.success}
           />
         ) : (
-          <Row label={t.install.confirmLabelMcp} value={t.install.confirmSkipped} valueColor="gray" />
+          <Row label={t.install.confirmLabelMcp} value={t.install.confirmSkipped} valueColor={C.neutral} />
+        )}
+
+        {config.installCodexHooks ? (
+          <Row
+            label={t.install.confirmLabelCodexHooks}
+            value={`${config.codexHookLevel} — ${t.install.codexHooksLevelDescriptions[config.codexHookLevel]}`}
+            valueColor={C.success}
+          />
+        ) : (
+          <Row label={t.install.confirmLabelCodexHooks} value={t.install.confirmSkipped} valueColor={C.neutral} />
+        )}
+
+        {config.installCodexMcp ? (
+          <Row
+            label={t.install.confirmLabelCodexMcp}
+            value={`${config.codexMcpTools.length} tools`}
+            valueColor={C.success}
+          />
+        ) : (
+          <Row label={t.install.confirmLabelCodexMcp} value={t.install.confirmSkipped} valueColor={C.neutral} />
+        )}
+
+        {config.installExtraMcp ? (
+          <Row
+            label="Extra MCP"
+            value={`${config.extraMcpTargetIds.length} target(s): ${config.extraMcpTargetIds.join(', ')}`}
+            valueColor={C.success}
+          />
+        ) : (
+          <Row label="Extra MCP" value={t.install.confirmSkipped} valueColor={C.neutral} />
         )}
 
         <Row
@@ -94,7 +133,7 @@ export function InstallConfirm({ config, onConfirm, onBack }: InstallConfirmProp
           value={config.installStatusline
             ? `${t.install.statuslineEnabled} (${config.statuslineTheme})`
             : t.install.confirmSkipped}
-          valueColor={config.installStatusline ? 'green' : 'gray'}
+          valueColor={config.installStatusline ? C.success : C.neutral}
         />
 
         <Row
@@ -106,7 +145,7 @@ export function InstallConfirm({ config, onConfirm, onBack }: InstallConfirmProp
                 ? t.install.backupClaudeMdLabel
                 : t.install.confirmSkipped
           }
-          valueColor={config.backupClaudeMd || config.backupAll ? 'green' : 'gray'}
+          valueColor={config.backupClaudeMd || config.backupAll ? C.success : C.neutral}
         />
       </Box>
 

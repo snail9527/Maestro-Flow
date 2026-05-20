@@ -12,6 +12,7 @@ import { checkSkillContextHook } from '../../commands/config.js';
 import { SkillsList } from './SkillsList.js';
 import { SkillParamEditor } from './SkillParamEditor.js';
 import { ConfigSourcesView } from './ConfigSourcesView.js';
+import { C, SP, BORDER, SYM, pad, KeyHints, SectionHeader, StatusBadge } from '../shared/index.js';
 
 type View = 'dashboard' | 'skills' | 'editor' | 'sources';
 
@@ -88,30 +89,27 @@ export function SkillConfigDashboard({ workDir, initialView, editSkill }: SkillC
   const totalCommands = commandDefs.size;
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="cyan">MAESTRO SKILL CONFIG</Text>
+    <Box flexDirection="column" paddingX={SP.detailPadX}>
+      <Box {...BORDER.primary} flexDirection="column" paddingX={SP.panelPadX} paddingY={SP.panelPadY}>
+        <SectionHeader title="MAESTRO SKILL CONFIG" />
         <Text> </Text>
 
-        <Box gap={2}>
+        <Box gap={SP.tabGap}>
           <Text>Commands discovered:</Text>
-          <Text bold color="green">{totalCommands}</Text>
+          <Text bold color={C.success}>{totalCommands}</Text>
         </Box>
-        <Box gap={2}>
+        <Box gap={SP.tabGap}>
           <Text>Skills with defaults:</Text>
-          <Text bold color="yellow">{configuredSkills.length}</Text>
+          <Text bold color={C.warning}>{configuredSkills.length}</Text>
         </Box>
-        <Box gap={2}>
+        <Box gap={SP.tabGap}>
           <Text>Hook (skill-context):</Text>
-          {hookStatus === 'installed'
-            ? <Text bold color="green">installed</Text>
-            : <Text bold color="red">not installed</Text>
-          }
+          <StatusBadge enabled={hookStatus === 'installed'} labels={{ on: 'installed', off: 'not installed' }} />
         </Box>
 
         {hookStatus === 'not-installed' && (
-          <Box marginTop={1}>
-            <Text color="red">  Parameter injection requires the skill-context hook.</Text>
+          <Box marginTop={SP.sectionGap}>
+            <Text color={C.error}>  Parameter injection requires the skill-context hook.</Text>
           </Box>
         )}
         {hookStatus === 'not-installed' && (
@@ -125,9 +123,9 @@ export function SkillConfigDashboard({ workDir, initialView, editSkill }: SkillC
             {configuredSkills.slice(0, 8).map(([name, defaults]) => {
               const paramCount = Object.keys(defaults.params).length;
               return (
-                <Box key={name} gap={1}>
-                  <Text color="green">  ✓</Text>
-                  <Text bold>{padRight(name, 28)}</Text>
+                <Box key={name} gap={SP.inlineGap}>
+                  <Text color={C.success}>  {SYM.enabled}</Text>
+                  <Text bold>{pad(name, 28)}</Text>
                   <Text dimColor>{paramCount} param{paramCount !== 1 ? 's' : ''}</Text>
                 </Box>
               );
@@ -139,16 +137,12 @@ export function SkillConfigDashboard({ workDir, initialView, editSkill }: SkillC
         )}
 
         <Text> </Text>
-        <Box gap={2}>
-          <Text color="cyan">[1]</Text><Text>Skills</Text>
-          <Text color="cyan">[2]</Text><Text>Config Sources</Text>
+        <Box gap={SP.tabGap}>
+          <Text color={C.primary}>[1]</Text><Text>Skills</Text>
+          <Text color={C.primary}>[2]</Text><Text>Config Sources</Text>
         </Box>
-        <Text dimColor>  [q] Quit</Text>
       </Box>
+      <KeyHints hints="[1-2] Select  [q] Quit" />
     </Box>
   );
-}
-
-function padRight(s: string, width: number): string {
-  return s.length >= width ? s : s + ' '.repeat(width - s.length);
 }

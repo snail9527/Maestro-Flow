@@ -8,6 +8,7 @@ import { StatusBar } from '@/client/components/layout/status-bar/StatusBar.js';
 import { PanelArea } from '@/client/components/layout/status-bar/PanelArea.js';
 import { useBoardStore } from '@/client/store/board-store.js';
 import { useAgentStore } from '@/client/store/agent-store.js';
+import { useSettingsStore } from '@/client/store/settings-store.js';
 import { useWebSocket } from '@/client/hooks/useWebSocket.js';
 import { API_ENDPOINTS } from '@/shared/constants.js';
 import { useI18n } from '@/client/i18n/index.js';
@@ -32,6 +33,31 @@ export function AppLayout() {
   const location = useLocation();
   const showOrchestrator = location.pathname.startsWith('/kanban');
   const isChatPage = location.pathname.startsWith('/chat');
+
+  // Load settings on mount (needed for theme + nav visibility before dialog opens)
+  const loadSettings = useSettingsStore((s) => s.loadConfig);
+  const theme = useSettingsStore((s) => s.draft?.general?.theme ?? s.config?.general?.theme);
+
+  useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
+
+  // Sync theme to DOM + localStorage whenever it changes
+  useEffect(() => {
+    if (!theme) return; // settings not loaded yet
+    if (theme === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const apply = () => {
+        document.documentElement.dataset.theme = mq.matches ? 'dark' : 'light';
+      };
+      apply();
+      mq.addEventListener('change', apply);
+      localStorage.setItem('theme', 'system');
+      return () => mq.removeEventListener('change', apply);
+    }
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   // Establish WebSocket connection for real-time updates
   useWebSocket();

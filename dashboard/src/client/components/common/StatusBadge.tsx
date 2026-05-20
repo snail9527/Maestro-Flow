@@ -9,12 +9,10 @@ import { useI18n } from '@/client/i18n/index.js';
 /** Shape per status for non-color differentiation (per spec) */
 const STATUS_SHAPES: Record<PhaseStatus, string> = {
   not_started: 'rounded-full',    // circle
-  pending: 'rounded-full',        // circle
-  exploring: 'rounded-full',      // circle
   planning: 'rotate-45 rounded-none', // diamond
   executing: 'rounded-full',      // circle (pulsing)
   verifying: 'rotate-45 rounded-none', // diamond
-  testing: 'rounded-full',        // circle
+  reviewing: 'rounded-full',      // circle
   completed: 'rounded-full',      // circle
   blocked: 'rounded-[var(--radius-sm)]', // square
 };
@@ -22,25 +20,21 @@ const STATUS_SHAPES: Record<PhaseStatus, string> = {
 /** Translation keys for each status */
 const STATUS_LABEL_KEYS: Record<PhaseStatus, string> = {
   not_started: 'status.not_started',
-  pending: 'status.pending',
-  exploring: 'status.exploring',
   planning: 'status.planning',
   executing: 'status.executing',
   verifying: 'status.verifying',
-  testing: 'status.testing',
+  reviewing: 'status.reviewing',
   completed: 'status.completed',
   blocked: 'status.blocked',
 };
 
 /** Status background token CSS variable names */
 const STATUS_BG_VARS: Record<PhaseStatus, string> = {
-  not_started: 'var(--color-status-bg-pending)',
-  pending: 'var(--color-status-bg-pending)',
-  exploring: 'var(--color-status-bg-exploring)',
+  not_started: 'var(--color-status-bg-not-started)',
   planning: 'var(--color-status-bg-planning)',
   executing: 'var(--color-status-bg-executing)',
   verifying: 'var(--color-status-bg-verifying)',
-  testing: 'var(--color-status-bg-testing)',
+  reviewing: 'var(--color-status-bg-reviewing)',
   completed: 'var(--color-status-bg-completed)',
   blocked: 'var(--color-status-bg-blocked)',
 };

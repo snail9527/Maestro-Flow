@@ -1,6 +1,6 @@
 ---
 name: wiki-digest
-description: Knowledge synthesis from wiki entries. Theme clustering, gap analysis, coverage heatmap (type × theme matrix). Optionally creates knowledge-gap issues. Persists meta-insights to lessons.jsonl.
+description: Generate wiki digest with theme clustering and gap analysis
 argument-hint: "[<topic>|--recent N] [--type <type>] [--format brief|full] [--create-issues]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
@@ -26,7 +26,7 @@ $ARGUMENTS — scope and optional flags.
 - `--format full` — Detailed with per-entry summaries
 - `--create-issues` — Auto-create knowledge-gap issues in issues.jsonl
 
-**Output**: `.workflow/learning/digest-{slug}-{date}.md`
+**Output**: `.workflow/knowhow/KNW-digest-{slug}-{date}.md`
 </context>
 
 <execution>
@@ -41,7 +41,7 @@ Group entries into 3-5 themes via: tag co-occurrence, title BM25 similarity, rel
 Per theme: summary paragraph, key entries (by hub score), gap detection (broken links, orphans, TODO markers, missing perspectives), health score.
 
 ### Stage 4: Cross-Reference with Lessons
-Search `lessons.jsonl` for related insights. Flag unlinked insights (lessons matching theme but not referenced by wiki entries).
+Search `specs/learnings.md` for related insights. Flag unlinked insights (knowhow entries matching theme but not referenced by wiki entries).
 
 ### Stage 5: Coverage Heatmap
 Type × theme matrix showing knowledge density:
@@ -49,7 +49,7 @@ Type × theme matrix showing knowledge density:
               Theme 1    Theme 2    Theme 3
 spec          ███░░      ░░░░░      █████
 memory        ████░      ███░░      ░░░░░
-lesson        █░░░░      ██░░░      ████░
+knowhow       █░░░░      ██░░░      ████░
 ```
 Empty cells = knowledge gaps.
 
@@ -60,7 +60,7 @@ Produce `digest-{slug}-{date}.md` with themes, heatmap, gaps, unlinked insights,
 For each gap: dedup against issues.jsonl, append with `type: "knowledge-gap"`, `source: "wiki-digest"`.
 
 ### Stage 8: Persist
-Append meta-insights to `lessons.jsonl` (source: "wiki-digest"). Display summary.
+Append meta-insights to `specs/learnings.md` (source: "wiki-digest"). Display summary.
 
 **Next steps:** `/learn-follow <wiki-id>`, `/wiki-connect --fix`, `/manage-wiki cleanup`, `/learn-decompose <path>`
 </execution>
@@ -71,7 +71,7 @@ Append meta-insights to `lessons.jsonl` (source: "wiki-digest"). Display summary
 | E001 | error | No wiki entries found | Initialize wiki content |
 | E002 | error | Topic search returned 0 | Broaden topic |
 | W001 | warning | Too few entries (<5) | Themes may be trivial |
-| W002 | warning | lessons.jsonl not found | Skip cross-reference |
+| W002 | warning | learnings.md not found | Skip cross-reference |
 | W003 | warning | Some entry bodies failed to load | Partial summaries |
 </error_codes>
 
@@ -79,9 +79,9 @@ Append meta-insights to `lessons.jsonl` (source: "wiki-digest"). Display summary
 - [ ] Scope parsed and entries loaded
 - [ ] Entries clustered into 3-5 semantic themes
 - [ ] Per-theme analysis with gaps identified
-- [ ] Cross-reference with lessons.jsonl completed
+- [ ] Cross-reference with specs/learnings.md completed
 - [ ] Coverage heatmap generated
 - [ ] If --create-issues: gap issues created (deduped)
-- [ ] Digest written to `digest-{slug}-{date}.md`
-- [ ] Meta-insights appended to lessons.jsonl
+- [ ] Digest written to `KNW-digest-{slug}-{date}.md`
+- [ ] Meta-insights appended to specs/learnings.md
 </success_criteria>

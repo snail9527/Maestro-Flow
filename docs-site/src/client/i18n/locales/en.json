@@ -2,14 +2,21 @@
   "nav": {
     "home": "Home",
     "search": "Search",
-    "categories": "Categories"
+    "categories": "Categories",
+    "changelog": "Changelog",
+    "github": "GitHub"
   },
   "sidebar": {
     "toggle": "Toggle sidebar",
     "categories": "Categories",
+    "aria_nav": "Command categories",
     "commands": "Commands",
     "skills": "Skills",
     "codex_skills": "Codex Skills",
+    "guides": "Guides",
+    "quick_start": "Quick Start",
+    "badge_skill": "Skill",
+    "badge_codex": "Codex",
     "expand_all": "Expand all",
     "collapse_all": "Collapse all"
   },
@@ -42,7 +49,9 @@
       "codex_skill": "Codex Skill"
     },
     "results_count": "{count} result(s)",
-    "searching": "Searching..."
+    "searching": "Searching...",
+    "empty_title": "Search Maestro Documentation",
+    "empty_description": "Enter a search term to find commands, Claude skills, and Codex skills."
   },
   "breadcrumbs": {
     "home": "Home",
@@ -78,6 +87,11 @@
     "team": "Multi-agent team collaboration skills for orchestrated parallel workflows",
     "learn": "Pattern extraction, guided reading, investigation, retrospectives, and multi-perspective analysis",
     "wiki": "Knowledge graph management, connection discovery, and digest generation"
+  },
+  "guides": {
+    "title": "Guides",
+    "description": "Deep-dive guides into Maestro subsystems — commands, overlays, team collaboration, parallel development, and more",
+    "back_to_all": "All Guides"
   },
   "landing": {
     "title": "Maestro Documentation",
@@ -116,6 +130,18 @@
     "section_success_criteria": "Success Criteria",
     "section_documentation": "Documentation",
     "section_workflow": "Workflow Connections",
+    "workflow_previous": "Previous",
+    "workflow_next": "Next",
     "related_guides": "Related Guides"
+  },
+  "toc": {
+    "aria_label": "Table of contents",
+    "on_this_page": "On this page"
+  },
+  "changelog": {
+    "title": "Changelog",
+    "description": "Release history for Maestro Flow",
+    "back_to_home": "Back to Home",
+    "latest": "Latest"
   }
 }

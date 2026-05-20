@@ -14,6 +14,7 @@ export interface SpecEntryParsed {
   keywords: string[];
   date: string;
   source?: string;
+  ref?: string;
   title: string;
   content: string;
   lineStart: number;
@@ -41,7 +42,8 @@ export interface ParseError {
 // Valid categories (shared with spec-loader)
 // ============================================================================
 
-export const VALID_CATEGORIES = ['coding', 'arch', 'quality', 'debug', 'test', 'review', 'learning'] as const;
+export const VALID_CATEGORIES = ['coding', 'arch', 'debug', 'test', 'review', 'learning', 'ui'] as const;
+
 export type ValidCategory = (typeof VALID_CATEGORIES)[number];
 
 // ============================================================================
@@ -100,11 +102,14 @@ export function parseSpecEntries(content: string): ParseResult {
     const title = titleMatch ? titleMatch[1].trim() : '';
 
     // Validate and build entry
+    const ref = attrs.ref || undefined;
+
     const entry: SpecEntryParsed = {
       category: attrs.category ?? '',
       keywords: attrs.keywords ? attrs.keywords.split(',').map(k => k.trim().toLowerCase()).filter(Boolean) : [],
       date: attrs.date ?? '',
       source: attrs.source,
+      ref,
       title,
       content: body.trim(),
       lineStart,
@@ -197,21 +202,31 @@ function formatEntryClean(e: SpecEntryParsed): string {
   if (e.date) meta.push(e.date);
   if (e.source) meta.push(e.source);
 
-  if (meta.length === 0) return e.content;
+  if (meta.length === 0 && !e.ref) return e.content;
 
-  const metaLine = `> ${meta.join(' \u00b7 ')}`;
+  const metaLine = meta.length > 0 ? `> ${meta.join(' \u00b7 ')}` : '';
+
+  // Build ref detail line: knowhow/AST-oauth-flow.md → knowhow-oauth-flow
+  let refLine = '';
+  if (e.ref) {
+    const refStem = e.ref.replace(/^knowhow\//, '').replace(/\.md$/, '');
+    const refSlug = refStem.replace(/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const refId = `knowhow-${refSlug}`;
+    refLine = `\n\u2192 Detail: maestro wiki load ${refId}`;
+  }
 
   // Inject after first ### heading line
   const idx = e.content.indexOf('\n');
   if (idx !== -1 && e.content.trimStart().startsWith('###')) {
-    return e.content.slice(0, idx) + '\n' + metaLine + e.content.slice(idx);
+    return e.content.slice(0, idx) + (metaLine ? '\n' + metaLine : '') + refLine + e.content.slice(idx);
   }
 
-  return metaLine + '\n\n' + e.content;
+  return (metaLine ? metaLine + '\n\n' : '') + e.content + refLine;
 }
 
 /**
  * Format a single entry for writing to a spec file.
+ * Writes `category=` attribute as the primary classifier.
  */
 export function formatNewEntry(
   category: string,
@@ -220,10 +235,13 @@ export function formatNewEntry(
   title: string,
   content: string,
   source?: string,
+  ref?: string,
 ): string {
   const kwStr = keywords.map(k => k.toLowerCase().trim()).filter(Boolean).join(',');
   const sourceAttr = source ? ` source="${source}"` : '';
-  return `<spec-entry category="${category}" keywords="${kwStr}" date="${date}"${sourceAttr}>\n\n### ${title}\n\n${content}\n\n</spec-entry>`;
+  const refAttr = ref ? ` ref="${ref}"` : '';
+
+  return `<spec-entry category="${category}" keywords="${kwStr}" date="${date}"${sourceAttr}${refAttr}>\n\n### ${title}\n\n${content}\n\n</spec-entry>`;
 }
 
 // ============================================================================

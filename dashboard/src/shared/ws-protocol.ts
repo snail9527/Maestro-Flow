@@ -87,7 +87,9 @@ export type WsEventType =
   | 'room:task_created'
   | 'room:task_updated'
   | 'room:phase_changed'
-  | 'room:snapshot';
+  | 'room:snapshot'
+  // Maestro Coordinate events
+  | 'maestro:session_updated';
 
 // ---------------------------------------------------------------------------
 // Server → Client messages

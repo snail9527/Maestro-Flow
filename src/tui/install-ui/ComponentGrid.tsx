@@ -10,6 +10,7 @@ import {
 } from './ComponentGrid.logic.js';
 import type { ScannedComponent } from '../../commands/install-backend.js';
 import { t } from '../../i18n/index.js';
+import { C } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // ComponentGrid — multi-select container for installable components
@@ -113,7 +114,7 @@ export function ComponentGrid({
   if (count === 0) {
     return (
       <Box flexDirection="column">
-        <Text bold color="cyan">
+        <Text bold color={C.primary}>
           {t.install.componentsTitle}
         </Text>
         <Text dimColor>{t.install.componentsNone}</Text>
@@ -125,7 +126,7 @@ export function ComponentGrid({
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">
+      <Text bold color={C.primary}>
         {t.install.componentsTitle}
       </Text>
       <Box flexDirection="column" marginTop={1}>

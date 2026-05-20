@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { useSettingsStore } from '@/client/store/settings-store.js';
 import LayoutGrid from 'lucide-react/dist/esm/icons/layout-grid.js';
 import FileText from 'lucide-react/dist/esm/icons/file-text.js';
 import MessageSquare from 'lucide-react/dist/esm/icons/message-square.js';
@@ -33,7 +34,7 @@ interface DockNavItem {
   labelKey: string;
   tooltipKey: string;
   path: string;
-  icon: 'kanban' | 'artifacts' | 'chat' | 'workflow' | 'mcp' | 'specs' | 'teams' | 'requirement' | 'supervisor' | 'collab' | 'rooms';
+  icon: 'kanban' | 'artifacts' | 'chat' | 'workflow' | 'mcp' | 'specs' | 'teams' | 'requirement' | 'maestro-coordinate' | 'collab' | 'rooms';
   shortcut?: string;
 }
 
@@ -47,7 +48,7 @@ const NAV_ITEMS: DockNavItem[] = [
   { labelKey: 'nav.teams', tooltipKey: 'dock.teams_tooltip', path: '/teams', icon: 'teams', shortcut: 'T' },
   { labelKey: 'nav.collab', tooltipKey: 'dock.collab_tooltip', path: '/collab', icon: 'collab', shortcut: 'L' },
   { labelKey: 'nav.requirement', tooltipKey: 'dock.requirement_tooltip', path: '/requirement', icon: 'requirement', shortcut: 'R' },
-  { labelKey: 'nav.supervisor', tooltipKey: 'dock.supervisor_tooltip', path: '/supervisor', icon: 'supervisor', shortcut: 'V' },
+  { labelKey: 'nav.maestro_coordinate', tooltipKey: 'dock.maestro_coordinate_tooltip', path: '/maestro-coordinate', icon: 'maestro-coordinate', shortcut: 'V' },
   { labelKey: 'nav.rooms', tooltipKey: 'dock.rooms_tooltip', path: '/rooms', icon: 'rooms', shortcut: 'O' },
 ];
 
@@ -98,6 +99,18 @@ export function DockRail({ isPinned, onTogglePin }: DockRailProps) {
     );
   }, [processes]);
 
+  // Filter nav items based on settings (use JSON stringify for stable comparison)
+  const hiddenNavItems = useSettingsStore((s) => {
+    const items = s.draft?.general?.hiddenNavItems ?? s.config?.general?.hiddenNavItems;
+    return items;
+  });
+  const DEFAULT_HIDDEN = useMemo(() => ['/maestro-coordinate', '/requirement', '/rooms'], []);
+  const hidden = hiddenNavItems ?? DEFAULT_HIDDEN;
+  const visibleNavItems = useMemo(
+    () => NAV_ITEMS.filter((item) => !hidden.includes(item.path)),
+    [hidden],
+  );
+
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
   const SESSION_COLLAPSE_LIMIT = 5;
 
@@ -138,7 +151,7 @@ export function DockRail({ isPinned, onTogglePin }: DockRailProps) {
         onMouseLeave={handleRailLeave}
       >
         {/* View buttons */}
-        {NAV_ITEMS.map((item) => (
+        {visibleNavItems.map((item) => (
           <RailButton
             key={item.path}
             item={item}
@@ -158,7 +171,7 @@ export function DockRail({ isPinned, onTogglePin }: DockRailProps) {
           aria-label={t('dock.phases_label')}
         >
           {processList.length > 0
-            ? processList.map((proc) => (
+            ? processList.slice(0, SESSION_COLLAPSE_LIMIT).map((proc) => (
                 <SessionDot
                   key={proc.id}
                   process={proc}
@@ -213,7 +226,7 @@ export function DockRail({ isPinned, onTogglePin }: DockRailProps) {
             {t('dock.views_label')}
           </h2>
           <nav className="flex flex-col gap-0.5">
-            {NAV_ITEMS.map((item) => (
+            {visibleNavItems.map((item) => (
               <PanelNavItem key={item.path} item={item} t={t} />
             ))}
           </nav>
@@ -282,13 +295,13 @@ export function DockRail({ isPinned, onTogglePin }: DockRailProps) {
               </span>
               <span className="flex items-center gap-2 text-[10px]">
                 {issueCounts.open > 0 && (
-                  <span style={{ color: '#5B8DB8' }}>{issueCounts.open} open</span>
+                  <span style={{ color: 'var(--color-accent-blue)' }}>{issueCounts.open} open</span>
                 )}
                 {issueCounts.in_progress > 0 && (
-                  <span style={{ color: '#B89540' }}>{issueCounts.in_progress} active</span>
+                  <span style={{ color: 'var(--color-accent-yellow)' }}>{issueCounts.in_progress} active</span>
                 )}
                 {issueCounts.resolved > 0 && (
-                  <span style={{ color: '#5A9E78' }}>{issueCounts.resolved} done</span>
+                  <span style={{ color: 'var(--color-accent-green)' }}>{issueCounts.resolved} done</span>
                 )}
               </span>
             </button>
@@ -346,7 +359,7 @@ function RailButton({
       aria-label={t(item.tooltipKey)}
       aria-current={isActive ? 'page' : undefined}
       className={[
-        'group relative flex items-center justify-center w-9 h-9 rounded-[8px]',
+        'relative flex items-center justify-center w-9 h-9 rounded-[8px]',
         'transition-colors duration-150',
         'focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)]',
         isActive
@@ -355,10 +368,6 @@ function RailButton({
       ].join(' ')}
     >
       <NavIcon icon={item.icon} />
-      {/* Tooltip */}
-      <span className="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 bg-text-primary text-[11px] font-medium text-white px-2 py-0.5 rounded-[6px] whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150 z-[200]">
-        {t(item.tooltipKey)}
-      </span>
     </button>
   );
 }
@@ -376,7 +385,7 @@ const NAV_ICON_MAP = {
   specs: BookOpen,
   teams: Bot,
   requirement: ListChecks,
-  supervisor: Activity,
+  'maestro-coordinate': Activity,
   collab: UsersRound,
   rooms: Presentation,
 } as const;

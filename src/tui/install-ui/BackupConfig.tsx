@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { t } from '../../i18n/index.js';
+import { C, SYM } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // BackupConfig — Granular backup options
@@ -66,16 +67,16 @@ export function BackupConfig({
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">{t.install.backupTitle}</Text>
+      <Text bold color={C.primary}>{t.install.backupTitle}</Text>
 
       <Box flexDirection="column" marginTop={1}>
         {options.map((opt, i) => {
           const hl = i === index;
           return (
             <Box key={opt.id}>
-              <Text color={hl ? 'cyan' : 'gray'}>[{i + 1}]</Text>
-              <Text color={opt.value ? 'green' : 'gray'}> {opt.value ? '[x]' : '[ ]'} </Text>
-              <Text color={hl ? 'cyan' : undefined} bold={hl}>{opt.label}</Text>
+              <Text color={hl ? C.primary : C.neutral}>[{i + 1}]</Text>
+              <Text color={opt.value ? C.success : C.neutral}> {opt.value ? SYM.checkOn : SYM.checkOff} </Text>
+              <Text color={hl ? C.primary : undefined} bold={hl}>{opt.label}</Text>
               <Text dimColor> — {opt.desc}</Text>
             </Box>
           );

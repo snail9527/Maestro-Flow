@@ -202,19 +202,6 @@ describe('appendSpecEntry - category routing', () => {
     expect(result.file).toContain('debug-notes.md');
   });
 
-  it('routes quality to quality-rules.md', () => {
-    const result = appendSpecEntry(
-      testDir,
-      'quality',
-      'Code coverage',
-      'Maintain 80% coverage.',
-      ['testing'],
-    );
-
-    expect(result.ok).toBe(true);
-    expect(result.file).toContain('quality-rules.md');
-  });
-
   it('routes different categories to different files', () => {
     const arch = appendSpecEntry(testDir, 'arch', 'Rule A', 'Content A.', ['a']);
     const coding = appendSpecEntry(testDir, 'coding', 'Rule B', 'Content B.', ['b']);

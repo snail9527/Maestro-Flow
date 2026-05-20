@@ -1,6 +1,6 @@
 ---
 name: quality-test
-description: Conversational UAT with session persistence, auto-diagnosis, and gap-plan closure loop
+description: Use when implementation needs user acceptance testing with interactive verification and gap closure
 argument-hint: "[phase] [--smoke] [--auto-fix]"
 allowed-tools:
   - Read
@@ -39,6 +39,16 @@ Flags, artifact context resolution, and output directory format defined in workf
 Follow '~/.maestro/workflows/test.md' completely.
 
 **Command-specific extensions (not in workflow):**
+
+**Knowledge context loading** (before test design):
+- Wiki search: `maestro wiki search "<phase/feature keywords>" --json` → prior test strategies, recipes, decisions
+- Role knowledge: `maestro wiki list --category test` → select relevant → `maestro wiki load <id>`
+- Specs + tools: `maestro spec load --category test` → test conventions + discoverable knowhow tools
+
+**Test tool discovery** (knowhow tools as scenario source):
+- Load registered test tools: `maestro spec load --category test --keyword <feature>`
+- If tools found, extract their steps as additional test scenarios marked `source: "tool"`
+- Each numbered step in a tool becomes a UAT test with its assertion as `expected` behavior
 
 **Review findings integration** (from related review artifacts):
 - Extract critical/high findings as additional test scenarios, marked `source: "review_finding"`
@@ -95,6 +105,10 @@ Append to state.json.artifacts[]:
 - [ ] Severity inferred from natural language (never asked)
 - [ ] Batched writes: on issue, every 5 passes, or completion
 - [ ] test-results.json and coverage-report.json written
+- [ ] UAT confidence scored with 4-dimension factor model
+- [ ] Readiness gate checked before final report
+- [ ] Pressure pass completed if > 80% pass rate
+- [ ] Confidence summary appended to uat.md
 - [ ] index.json uat fields updated
 - [ ] If issues: parallel debug agents spawned per gap cluster
 - [ ] Gaps updated with root_cause, fix_direction, affected_files

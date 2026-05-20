@@ -1,9 +1,11 @@
 import { useBoardStore } from '@/client/store/board-store.js';
 import { useSettingsStore } from '@/client/store/settings-store.js';
+import { useWorkflowConfigStore } from '@/client/store/workflow-config-store.js';
 import { useI18n } from '@/client/i18n/index.js';
 import { ViewSwitcher } from '@/client/components/common/ViewSwitcher.js';
 import { WorkspaceSwitcher } from '@/client/components/common/WorkspaceSwitcher.js';
 import { OnlineAvatarGroup } from '@/client/components/collab/OnlineAvatarGroup.js';
+import { WorkflowConfigPopover } from './WorkflowConfigPopover.js';
 
 // ---------------------------------------------------------------------------
 // TopBar — project name, milestone badge, current phase, connection dot
@@ -13,6 +15,8 @@ export function TopBar() {
   const board = useBoardStore((s) => s.board);
   const connected = useBoardStore((s) => s.connected);
   const setSettingsOpen = useSettingsStore((s) => s.setOpen);
+  const wfConfigOpen = useWorkflowConfigStore((s) => s.open);
+  const setWfConfigOpen = useWorkflowConfigStore((s) => s.setOpen);
   const { t, locale, setLocale } = useI18n();
 
   const project = board?.project;
@@ -25,7 +29,7 @@ export function TopBar() {
   return (
     <header
       role="banner"
-      className="flex items-center justify-between px-[var(--spacing-4)] h-[var(--size-topbar-height)] bg-bg-secondary border-b border-border shrink-0"
+      className="relative flex items-center justify-between px-[var(--spacing-4)] h-[var(--size-topbar-height)] bg-bg-secondary border-b border-border shrink-0"
     >
       {/* Left: branding + project */}
       <div className="flex items-center gap-[var(--spacing-3)]">
@@ -82,6 +86,30 @@ export function TopBar() {
           </span>
         )}
 
+        {/* Workflow config toggle */}
+        <button
+          type="button"
+          data-workflow-config-trigger
+          onClick={() => setWfConfigOpen(!wfConfigOpen)}
+          aria-label={t('workflow_config.btn_aria')}
+          className={[
+            'flex items-center justify-center w-8 h-8 rounded-[var(--radius-sm)]',
+            wfConfigOpen ? 'text-accent-blue bg-accent-blue/10' : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
+            'transition-colors duration-[var(--duration-fast)] ease-[var(--ease-notion)]',
+            'focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)]',
+          ].join(' ')}
+        >
+          {/* Sliders / adjustments icon */}
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />
+            <line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" />
+            <line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" />
+            <line x1="1" y1="14" x2="7" y2="14" />
+            <line x1="9" y1="8" x2="15" y2="8" />
+            <line x1="17" y1="16" x2="23" y2="16" />
+          </svg>
+        </button>
+
         {/* Settings gear */}
         <button
           type="button"
@@ -117,6 +145,9 @@ export function TopBar() {
           {connected ? t('topbar.connection.connected') : t('topbar.connection.disconnected')}
         </span>
       </div>
+
+      {/* Workflow config floating panel */}
+      <WorkflowConfigPopover />
     </header>
   );
 }

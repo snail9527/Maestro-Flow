@@ -62,10 +62,10 @@ export default function SearchPage() {
             <path d="M21 21l-4.35-4.35" />
           </svg>
           <h2 className="text-[length:var(--font-size-lg)] font-[var(--font-weight-semibold)] text-text-primary mb-[var(--spacing-2)]">
-            Search Maestro Documentation
+            {t('search.empty_title')}
           </h2>
           <p className="text-text-secondary max-w-md mx-auto">
-            Enter a search term to find commands, Claude skills, and Codex skills.
+            {t('search.empty_description')}
           </p>
         </div>
       )}

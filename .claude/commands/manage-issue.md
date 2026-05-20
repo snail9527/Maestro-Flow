@@ -1,7 +1,7 @@
 ---
 name: manage-issue
-description: Issue CRUD operations -- create, query, update, close, and link issues to tasks
-argument-hint: "<create|list|status|update|close|link> [options]"
+description: Create, query, update, close, and link issues
+argument-hint: "<subcommand: create|list|status|update|close|link> [--title text] [--severity S] [--status S] [--resolution text]"
 allowed-tools:
   - Read
   - Write

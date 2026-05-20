@@ -10,12 +10,10 @@ import CheckIcon from 'lucide-react/dist/esm/icons/check.js';
 
 const STATUS_LABELS: Record<PhaseStatus, string> = {
   not_started: 'Not Started',
-  pending: 'Pending',
-  exploring: 'Exploring',
   planning: 'Planning',
   executing: 'Executing',
   verifying: 'Verifying',
-  testing: 'Testing',
+  reviewing: 'Reviewing',
   completed: 'Completed',
   blocked: 'Blocked',
 };

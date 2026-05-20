@@ -183,7 +183,7 @@ Content.
 // ---------------------------------------------------------------------------
 
 describe('validateSpecEntry', () => {
-  it('returns empty array for valid entry', () => {
+  it('returns empty array for valid entry with category', () => {
     const errors = validateSpecEntry({
       category: 'coding',
       keywords: ['auth'],
@@ -196,7 +196,20 @@ describe('validateSpecEntry', () => {
     assert.strictEqual(errors.length, 0);
   });
 
-  it('validates all categories', () => {
+  it('requires category', () => {
+    const errors = validateSpecEntry({
+      category: '',
+      keywords: ['auth'],
+      date: '2026-04-21',
+      title: 'Test',
+      content: 'Content',
+      lineStart: 1,
+      lineEnd: 5,
+    });
+    assert.ok(errors.some(e => e.includes('category')));
+  });
+
+  it('validates all categories are accepted', () => {
     for (const cat of VALID_CATEGORIES) {
       const errors = validateSpecEntry({
         category: cat,
@@ -267,11 +280,12 @@ describe('formatSpecEntries', () => {
 // ---------------------------------------------------------------------------
 
 describe('formatNewEntry', () => {
-  it('produces valid <spec-entry> block', () => {
+  it('produces valid <spec-entry> block with category attribute', () => {
     const result = formatNewEntry('coding', ['auth', 'token'], '2026-04-21', 'Token rotation', 'Content here.');
     assert.ok(result.startsWith('<spec-entry'));
     assert.ok(result.endsWith('</spec-entry>'));
-    assert.ok(result.includes('category="coding"'));
+    assert.ok(result.includes('category="coding"'), 'should write category attribute');
+    assert.ok(!result.includes('roles='), 'should not write roles attribute');
     assert.ok(result.includes('keywords="auth,token"'));
     assert.ok(result.includes('date="2026-04-21"'));
     assert.ok(result.includes('### Token rotation'));

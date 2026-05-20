@@ -1,264 +1,260 @@
 @import "tailwindcss";
 
 /*
- * Warm Minimal Design Token System
- * Based on dashboard warm palette (#FAF8F5)
+ * Gemini CLI Docs Design Token System
+ * 1:1 visual replication of geminicli.com docs design
  * Light/dark mode via prefers-color-scheme + data-theme attribute
  */
 
-/* ===== LIGHT MODE (default) ===== */
+/* ===== LIGHT MODE (default) — Gemini CLI style ===== */
 :root,
 [data-theme="light"] {
-  /* Background */
-  --color-bg-primary: #FAF8F5;
-  --color-bg-secondary: #F3F0EA;
+  /* Background — clean white */
+  --color-bg-primary: #FFFFFF;
+  --color-bg-secondary: #FFFFFF;
   --color-bg-card: #FFFFFF;
-  --color-bg-elevated: #FFFFFF;
-  --color-bg-hover: rgba(45, 42, 38, 0.04);
-  --color-bg-active: rgba(45, 42, 38, 0.07);
+  --color-bg-elevated: #F8F9FA;
+  --color-bg-hover: rgba(54, 75, 255, 0.06);
+  --color-bg-active: rgba(54, 75, 255, 0.10);
 
   /* Tinted backgrounds */
-  --color-tint-blue: #EBF2FA;
-  --color-tint-green: #EEF7F2;
-  --color-tint-yellow: #FDF6E4;
-  --color-tint-orange: #FDF0E4;
-  --color-tint-purple: #F3EEF9;
-  --color-tint-gray: #F2F1EE;
+  --color-tint-blue: rgba(54, 75, 255, 0.08);
+  --color-tint-green: rgba(30, 142, 62, 0.08);
+  --color-tint-yellow: rgba(227, 116, 0, 0.08);
+  --color-tint-orange: rgba(227, 116, 0, 0.08);
+  --color-tint-purple: rgba(132, 48, 206, 0.08);
+  --color-tint-gray: #F1F3F4;
 
-  /* Text */
-  --color-text-primary: #2D2A26;
-  --color-text-secondary: #78756F;
-  --color-text-tertiary: #A09D97;
-  --color-text-placeholder: #D1CEC8;
+  /* Text — Google style grays */
+  --color-text-primary: #353841;
+  --color-text-secondary: #5F6368;
+  --color-text-tertiary: #80868B;
+  --color-text-placeholder: #C4C7C5;
   --color-text-inverse: #FFFFFF;
 
   /* Border */
-  --color-border: #E8E5DE;
-  --color-border-divider: #ECEAE4;
-  --color-border-focused: rgba(74, 144, 217, 0.5);
+  --color-border: #E0E0E0;
+  --color-border-divider: #E8EAED;
+  --color-border-focused: rgba(54, 75, 255, 0.5);
 
-  /* Accent */
-  --color-accent-blue: #4A90D9;
-  --color-accent-blue-light: #6BA8E8;
-  --color-accent-orange: #D4832E;
-  --color-accent-yellow: #C99B2D;
-  --color-accent-green: #3D9B6F;
+  /* Accent — Gemini vivid blue */
+  --color-accent-blue: #364BFF;
+  --color-accent-blue-light: #5C6CFF;
+  --color-accent-orange: #E37400;
+  --color-accent-yellow: #E37400;
+  --color-accent-green: #1E8E3E;
   --color-accent-pink: #C14C8A;
-  --color-accent-purple: #8B6BBF;
-  --color-accent-red: #D05454;
-  --color-accent-gray: #A09D97;
+  --color-accent-purple: #8430CE;
+  --color-accent-red: #D93025;
+  --color-accent-gray: #80868B;
 
   /* Status */
-  --color-status-pending: #A09D97;
-  --color-status-exploring: #4A90D9;
-  --color-status-planning: #8B6BBF;
-  --color-status-executing: #C99B2D;
-  --color-status-verifying: #D4832E;
-  --color-status-testing: #4A90D9;
-  --color-status-completed: #3D9B6F;
-  --color-status-blocked: #D05454;
+  --color-status-pending: #80868B;
+  --color-status-exploring: #364BFF;
+  --color-status-planning: #8430CE;
+  --color-status-executing: #E37400;
+  --color-status-verifying: #E37400;
+  --color-status-testing: #364BFF;
+  --color-status-completed: #1E8E3E;
+  --color-status-blocked: #D93025;
 
   /* Status Backgrounds */
-  --color-status-bg-pending: rgba(160, 157, 151, 0.12);
-  --color-status-bg-exploring: rgba(74, 144, 217, 0.12);
-  --color-status-bg-planning: rgba(139, 107, 191, 0.12);
-  --color-status-bg-executing: rgba(201, 155, 45, 0.12);
-  --color-status-bg-verifying: rgba(212, 131, 46, 0.12);
-  --color-status-bg-testing: rgba(74, 144, 217, 0.12);
-  --color-status-bg-completed: rgba(61, 155, 111, 0.12);
-  --color-status-bg-blocked: rgba(208, 84, 84, 0.12);
+  --color-status-bg-pending: rgba(128, 134, 139, 0.12);
+  --color-status-bg-exploring: rgba(54, 75, 255, 0.10);
+  --color-status-bg-planning: rgba(132, 48, 206, 0.10);
+  --color-status-bg-executing: rgba(227, 116, 0, 0.10);
+  --color-status-bg-verifying: rgba(227, 116, 0, 0.10);
+  --color-status-bg-testing: rgba(54, 75, 255, 0.10);
+  --color-status-bg-completed: rgba(30, 142, 62, 0.10);
+  --color-status-bg-blocked: rgba(217, 48, 37, 0.10);
 
   /* Selection */
-  --color-selection: rgba(74, 144, 217, 0.28);
-  --color-selection-text: #2D2A26;
-  --color-selection-range: rgba(74, 144, 217, 0.14);
+  --color-selection: rgba(54, 75, 255, 0.28);
+  --color-selection-text: #353841;
+  --color-selection-range: rgba(54, 75, 255, 0.14);
 
   /* Scrollbar */
-  --color-scrollbar-thumb: rgba(45, 42, 38, 0.16);
-  --color-scrollbar-thumb-hover: rgba(45, 42, 38, 0.28);
+  --color-scrollbar-thumb: rgba(53, 56, 65, 0.16);
+  --color-scrollbar-thumb-hover: rgba(53, 56, 65, 0.28);
   --color-scrollbar-track: transparent;
 
   /* Code block */
-  --color-bg-code: #2D2A26;
-  --color-text-code: #E8E5DE;
-  --color-code-keyword: #C9A0DC;
-  --color-code-string: #A8D4A0;
-  --color-code-comment: #78756F;
-  --color-code-function: #7DB8E0;
-  --color-code-number: #E0C088;
+  --color-bg-code: #1E1E2E;
+  --color-text-code: #CDD6F4;
+  --color-code-keyword: #CBA6F7;
+  --color-code-string: #A6E3A1;
+  --color-code-comment: #6C7086;
+  --color-code-function: #89B4FA;
+  --color-code-number: #FAB387;
 
   /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(45, 42, 38, 0.04);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(45, 42, 38, 0.03);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(45, 42, 38, 0.03);
-  --shadow-inner: inset 0 0 0 1px rgba(45, 42, 38, 0.04);
-  --shadow-focus-ring: 0 0 0 2px #FAF8F5, 0 0 0 4px rgba(74, 144, 217, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.12);
+  --shadow-inner: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --shadow-focus-ring: 0 0 0 2px #FFFFFF, 0 0 0 4px rgba(54, 75, 255, 0.5);
 }
 
 /* ===== DARK MODE ===== */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --color-bg-primary: #1A1816;
-    --color-bg-secondary: #211F1C;
-    --color-bg-card: #282520;
-    --color-bg-elevated: #302D28;
-    --color-bg-hover: rgba(255, 255, 255, 0.05);
-    --color-bg-active: rgba(255, 255, 255, 0.08);
+    --color-bg-primary: #131118;
+    --color-bg-secondary: #0F0D14;
+    --color-bg-card: #1A1721;
+    --color-bg-elevated: #221F2A;
+    --color-bg-hover: rgba(255, 255, 255, 0.06);
+    --color-bg-active: rgba(255, 255, 255, 0.10);
 
-    --color-tint-blue: rgba(74, 144, 217, 0.1);
-    --color-tint-green: rgba(61, 155, 111, 0.1);
-    --color-tint-yellow: rgba(201, 155, 45, 0.1);
-    --color-tint-orange: rgba(212, 131, 46, 0.1);
-    --color-tint-purple: rgba(139, 107, 191, 0.1);
-    --color-tint-gray: rgba(160, 157, 151, 0.08);
+    --color-tint-blue: rgba(54, 75, 255, 0.12);
+    --color-tint-green: rgba(30, 142, 62, 0.12);
+    --color-tint-yellow: rgba(227, 116, 0, 0.12);
+    --color-tint-orange: rgba(227, 116, 0, 0.12);
+    --color-tint-purple: rgba(132, 48, 206, 0.12);
+    --color-tint-gray: rgba(255, 255, 255, 0.06);
 
-    --color-text-primary: #E8E5DE;
-    --color-text-secondary: rgba(232, 229, 222, 0.6);
-    --color-text-tertiary: rgba(232, 229, 222, 0.4);
-    --color-text-placeholder: rgba(232, 229, 222, 0.25);
+    --color-text-primary: #E8EAED;
+    --color-text-secondary: rgba(232, 234, 237, 0.7);
+    --color-text-tertiary: rgba(232, 234, 237, 0.5);
+    --color-text-placeholder: rgba(232, 234, 237, 0.3);
     --color-text-inverse: #FFFFFF;
 
-    --color-border: rgba(232, 229, 222, 0.08);
-    --color-border-divider: rgba(232, 229, 222, 0.06);
-    --color-border-focused: rgba(74, 144, 217, 0.5);
+    --color-border: rgba(232, 234, 237, 0.12);
+    --color-border-divider: rgba(232, 234, 237, 0.08);
+    --color-border-focused: rgba(54, 75, 255, 0.5);
 
-    --color-accent-blue: #6BA8E8;
-    --color-accent-blue-light: #8BBEF0;
-    --color-accent-orange: #E8A44C;
-    --color-accent-yellow: #D4B84E;
-    --color-accent-green: #5AC78B;
-    --color-accent-pink: #D47AAC;
-    --color-accent-purple: #A88CD7;
-    --color-accent-red: #E86B6B;
-    --color-accent-gray: #8A8780;
+    --color-accent-blue: #8AB4F8;
+    --color-accent-blue-light: #A8C7FA;
+    --color-accent-orange: #FBBC04;
+    --color-accent-yellow: #FBBC04;
+    --color-accent-green: #81C995;
+    --color-accent-pink: #F48FB1;
+    --color-accent-purple: #CE93D8;
+    --color-accent-red: #F28B82;
+    --color-accent-gray: #9AA0A6;
 
-    --color-status-pending: #8A8780;
-    --color-status-exploring: #6BA8E8;
-    --color-status-planning: #A88CD7;
-    --color-status-executing: #D4B84E;
-    --color-status-verifying: #E8A44C;
-    --color-status-testing: #6BA8E8;
-    --color-status-completed: #5AC78B;
-    --color-status-blocked: #E86B6B;
+    --color-status-pending: #9AA0A6;
+    --color-status-exploring: #8AB4F8;
+    --color-status-planning: #CE93D8;
+    --color-status-executing: #FBBC04;
+    --color-status-verifying: #FBBC04;
+    --color-status-testing: #8AB4F8;
+    --color-status-completed: #81C995;
+    --color-status-blocked: #F28B82;
 
-    --color-status-bg-pending: rgba(138, 135, 128, 0.15);
-    --color-status-bg-exploring: rgba(107, 168, 232, 0.15);
-    --color-status-bg-planning: rgba(168, 140, 215, 0.15);
-    --color-status-bg-executing: rgba(212, 184, 78, 0.15);
-    --color-status-bg-verifying: rgba(232, 164, 76, 0.15);
-    --color-status-bg-testing: rgba(107, 168, 232, 0.15);
-    --color-status-bg-completed: rgba(90, 199, 139, 0.15);
-    --color-status-bg-blocked: rgba(232, 107, 107, 0.15);
+    --color-status-bg-pending: rgba(154, 160, 166, 0.15);
+    --color-status-bg-exploring: rgba(138, 180, 248, 0.15);
+    --color-status-bg-planning: rgba(206, 147, 216, 0.15);
+    --color-status-bg-executing: rgba(251, 188, 4, 0.15);
+    --color-status-bg-verifying: rgba(251, 188, 4, 0.15);
+    --color-status-bg-testing: rgba(138, 180, 248, 0.15);
+    --color-status-bg-completed: rgba(129, 201, 149, 0.15);
+    --color-status-bg-blocked: rgba(242, 139, 130, 0.15);
 
-    --color-selection: rgba(107, 168, 232, 0.35);
-    --color-selection-text: #E8E5DE;
-    --color-selection-range: rgba(107, 168, 232, 0.20);
+    --color-selection: rgba(138, 180, 248, 0.35);
+    --color-selection-text: #E8EAED;
+    --color-selection-range: rgba(138, 180, 248, 0.20);
 
-    --color-scrollbar-thumb: rgba(232, 229, 222, 0.12);
-    --color-scrollbar-thumb-hover: rgba(232, 229, 222, 0.22);
+    --color-scrollbar-thumb: rgba(232, 234, 237, 0.14);
+    --color-scrollbar-thumb-hover: rgba(232, 234, 237, 0.24);
     --color-scrollbar-track: transparent;
 
-    --color-bg-code: #151310;
-    --color-text-code: #E8E5DE;
-    --color-code-keyword: #C9A0DC;
-    --color-code-string: #A8D4A0;
-    --color-code-comment: #6B6862;
-    --color-code-function: #7DB8E0;
-    --color-code-number: #E0C088;
+    --color-bg-code: #11101A;
+    --color-text-code: #CDD6F4;
 
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.04);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04);
-    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
-    --shadow-inner: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-    --shadow-focus-ring: 0 0 0 2px #1A1816, 0 0 0 4px rgba(107, 168, 232, 0.5);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+    --shadow-inner: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    --shadow-focus-ring: 0 0 0 2px #131118, 0 0 0 4px rgba(138, 180, 248, 0.5);
   }
 }
 
 [data-theme="dark"] {
-  --color-bg-primary: #1A1816;
-  --color-bg-secondary: #211F1C;
-  --color-bg-card: #282520;
-  --color-bg-elevated: #302D28;
-  --color-bg-hover: rgba(255, 255, 255, 0.05);
-  --color-bg-active: rgba(255, 255, 255, 0.08);
+  --color-bg-primary: #131118;
+  --color-bg-secondary: #0F0D14;
+  --color-bg-card: #1A1721;
+  --color-bg-elevated: #221F2A;
+  --color-bg-hover: rgba(255, 255, 255, 0.06);
+  --color-bg-active: rgba(255, 255, 255, 0.10);
 
-  --color-tint-blue: rgba(74, 144, 217, 0.1);
-  --color-tint-green: rgba(61, 155, 111, 0.1);
-  --color-tint-yellow: rgba(201, 155, 45, 0.1);
-  --color-tint-orange: rgba(212, 131, 46, 0.1);
-  --color-tint-purple: rgba(139, 107, 191, 0.1);
-  --color-tint-gray: rgba(160, 157, 151, 0.08);
+  --color-tint-blue: rgba(54, 75, 255, 0.12);
+  --color-tint-green: rgba(30, 142, 62, 0.12);
+  --color-tint-yellow: rgba(227, 116, 0, 0.12);
+  --color-tint-orange: rgba(227, 116, 0, 0.12);
+  --color-tint-purple: rgba(132, 48, 206, 0.12);
+  --color-tint-gray: rgba(255, 255, 255, 0.06);
 
-  --color-text-primary: #E8E5DE;
-  --color-text-secondary: rgba(232, 229, 222, 0.6);
-  --color-text-tertiary: rgba(232, 229, 222, 0.4);
-  --color-text-placeholder: rgba(232, 229, 222, 0.25);
+  --color-text-primary: #E8EAED;
+  --color-text-secondary: rgba(232, 234, 237, 0.7);
+  --color-text-tertiary: rgba(232, 234, 237, 0.5);
+  --color-text-placeholder: rgba(232, 234, 237, 0.3);
   --color-text-inverse: #FFFFFF;
 
-  --color-border: rgba(232, 229, 222, 0.08);
-  --color-border-divider: rgba(232, 229, 222, 0.06);
-  --color-border-focused: rgba(74, 144, 217, 0.5);
+  --color-border: rgba(232, 234, 237, 0.12);
+  --color-border-divider: rgba(232, 234, 237, 0.08);
+  --color-border-focused: rgba(54, 75, 255, 0.5);
 
-  --color-accent-blue: #6BA8E8;
-  --color-accent-blue-light: #8BBEF0;
-  --color-accent-orange: #E8A44C;
-  --color-accent-yellow: #D4B84E;
-  --color-accent-green: #5AC78B;
-  --color-accent-pink: #D47AAC;
-  --color-accent-purple: #A88CD7;
-  --color-accent-red: #E86B6B;
-  --color-accent-gray: #8A8780;
+  --color-accent-blue: #8AB4F8;
+  --color-accent-blue-light: #A8C7FA;
+  --color-accent-orange: #FBBC04;
+  --color-accent-yellow: #FBBC04;
+  --color-accent-green: #81C995;
+  --color-accent-pink: #F48FB1;
+  --color-accent-purple: #CE93D8;
+  --color-accent-red: #F28B82;
+  --color-accent-gray: #9AA0A6;
 
-  --color-status-pending: #8A8780;
-  --color-status-exploring: #6BA8E8;
-  --color-status-planning: #A88CD7;
-  --color-status-executing: #D4B84E;
-  --color-status-verifying: #E8A44C;
-  --color-status-testing: #6BA8E8;
-  --color-status-completed: #5AC78B;
-  --color-status-blocked: #E86B6B;
+  --color-status-pending: #9AA0A6;
+  --color-status-exploring: #8AB4F8;
+  --color-status-planning: #CE93D8;
+  --color-status-executing: #FBBC04;
+  --color-status-verifying: #FBBC04;
+  --color-status-testing: #8AB4F8;
+  --color-status-completed: #81C995;
+  --color-status-blocked: #F28B82;
 
-  --color-status-bg-pending: rgba(138, 135, 128, 0.15);
-  --color-status-bg-exploring: rgba(107, 168, 232, 0.15);
-  --color-status-bg-planning: rgba(168, 140, 215, 0.15);
-  --color-status-bg-executing: rgba(212, 184, 78, 0.15);
-  --color-status-bg-verifying: rgba(232, 164, 76, 0.15);
-  --color-status-bg-testing: rgba(107, 168, 232, 0.15);
-  --color-status-bg-completed: rgba(90, 199, 139, 0.15);
-  --color-status-bg-blocked: rgba(232, 107, 107, 0.15);
+  --color-status-bg-pending: rgba(154, 160, 166, 0.15);
+  --color-status-bg-exploring: rgba(138, 180, 248, 0.15);
+  --color-status-bg-planning: rgba(206, 147, 216, 0.15);
+  --color-status-bg-executing: rgba(251, 188, 4, 0.15);
+  --color-status-bg-verifying: rgba(251, 188, 4, 0.15);
+  --color-status-bg-testing: rgba(138, 180, 248, 0.15);
+  --color-status-bg-completed: rgba(129, 201, 149, 0.15);
+  --color-status-bg-blocked: rgba(242, 139, 130, 0.15);
 
-  --color-selection: rgba(107, 168, 232, 0.35);
-  --color-selection-text: #E8E5DE;
-  --color-selection-range: rgba(107, 168, 232, 0.20);
+  --color-selection: rgba(138, 180, 248, 0.35);
+  --color-selection-text: #E8EAED;
+  --color-selection-range: rgba(138, 180, 248, 0.20);
 
-  --color-scrollbar-thumb: rgba(232, 229, 222, 0.12);
-  --color-scrollbar-thumb-hover: rgba(232, 229, 222, 0.22);
+  --color-scrollbar-thumb: rgba(232, 234, 237, 0.14);
+  --color-scrollbar-thumb-hover: rgba(232, 234, 237, 0.24);
   --color-scrollbar-track: transparent;
 
-  --color-bg-code: #151310;
-  --color-text-code: #E8E5DE;
+  --color-bg-code: #11101A;
+  --color-text-code: #CDD6F4;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.04);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
-  --shadow-inner: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-  --shadow-focus-ring: 0 0 0 2px #1A1816, 0 0 0 4px rgba(107, 168, 232, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-inner: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-focus-ring: 0 0 0 2px #131118, 0 0 0 4px rgba(138, 180, 248, 0.5);
 }
 
 /* ===== STATIC TOKENS ===== */
 :root {
-  /* Typography */
+  /* Typography — match Gemini CLI (Inter as closest to Google Sans Text) */
   --font-sans: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  --font-mono: 'JetBrains Mono', 'Google Sans Mono', 'SF Mono', ui-monospace, monospace;
 
-  --font-size-xs: 0.6875rem;
-  --font-size-sm: 0.8125rem;
-  --font-size-base: 0.875rem;
+  /* Gemini CLI uses 16px base, 28px line height */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
   --font-size-md: 1rem;
-  --font-size-lg: 1.125rem;
+  --font-size-lg: 1.0625rem;
   --font-size-xl: 1.25rem;
   --font-size-2xl: 1.5rem;
-  --font-size-3xl: 1.75rem;
+  --font-size-3xl: 2.625rem;
 
   --font-weight-regular: 400;
   --font-weight-medium: 500;
@@ -267,7 +263,7 @@
 
   --line-height-tight: 1.2;
   --line-height-normal: 1.5;
-  --line-height-relaxed: 1.7;
+  --line-height-relaxed: 1.75;
 
   --letter-spacing-tighter: -0.02em;
   --letter-spacing-tight: -0.01em;
@@ -289,25 +285,26 @@
   --spacing-12: 48px;
   --spacing-16: 64px;
 
-  /* Sizing */
-  --size-sidebar-width: 260px;
+  /* Sizing — match Gemini CLI dimensions */
+  --size-sidebar-width: 272px;
   --size-topbar-height: 56px;
-  --size-content-max-width: 1100px;
-  --size-toc-width: 200px;
-  --size-card-min-width: 260px;
-  --size-card-max-width: 340px;
+  --size-banner-height: 37px;
+  --size-content-max-width: 1200px;
+  --size-toc-width: 220px;
+  --size-card-min-width: 280px;
+  --size-card-max-width: 360px;
   --size-icon-sm: 14px;
   --size-icon-md: 16px;
   --size-icon-lg: 20px;
   --size-scrollbar-width: 4px;
 
-  /* Border Radius */
+  /* Border Radius — Gemini CLI uses subtle rounding */
   --radius-none: 0px;
-  --radius-sm: 5px;
-  --radius-default: 8px;
-  --radius-md: 10px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-sm: 4px;
+  --radius-default: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
   --radius-full: 9999px;
 
   /* Transitions */
@@ -322,8 +319,8 @@
 
   /* Opacity */
   --opacity-disabled: 0.4;
-  --opacity-hover-overlay: 0.04;
-  --opacity-active-overlay: 0.07;
+  --opacity-hover-overlay: 0.06;
+  --opacity-active-overlay: 0.10;
   --opacity-card-dimmed: 0.6;
   --opacity-backdrop: 0.5;
 }
@@ -444,7 +441,7 @@
 body {
   font-family: var(--font-sans);
   font-size: var(--font-size-base);
-  line-height: var(--line-height-relaxed);
+  line-height: 1.75;
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
   margin: 0;
@@ -473,68 +470,66 @@ body {
 }
 
 
-/* ===== MERMAID DIAGRAMS ===== */
-/* All nodes: dark fill + colored borders + white text */
+/* ===== MERMAID DIAGRAMS — light background, always ===== */
+.mermaid-diagram {
+  background-color: #FFFFFF !important;
+  border: 1px solid #E0E0E0 !important;
+  border-radius: 8px;
+  padding: 16px;
+}
 .mermaid-diagram svg {
   max-width: 100%;
   margin: 0 auto;
 }
-/* All node backgrounds — force dark, override classDef inline styles */
 .mermaid-diagram .node rect,
 .mermaid-diagram .node polygon,
 .mermaid-diagram .node circle {
-  fill: #302D28 !important;
+  fill: #FFFFFF !important;
   stroke-width: 1.5px !important;
 }
-/* Different border colors per node type for visual distinction */
 .mermaid-diagram .node.default .basic.label-container,
-.mermaid-diagram .node.default rect { stroke: #5A554F !important; }
-.mermaid-diagram .node.phaseNode rect { stroke: #5AC78B !important; }
-.mermaid-diagram .node.issueNode rect { stroke: #8B6BBF !important; }
-.mermaid-diagram .node.sharedNode rect { stroke: #6BA8E8 !important; }
-.mermaid-diagram .node.commander rect { stroke: #6BA8E8 !important; }
-/* Inner label rect — transparent, never covers text */
+.mermaid-diagram .node.default rect { stroke: #BDC1C6 !important; }
+.mermaid-diagram .node.phaseNode rect { stroke: #1E8E3E !important; }
+.mermaid-diagram .node.issueNode rect { stroke: #8430CE !important; }
+.mermaid-diagram .node.sharedNode rect { stroke: #364BFF !important; }
+.mermaid-diagram .node.commander rect { stroke: #364BFF !important; }
 .mermaid-diagram .node .label rect,
 .mermaid-diagram .edgeLabel rect {
   fill: transparent !important;
   stroke: none !important;
 }
-/* Node text — always white */
 .mermaid-diagram .nodeLabel,
 .mermaid-diagram .nodeLabel p,
 .mermaid-diagram .nodeLabel span,
 .mermaid-diagram .node text {
-  color: #E8E5DE !important;
-  fill: #E8E5DE !important;
+  color: #353841 !important;
+  fill: #353841 !important;
 }
-/* Edges */
 .mermaid-diagram .edgePath .path {
-  stroke: #78756F !important;
+  stroke: #80868B !important;
   stroke-width: 1.5px;
 }
 .mermaid-diagram .edgeLabel,
 .mermaid-diagram .edgeLabel .label {
   background-color: transparent !important;
-  color: #C8C5BE !important;
-  fill: #C8C5BE !important;
+  color: #5F6368 !important;
+  fill: #5F6368 !important;
 }
-/* Arrows */
 .mermaid-diagram .arrowheadPath,
 .mermaid-diagram marker path {
-  fill: #78756F !important;
-  stroke: #78756F !important;
+  fill: #80868B !important;
+  stroke: #80868B !important;
 }
-/* Clusters — subtle grouped regions */
 .mermaid-diagram .cluster rect {
-  fill: rgba(255,255,255,0.03) !important;
-  stroke: #4A4740 !important;
+  fill: #F1F3F4 !important;
+  stroke: #E0E0E0 !important;
   stroke-width: 1px;
   rx: 8;
 }
 .mermaid-diagram .cluster .nodeLabel,
 .mermaid-diagram .cluster text {
-  color: #A09D97 !important;
-  fill: #A09D97 !important;
+  color: #5F6368 !important;
+  fill: #5F6368 !important;
 }
 
 

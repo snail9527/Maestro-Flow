@@ -121,8 +121,8 @@ export function WfTableView({ onSelectTask }: WfTableViewProps) {
           {sorted.length}
         </span>
         <div className="ml-auto flex items-center gap-[var(--spacing-3)]">
-          {(['executing', 'verifying', 'planning', 'completed'] as const).map((s) => {
-            const count = sorted.filter((p) => p.status === s || (s === 'verifying' && p.status === 'testing')).length;
+          {(['executing', 'verifying', 'reviewing', 'planning', 'completed'] as const).map((s) => {
+            const count = sorted.filter((p) => p.status === s).length;
             if (count === 0) return null;
             return (
               <div key={s} className="flex items-center gap-[var(--spacing-1)]">

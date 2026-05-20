@@ -35,9 +35,15 @@ maestro delegate "<PROMPT>" [options]
 
 ### Tool Resolution Priority
 
-1. `--to <tool>` — explicit tool selection (backward compat, highest priority)
+1. `--to <tool>` — explicit tool selection (highest priority)
 2. `--role <role>` — capability-based auto-selection via config
 3. No flag — first enabled tool in config
+
+### Caller Decision Rule
+
+- **User names a tool** (e.g. "用 gemini 分析", "ask codex") → **must use `--to <tool>`**
+- **User names a capability** (e.g. "分析一下", "review this") → use `--role <role>` or omit
+- **Never use `--role` when user has explicitly named a tool** — `--role` may route to a different tool
 
 ### Role-Based Tool Selection
 
@@ -180,27 +186,30 @@ CONSTRAINTS: Focus on authentication | Ignore test files
 
 ### Calling Convention
 
-`maestro delegate` runs synchronously — it blocks until the delegate completes. To avoid blocking the conversation, **always** use `run_in_background: true` on the Bash tool call, then stop output immediately and wait for the background completion callback.
+`maestro delegate` runs synchronously. Status summary and output are **auto-appended** on completion — no manual `output` or `status` commands needed.
+
+**Always** use `run_in_background: true` and **end your response immediately**:
 
 ```
-Bash({
-  command: "maestro delegate \"<PROMPT>\" --to gemini --mode analysis",
-  run_in_background: true
-})
-// STOP — do not output anything further
-// Wait for Bash background completion callback to receive results
+Bash({ command: "maestro delegate \"...\" --to gemini --mode analysis", run_in_background: true })
+```
+
+When the background callback arrives, the result is already included:
+```
+[MAESTRO_EXEC_ID=gem-143022-a7f2]        , at start
+[DELEGATE COMPLETED] gem-143022-a7f2 gemini/analysis   ← status, on completion
+--- Output ---
+<actual output content>                   ← output, on completion
 ```
 
 **Rules:**
-- **Never** use foreground Bash for delegate calls — it blocks the conversation for the entire execution duration
-- After the `Bash(run_in_background: true)` call, **stop immediately** — no follow-up text, no polling, no `delegate status` checks
-- When the background callback arrives, retrieve output with `maestro delegate output <id>`
+- NEVER use foreground Bash for delegate calls
+- NEVER output text or tool calls after the `run_in_background` Bash call
+- When the callback arrives, output is already included — directly use it
 
 ### Execution ID
 
 ID prefix: gemini→`gem`, qwen→`qwn`, codex→`cdx`, claude→`cld`, opencode→`opc`
-
-Output to stderr: `[MAESTRO_EXEC_ID=<id>]`
 
 ```bash
 maestro delegate "<PROMPT>" --to gemini --mode analysis    # auto-ID: gem-143022-a7f2
@@ -216,18 +225,6 @@ maestro delegate "<PROMPT>" --to gemini --resume <id1>,<id2>     # merge multipl
 ```
 
 Resume auto-assembles previous conversation context. Warning emitted when context exceeds 32KB.
-
-### Subcommands
-
-```bash
-maestro delegate show                     # recent 20 executions
-maestro delegate show --all               # up to 100
-maestro delegate output <id>              # assistant output
-maestro delegate output <id> --verbose    # include start/end timestamps
-maestro delegate status <id>              # broker + history + snapshot preview
-maestro delegate tail <id>                # recent events + history
-maestro delegate cancel <id>              # request cancellation
-```
 </execution>
 
 ---
@@ -250,6 +247,6 @@ Proactively invoke `maestro delegate` when these conditions are met — no user 
 
 - Default `--mode analysis` (safe, read-only)
 - Wait for results before next action
-- Use `--role` for capability-based tool selection; fallback chain is config-driven
+- User named a tool → `--to <tool>`; user didn't → `--role` or omit (see Caller Decision Rule)
 - Rule suggestions are guidelines — choose the best fit
 </execution>

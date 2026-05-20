@@ -3,6 +3,7 @@ import { Box, Text, useInput } from 'ink';
 import { TextInput } from '@inkjs/ui';
 import { MCP_TOOLS } from '../../commands/install-backend.js';
 import { t } from '../../i18n/index.js';
+import { C, SYM } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // McpConfig -- MCP tools configuration panel
@@ -86,15 +87,15 @@ export function McpConfig({
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">
+      <Text bold color={C.primary}>
         {t.install.mcpTitle}
       </Text>
 
       <Box marginTop={1}>
-        <Text color={index === 0 ? 'cyan' : undefined}>
+        <Text color={index === 0 ? C.primary : undefined}>
           {t.install.mcpEnable}{' '}
         </Text>
-        <Text color={enabled ? 'green' : 'yellow'} bold>
+        <Text color={enabled ? C.success : C.warning} bold>
           {enabled ? t.install.mcpYes : t.install.mcpNo}
         </Text>
         <Text dimColor> [y/n/Space]</Text>
@@ -109,9 +110,9 @@ export function McpConfig({
               const hl = index === i + 1;
               return (
                 <Box key={tool}>
-                  <Text color={hl ? 'cyan' : 'gray'}>[{i + 1}]</Text>
-                  <Text color={checked ? 'green' : 'gray'}> {checked ? '[x]' : '[ ]'} </Text>
-                  <Text color={hl ? 'cyan' : undefined} bold={hl}>{tool}</Text>
+                  <Text color={hl ? C.primary : C.neutral}>[{i + 1}]</Text>
+                  <Text color={checked ? C.success : C.neutral}> {checked ? SYM.checkOn : SYM.checkOff} </Text>
+                  <Text color={hl ? C.primary : undefined} bold={hl}>{tool}</Text>
                 </Box>
               );
             })}
@@ -136,7 +137,7 @@ export function McpConfig({
                     onChange={setRootInput}
                   />
                 ) : (
-                  <Text color="cyan">{projectRoot || t.install.mcpProjectRootDefault}</Text>
+                  <Text color={C.primary}>{projectRoot || t.install.mcpProjectRootDefault}</Text>
                 )}
               </Text>
               {!editingRoot && (

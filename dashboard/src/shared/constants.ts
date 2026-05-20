@@ -9,12 +9,10 @@ import type { Issue } from './issue-types.js';
 
 export const PHASE_STATUSES: readonly PhaseStatus[] = [
   'not_started',
-  'pending',
-  'exploring',
   'planning',
   'executing',
   'verifying',
-  'testing',
+  'reviewing',
   'completed',
   'blocked',
 ] as const;
@@ -28,7 +26,7 @@ export const TASK_STATUSES: readonly TaskStatus[] = [
 
 // ---------------------------------------------------------------------------
 // Kanban column configuration
-// Collapsed view: 6 columns grouping the 9 statuses
+// Collapsed view: 6 columns grouping the 7 statuses
 // ---------------------------------------------------------------------------
 
 export interface ColumnDefinition {
@@ -38,10 +36,10 @@ export interface ColumnDefinition {
 }
 
 export const COLLAPSED_COLUMNS: readonly ColumnDefinition[] = [
-  { id: 'backlog', label: 'Backlog', statuses: ['not_started', 'pending'] },
+  { id: 'backlog', label: 'Backlog', statuses: ['not_started'] },
   { id: 'triage', label: 'Triage', statuses: [] },
-  { id: 'in-progress', label: 'In Progress', statuses: ['exploring', 'planning', 'executing'] },
-  { id: 'review', label: 'Review', statuses: ['verifying', 'testing'] },
+  { id: 'in-progress', label: 'In Progress', statuses: ['planning', 'executing'] },
+  { id: 'review', label: 'Review', statuses: ['verifying', 'reviewing'] },
   { id: 'done', label: 'Done', statuses: ['completed', 'blocked'] },
   { id: 'deferred', label: 'Deferred', statuses: [] },
 ] as const;
@@ -68,6 +66,8 @@ export const SSE_EVENT_TYPES: Record<string, SSEEventType> = {
   TEAM_DISPATCH: 'team:dispatch',
   TEAM_PHASE: 'team:phase',
   TEAM_AGENT_STATUS: 'team:agent_status',
+  // Maestro Coordinate events
+  MAESTRO_SESSION_UPDATED: 'maestro:session_updated',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -322,6 +322,8 @@ export const INSTALL_API_ENDPOINTS = {
   DETECT: '/api/install/detect',
   EXECUTE: '/api/install/execute',
   MANIFESTS: '/api/install/manifests',
+  ADDONS: '/api/install/addons',
+  ADDON_INSTALL: '/api/install/addon',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -330,12 +332,10 @@ export const INSTALL_API_ENDPOINTS = {
 
 export const STATUS_COLORS: Record<PhaseStatus, string> = {
   not_started: '#A09D97',
-  pending: '#A09D97',
-  exploring: '#5B8DB8',
   planning: '#9178B5',
   executing: '#B89540',
   verifying: '#C8863A',
-  testing: '#5B8DB8',
+  reviewing: '#5B8DB8',
   completed: '#5A9E78',
   blocked: '#C46555',
 } as const;
@@ -352,6 +352,7 @@ export const AGENT_DOT_COLORS: Record<AgentType, string> = {
   'gemini-a2a': 'var(--color-accent-blue)',
   'qwen': 'var(--color-accent-orange)',
   'opencode': 'var(--color-text-tertiary)',
+  'agy': 'var(--color-accent-blue)',
   'agent-sdk': 'var(--color-accent-purple)',
 } as const;
 
@@ -363,6 +364,7 @@ export const AGENT_LABELS: Record<AgentType, string> = {
   'gemini-a2a': 'Gemini (A2A)',
   'qwen': 'Qwen',
   'opencode': 'OpenCode',
+  'agy': 'Antigravity',
   'agent-sdk': 'Agent SDK',
 } as const;
 

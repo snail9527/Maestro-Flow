@@ -104,6 +104,7 @@ Issue 是自修复管线：discover → analyze → plan → execute → close�
 ```bash
 maestro serve                  # → http://127.0.0.1:3001
 maestro view                   # 终端 TUI 替代方案
+maestro command-help           # 在浏览器中打开交互式命令参考（别名: ch）
 ```
 
 ### 6. 多智能体引擎
@@ -167,7 +168,8 @@ maestro/
 ## 文档
 
 - **[Maestro Ralph 指南](guide/maestro-ralph-guide.md)** — 自适应生命周期引擎：位置推断、decision 节点、质量模式、重试升级
-- **[命令使用指南](guide/command-usage-guide.md)** — 全部 51 个命令，含工作流图表、管线衔接、Issue 闭环
+- **[命令使用指南](guide/command-usage-guide.md)** — 全部 53 个命令，含工作流图表、管线衔接、Issue 闭环
+- **[命令参考 (HTML)](guide/command-usage-guide.html)** — 交互式 HTML 版本，支持搜索、卡片网格、工作流示例（`maestro command-help` 打开）
 - **[CLI 命令参考](guide/cli-commands-guide.en.md)** — 全部 21 个终端命令：install、delegate、coordinate、wiki、hooks、overlay、collab
 - **[Spec 系统指南](guide/spec-system-guide.md)** — `<spec-entry>` 格式、keyword 加载、验证 Hook、session dedup 注入
 - **[Delegate 异步执行指南](guide/delegate-async-guide.md)** — 异步任务委派：CLI & MCP 用法、消息注入、链式调用
@@ -198,6 +200,12 @@ maestro/
 欢迎加入微信群交流反馈：
 
 <img src="assets/wechat-group-qr.png" width="200" alt="微信群: Claude Code Workflow交流群 2" />
+
+## 打赏
+
+如果这个项目对你有帮助，欢迎请作者喝杯咖啡：
+
+<img src="assets/wechat-reward-qr.png" width="200" alt="微信赞赏码" />
 
 ## 友情链接
 

@@ -25,3 +25,12 @@ dashboard/dist/
 dashboard/dist-server/
 dashboard/node_modules/
 .history
+.claude/settings.local.json
+
+# Antigravity CLI auto-creates this for project discovery (empty on Windows without symlink permission)
+.antigravitycli/
+
+# Agent Skills open-standard mirror — build artifact (not committed),
+# but IS published via package.json#files. Regenerate via `npm run build:mirrors`
+# before publishing; prepublishOnly hook auto-runs it.
+.agents/

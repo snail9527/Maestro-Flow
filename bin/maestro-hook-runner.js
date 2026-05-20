@@ -58,6 +58,26 @@ const HOOKS = {
     if (config.toggles['specInjector'] === false) return;
     const { evaluateSpecInjection } = await import('../dist/src/hooks/spec-injector.js');
     const data = JSON.parse(raw);
+    const hookEventName = data.hook_event_name ?? '';
+    const isSessionStart = hookEventName === 'SessionStart';
+
+    // Codex SessionStart: inject specs as additionalContext
+    if (isSessionStart) {
+      const cwd = data.cwd ?? process.cwd();
+      const sessionId = data.session_id ?? '';
+      const result = evaluateSpecInjection('general', cwd, sessionId);
+      if (result.inject && result.content) {
+        process.stdout.write(JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'SessionStart',
+            additionalContext: result.content,
+          },
+        }));
+      }
+      return;
+    }
+
+    // Claude Code PreToolUse:Agent — rewrite agent prompt
     const toolInput = data.tool_input ?? {};
     const agentType = toolInput.subagent_type ?? '';
     if (!agentType) return;
@@ -105,7 +125,7 @@ const HOOKS = {
     if (result.flagged) {
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: {
-          hookEventName: 'UserPromptSubmit',
+          hookEventName: data.hook_event_name || 'UserPromptSubmit',
           additionalContext: result.warning,
         },
       }));

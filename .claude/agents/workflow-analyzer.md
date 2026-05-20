@@ -38,6 +38,8 @@ You perform structured multi-dimensional analysis of technical topics, proposals
 - Subject of analysis (proposal, technology choice, architecture decision, etc.)
 - Context: constraints, goals, existing system state
 - Comparison alternatives (if applicable)
+- **Codebase docs** (if `.workflow/codebase/` exists) — `ARCHITECTURE.md` and `CONCERNS.md` as evidence sources for feasibility/risk/dependency dimensions
+- **Wiki prior knowledge** (if `maestro wiki` available) — `maestro wiki search "<subject keywords>"` for prior decisions and analyses on related topics
 
 ## Output
 `analysis.md`:

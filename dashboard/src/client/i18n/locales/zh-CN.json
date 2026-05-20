@@ -10,6 +10,7 @@
     "teams": "Agents 团队",
     "collab": "多用户协作",
     "requirement": "需求扩展",
+    "maestro_coordinate": "Maestro 协调",
     "supervisor": "调度中心",
     "rooms": "会议室",
     "views": "视图"
@@ -30,6 +31,7 @@
     "teams_tooltip": "Agents 团队",
     "collab_tooltip": "多用户协作",
     "requirement_tooltip": "需求",
+    "maestro_coordinate_tooltip": "Maestro 协调会话",
     "supervisor_tooltip": "调度管理中心",
     "rooms_tooltip": "会议室",
     "views_label": "视图",
@@ -51,12 +53,10 @@
   },
   "status": {
     "not_started": "未开始",
-    "pending": "待处理",
-    "exploring": "探索中",
     "planning": "规划中",
     "executing": "执行中",
     "verifying": "验证中",
-    "testing": "测试中",
+    "reviewing": "审查中",
     "completed": "已完成",
     "blocked": "已阻塞"
   },
@@ -287,6 +287,23 @@
       "hours_ago": "{{count}} 小时前"
     }
   },
+  "maestro_coordinate": {
+    "title": "Maestro 协调",
+    "sessions": "会话列表",
+    "no_sessions": "暂无会话",
+    "no_sessions_desc": "运行 /maestro 或 /maestro-ralph 创建会话",
+    "select_session": "选择一个会话查看详情",
+    "steps": "步骤",
+    "context": "上下文",
+    "passed_gates": "已通过关卡",
+    "loading": "加载中...",
+    "refresh": "刷新",
+    "empty_title": "暂无 Maestro 会话",
+    "empty_desc": "来自 .workflow/.maestro/ 的会话数据将显示在此",
+    "source_ralph": "Ralph",
+    "source_maestro": "Maestro",
+    "source_coordinate": "Coordinate"
+  },
   "settings": {
     "title": "设置",
     "loading": "加载设置中...",
@@ -472,6 +489,76 @@
       "detail_caption_1": "从右侧滑入，看板保持可见",
       "detail_caption_2": "双栏居中弹窗布局",
       "detail_caption_3": "全屏模式，带面包屑导航"
+    }
+  },
+  "workflow_config": {
+    "title": "工作流配置",
+    "btn_aria": "打开工作流配置",
+    "loading": "加载中...",
+    "empty": "工作流未初始化，请先运行 maestro-init。",
+    "save": "保存",
+    "saving": "保存中...",
+    "discard": "丢弃",
+    "top": {
+      "title": "配置文件",
+      "mode": "模式",
+      "granularity": "粒度",
+      "model_profile": "模型策略"
+    },
+    "workflow": {
+      "title": "工作流代理",
+      "research": "调研",
+      "plan_check": "计划检查",
+      "verify_after_execute": "执行后验证",
+      "nyquist_validation": "Nyquist 验证",
+      "auto_sync": "自动同步",
+      "reflection": "反思",
+      "decision_protocol": "决策协议",
+      "auto_advance": "自动推进"
+    },
+    "execution": {
+      "title": "执行",
+      "method": "方法",
+      "parallel": "并行",
+      "max_concurrent": "最大并发",
+      "auto_commit": "自动提交",
+      "lazy_loading": "懒加载"
+    },
+    "git": {
+      "title": "Git",
+      "branching": "分支策略",
+      "commit_docs": "提交文档"
+    },
+    "gates": {
+      "title": "确认门控",
+      "confirm_project": "项目",
+      "confirm_roadmap": "路线图",
+      "confirm_plan": "计划",
+      "confirm_execute": "执行",
+      "confirm_transition": "过渡"
+    },
+    "safety": {
+      "title": "安全",
+      "always_confirm_destructive": "确认破坏性操作",
+      "always_confirm_external_services": "确认外部服务"
+    },
+    "specs": {
+      "title": "规范",
+      "auto_setup_on_init": "初始化时自动创建",
+      "extract_learnings_on_complete": "提取经验"
+    },
+    "codebase": {
+      "title": "代码库",
+      "doc_index": "文档索引",
+      "auto_sync_after_execute": "执行后自动同步",
+      "action_log": "操作日志"
+    },
+    "worktree": {
+      "title": "Worktree",
+      "enabled": "启用",
+      "root": "根目录",
+      "branch_prefix": "分支前缀",
+      "auto_cleanup": "自动清理"
     }
   }
 }

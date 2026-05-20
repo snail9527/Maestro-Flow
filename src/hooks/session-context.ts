@@ -20,6 +20,7 @@ import { resolveWorkspace } from './workspace.js';
 interface SessionContextInput {
   cwd?: string;
   session_id?: string;
+  hook_event_name?: string;
 }
 
 interface HookOutput {
@@ -66,7 +67,7 @@ export function evaluateSessionContext(data: SessionContextInput): HookOutput | 
 
   return {
     hookSpecificOutput: {
-      hookEventName: 'Notification',
+      hookEventName: data.hook_event_name || 'Notification',
       additionalContext: sections.join('\n\n'),
     },
   };

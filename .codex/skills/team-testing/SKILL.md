@@ -1,157 +1,210 @@
 ---
 name: team-testing
-description: Unified team skill for testing team. Progressive test coverage through Generator-Critic loops, shared memory, and dynamic layer selection. Triggers on "team testing".
-allowed-tools: spawn_agent(*), wait_agent(*), send_message(*), followup_task(*), close_agent(*), list_agents(*), report_agent_job_result(*), request_user_input(*), Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*), mcp__maestro-tools__team_msg(*)
+description: Team testing with progressive coverage and generator-critic loops
+argument-hint: "[scope] [-y|--yes] [-c|--concurrency N] [--continue] [--pipeline targeted|standard|comprehensive]"
+allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
-Orchestrate multi-agent test pipeline: strategist -> generator -> executor -> analyst. Progressive layer coverage (L1/L2/L3) with Generator-Critic loops for coverage convergence.
+Wave-based test pipeline via `spawn_agents_on_csv`. Progressive layer coverage (L1/L2/L3) with Generator-Critic loops for convergence.
 
 ```
-Skill(skill="team-testing", args="task description")
-                    |
-         SKILL.md (this file) = Router
-                    |
-     +--------------+--------------+
-     |                             |
-  no --role flag              --role <name>
-     |                             |
-  Coordinator                  Worker
-  roles/coordinator/role.md    roles/<name>/role.md
-     |
-     +-- analyze -> dispatch -> spawn workers -> STOP
-                                    |
-                    +-------+-------+-------+-------+
-                    v       v       v       v
-                [strat] [gen]  [exec]  [analyst]
-                team-worker agents, each loads roles/<role>/role.md
++-------------------------------------------------------------------+
+|                   TESTING CSV WAVE WORKFLOW                         |
++-------------------------------------------------------------------+
+|  Phase 1: Pipeline Selection + CSV Generation                      |
+|     +-- Detect pipeline (targeted/standard/comprehensive)          |
+|     +-- Build tasks.csv with wave assignments                      |
+|                                                                     |
+|  Phase 2: Wave Execution Engine                                    |
+|     +-- Sequential waves, parallel tasks within wave               |
+|     +-- GC Loop: after TESTRUN, check pass_rate + coverage         |
+|     |   +-- pass_rate < 0.95 OR coverage < target → iterate        |
+|     +-- discoveries.ndjson shared across waves                     |
+|                                                                     |
+|  Phase 3: Results Aggregation                                      |
++-------------------------------------------------------------------+
 ```
 </purpose>
 
 <context>
-### Role Registry
-
-| Role | Path | Prefix | Inner Loop |
-|------|------|--------|------------|
-| coordinator | [roles/coordinator/role.md](roles/coordinator/role.md) | -- | -- |
-| strategist | [roles/strategist/role.md](roles/strategist/role.md) | STRATEGY-* | false |
-| generator | [roles/generator/role.md](roles/generator/role.md) | TESTGEN-* | true |
-| executor | [roles/executor/role.md](roles/executor/role.md) | TESTRUN-* | true |
-| analyst | [roles/analyst/role.md](roles/analyst/role.md) | TESTANA-* | false |
-
-### Role Router
-
-Parse `$ARGUMENTS`:
-- Has `--role <name>` -> Read `roles/<name>/role.md`, execute Phase 2-4
-- No `--role` -> `roles/coordinator/role.md`, execute entry router
-
-### Delegation Lock
-
-**Coordinator is a PURE ORCHESTRATOR. It coordinates, it does NOT do.**
-
-Before calling ANY tool, apply this check:
-
-| Tool Call | Verdict | Reason |
-|-----------|---------|--------|
-| `spawn_agent`, `wait_agent`, `close_agent`, `send_message`, `followup_task` | ALLOWED | Orchestration |
-| `list_agents` | ALLOWED | Agent health check |
-| `request_user_input` | ALLOWED | User interaction |
-| `mcp__maestro-tools__team_msg` | ALLOWED | Message bus |
-| `Read/Write` on `.workflow/.team/` files | ALLOWED | Session state |
-| `Read` on `roles/`, `commands/`, `specs/` | ALLOWED | Loading own instructions |
-| `Read/Grep/Glob` on project source code | BLOCKED | Delegate to worker |
-| `Edit` on any file outside `.workflow/` | BLOCKED | Delegate to worker |
-| `Bash("maestro delegate ...")` | BLOCKED | Only workers call CLI |
-| `Bash` running build/test/lint commands | BLOCKED | Delegate to worker |
-
-**If a tool call is BLOCKED**: STOP. Create a task, spawn a worker.
-
-**No exceptions for "simple" tasks.** Even a single-file read-and-report MUST go through spawn_agent.
-
-### Shared Constants
-
-- **Session prefix**: `TST`
-- **Session path**: `.workflow/.team/TST-<slug>-<date>/`
-- **Team name**: `testing`
-- **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro-tools__team_msg(session_id=<session-id>, ...)`
-
-### Worker Spawn Template
-
-Spawn via `team-worker` agent. Message includes: role, role_spec path, session folder/id, requirement, inner_loop flag, task context, upstream context. After spawning: `wait_agent` (30 min). Timeout: STATUS_CHECK (3 min) -> FINALIZE (3 min) -> close.
-
-### Model Selection Guide
-
-| Role | reasoning_effort |
-|------|-------------------|
-| Strategist (STRATEGY-*) | high |
-| Generator (TESTGEN-*) | high |
-| Executor (TESTRUN-*) | medium |
-| Analyst (TESTANA-*) | high |
-
-Override via `model`/`reasoning_effort` params in spawn_agent for cost optimization.
-
-### User Commands
-
-| Command | Action |
-|---------|--------|
-| `check` / `status` | View pipeline status graph |
-| `resume` / `continue` | Advance to next step |
-| `revise <TASK-ID>` | Revise specific task |
-| `feedback <text>` | Inject feedback for revision |
-
-### v4 Agent Coordination
-
-**Message Semantics**: `send_message` to queue strategy to generators. `list_agents` for health checks. `followup_task` not used (all one-shot).
-
-**Parallel Test Generation**: Spawn multiple generators per layer (L1/L2/L3) in parallel, then executors.
-
-**GC Loop Coordination**: Create dynamic TESTGEN-fix and TESTRUN-fix tasks when coverage below target. Track `gc_rounds[layer]`.
-
-**Agent Health Check**: Reconcile `tasks.json` with `list_agents({})`. Reset orphaned tasks to pending.
-
-**Named Targeting**: `send_message({ target: "TESTGEN-001" })`, `close_agent({ target: "TESTRUN-001" })`.
-
-### Completion Action
-
-Present choice: **Archive & Clean** (recommended), **Keep Active**, **Deepen Coverage** (add layers or raise targets).
-
-### Session Directory
-
-```
-.workflow/.team/TST-<slug>-<date>/
-+-- .msg/messages.jsonl     # Team message bus
-+-- .msg/meta.json          # Session metadata
-+-- wisdom/                 # Cross-task knowledge
-+-- strategy/               # Strategist output
-+-- tests/                  # Generator output (L1-unit/, L2-integration/, L3-e2e/)
-+-- results/                # Executor output
-+-- analysis/               # Analyst output
+```bash
+$team-testing "src/auth module"
+$team-testing -y --pipeline comprehensive "src/"
+$team-testing --continue "20260518-tst-auth"
 ```
 
-### Specs Reference
+**Flags**: `-y` (auto), `-c N` (concurrency, default 3), `--continue` (resume), `--pipeline targeted|standard|comprehensive`
 
-- [specs/pipelines.md](specs/pipelines.md) -- Pipeline definitions and task registry
-- [specs/team-config.json](specs/team-config.json) -- Team configuration
+### Role Registry (Fixed)
+
+| Role | Path | Prefix |
+|------|------|--------|
+| strategist | [roles/strategist/role.md](roles/strategist/role.md) | STRATEGY-* |
+| generator | [roles/generator/role.md](roles/generator/role.md) | TESTGEN-* |
+| executor | [roles/executor/role.md](roles/executor/role.md) | TESTRUN-* |
+| analyst | [roles/analyst/role.md](roles/analyst/role.md) | TESTANA-* |
+
+**Session**: `.workflow/.csv-wave/{YYYYMMDD}-tst-{slug}/`
+**Output**: tasks.csv, results.csv, discoveries.ndjson, context.md
+
+### Pipeline Selection
+
+| Scope | Pipeline |
+|-------|----------|
+| ≤3 files, ≤1 module | targeted |
+| ≤10 files, ≤3 modules | standard |
+| >10 files or >3 modules | comprehensive |
 </context>
+
+<csv_schema>
+
+### tasks.csv (Input columns)
+
+```csv
+id,title,description,role,test_layer,deps,context_from,wave
+```
+
+| Column | Description |
+|--------|-------------|
+| `id` | Task ID: `{PREFIX}-{NNN}` |
+| `title` | Short task title |
+| `description` | PURPOSE/TASK/EXPECTED/CONSTRAINTS |
+| `role` | Fixed role name |
+| `test_layer` | L1/L2/L3 or empty |
+| `deps` | Semicolon-separated dependency IDs |
+| `context_from` | Semicolon-separated context source IDs |
+| `wave` | Wave number |
+
+**Output columns** (via `output_schema` only):
+
+| Column | Description |
+|--------|-------------|
+| `result_status` | completed / failed / blocked |
+| `findings` | Key findings (max 500 chars) |
+| `files_modified` | Semicolon-separated paths |
+| `pass_rate` | Test pass rate (0.0-1.0, for TESTRUN tasks) |
+| `coverage_score` | Coverage % (0-100, for TESTRUN tasks) |
+| `error` | Error message |
+
+**Column separation rule**: Input and Output MUST NOT share names.
+
+### Pipeline Wave Assignments
+
+#### targeted (3 waves)
+
+| Wave | Task | Role |
+|------|------|------|
+| 1 | STRATEGY-001 | strategist |
+| 2 | TESTGEN-001 | generator |
+| 3 | TESTRUN-001 | executor |
+
+#### standard (6+ waves, GC loops)
+
+| Wave | Task | Role |
+|------|------|------|
+| 1 | STRATEGY-001 | strategist |
+| 2 | TESTGEN-001 | generator (L1) |
+| 3 | TESTRUN-001 | executor (L1) |
+| 4 | TESTGEN-002 | generator (L2) |
+| 5 | TESTRUN-002 | executor (L2) |
+| 6 | TESTANA-001 | analyst |
+
+GC: After TESTRUN, if pass_rate < 0.95 or coverage < target → iterate (max 3).
+
+#### comprehensive (8+ waves, parallel + GC)
+
+| Wave | Task | Role |
+|------|------|------|
+| 1 | STRATEGY-001 | strategist |
+| 2 | TESTGEN-001; TESTGEN-002 | generator (L1+L2 parallel) |
+| 3 | TESTRUN-001; TESTRUN-002 | executor (L1+L2 parallel) |
+| 4 | TESTGEN-003 | generator (L3) |
+| 5 | TESTRUN-003 | executor (L3) |
+| 6 | TESTANA-001 | analyst |
+
+**Coverage Targets**: L1≥80%, L2≥60%, L3≥40%. **Max GC Rounds**: 3 per layer.
+</csv_schema>
+
+<invariants>
+1. **Wave Order Sacred**
+2. **CSV Source of Truth**
+3. **Column Separation Rule**
+4. **GC Loop Max 3**: Per-layer, triggered by pass_rate < 0.95 OR coverage < target
+5. **Coverage Targets**: L1≥80%, L2≥60%, L3≥40%
+6. **Discovery Board Append-Only**
+7. **Cleanup Temp Files**
+8. **DO NOT STOP**
+9. **Role Files Authoritative**
+</invariants>
+
+<state_machine>
+
+<states>
+S_PARSE      — Parse arguments, detect pipeline
+S_CSV_GEN    — Generate tasks.csv
+S_WAVE_{N}   — Execute wave N
+S_GC_CHECK   — Check pass_rate + coverage after TESTRUN
+S_AGGREGATE  — Generate report
+</states>
+
+<transitions>
+S_PARSE → S_CSV_GEN
+S_CSV_GEN → S_WAVE_1
+S_WAVE_{N} → S_GC_CHECK      WHEN: wave was TESTRUN
+S_WAVE_{N} → S_WAVE_{N+1}    WHEN: not GC-eligible
+S_GC_CHECK → S_WAVE_{N+1}    WHEN: pass_rate >= 0.95 AND coverage >= target (converged)
+S_GC_CHECK → S_WAVE_{N+1}    WHEN: not converged, gc_rounds < 3 (add TESTGEN+TESTRUN rows)
+S_GC_CHECK → S_WAVE_{N+1}    WHEN: gc_rounds >= 3 (proceed with warning)
+S_WAVE_{N} → S_AGGREGATE     WHEN: last wave
+</transitions>
+
+<actions>
+
+### GC Loop
+
+After each TESTRUN wave:
+1. Read `pass_rate` and `coverage_score`
+2. pass_rate >= 0.95 AND coverage >= target → converged, continue
+3. Not converged AND gc_rounds < 3 → add TESTGEN+TESTRUN rows, iterate
+4. gc_rounds >= 3 → proceed with warning
+
+### Instruction Builder
+
+```
+You are a team-testing agent.
+Role: read 'role' column. Task: read 'description' column.
+
+## Role Definition
+Read: {skillRoot}/roles/{role}/role.md
+
+## Context
+Session: {sessionFolder}
+Discovery board: {sessionFolder}/discoveries.ndjson
+Previous context: 'prev_context' column
+
+## Output
+result_status, findings, files_modified, pass_rate (TESTRUN), coverage_score (TESTRUN), error
+```
+
+</actions>
+</state_machine>
 
 <error_codes>
 
-| Scenario | Resolution |
-|----------|------------|
-| Unknown --role value | Error with available role list |
-| Role not found | Error with expected path (roles/<name>/role.md) |
-| CLI tool fails | Worker fallback to direct implementation |
-| GC loop exceeded | Accept current coverage with warning |
-| Fast-advance conflict | Coordinator reconciles on next callback |
-| Completion action fails | Default to Keep Active |
+| Condition | Recovery |
+|-----------|----------|
+| Strategy produces empty plan | Default to L1 unit tests only |
+| Generator produces 0 tests | Mark blocked, skip executor |
+| Coverage never converges | After 3 GC rounds, proceed with warning |
+| All tests pass on first run | Normal — skip GC iterations |
 </error_codes>
 
 <success_criteria>
-- [ ] Role router correctly dispatches to coordinator or worker based on --role flag
-- [ ] Pipeline executes strategist -> generator -> executor -> analyst in order
-- [ ] Parallel generators spawned per test layer (L1/L2/L3)
-- [ ] GC loops create fix tasks dynamically when coverage is below target
-- [ ] Session state persisted after each wave
-- [ ] Completion action presented and handled correctly
+- [ ] Pipeline selected and CSV generated
+- [ ] Waves executed via spawn_agents_on_csv
+- [ ] GC loops iterate until converged or max 3
+- [ ] pass_rate and coverage_score tracked per TESTRUN
+- [ ] Column separation maintained
+- [ ] results.csv and context.md generated
 </success_criteria>

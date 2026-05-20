@@ -63,7 +63,8 @@ For revision mode:
 **CLI delegation** (medium/high complexity):
 
 ```
-Bash(`maestro delegate "PURPOSE: Generate <layer> tests using <framework> to achieve coverage target; success = all priority files covered with quality tests
+exec_command({
+  cmd: `maestro delegate "PURPOSE: Generate <layer> tests using <framework> to achieve coverage target; success = all priority files covered with quality tests
 TASK: • Analyze source files • Generate test cases (happy path, edge cases, errors) • Write test files with proper structure • Ensure import resolution
 MODE: write
 CONTEXT: @<source-files> @<session>/strategy/test-strategy.md | Memory: Framework: <framework>, Layer: <layer>, Round: <round>
@@ -72,7 +73,12 @@ Effective patterns: <patterns-from-meta>>
 EXPECTED: Test files in <session>/tests/<layer>/ with: proper test structure, comprehensive coverage, correct imports, framework conventions
 CONSTRAINTS: Follow test strategy priorities | Use framework best practices | <layer>-appropriate assertions
 Source files to test:
-<file-list-with-content>" --tool gemini --mode write --cd <session>`)
+<file-list-with-content>" --role implement --mode write --cd <session>`,
+  yield_time_ms: 30000,
+  max_output_tokens: 6000
+})
+// ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
+// NEVER skip — must wait for test files to be generated before verification
 ```
 
 **Output verification**:

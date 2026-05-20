@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { type InstallResult } from './types.js';
+import { C, BORDER } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // ResultDashboard -- final bordered summary after installation
@@ -14,8 +15,8 @@ interface ResultDashboardProps {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <Box>
-      <Text color="cyan">{label.padEnd(13)}</Text>
-      <Text color="green">{value}</Text>
+      <Text color={C.primary}>{label.padEnd(13)}</Text>
+      <Text color={C.success}>{value}</Text>
     </Box>
   );
 }
@@ -37,11 +38,10 @@ export function ResultDashboard({ result, onClose }: ResultDashboardProps) {
     <Box flexDirection="column" paddingX={1}>
       <Box
         flexDirection="column"
-        borderStyle="round"
-        borderColor="green"
+        {...BORDER.success}
         paddingX={1}
       >
-        <Text bold color="green">
+        <Text bold color={C.success}>
           Installation Complete
         </Text>
         <Row label="Files:" value={`${totalStats.files} installed`} />
@@ -67,7 +67,7 @@ export function ResultDashboard({ result, onClose }: ResultDashboardProps) {
           />
         )}
         <Box>
-          <Text color="cyan">{'Manifest:'.padEnd(13)}</Text>
+          <Text color={C.primary}>{'Manifest:'.padEnd(13)}</Text>
           <Text dimColor>{manifestPath}</Text>
         </Box>
       </Box>

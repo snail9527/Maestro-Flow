@@ -42,6 +42,10 @@ export async function createAdapterForType(agentType: AgentType): Promise<AgentA
       const { OpenCodeAdapter } = await import('./opencode-adapter.js');
       return new OpenCodeAdapter();
     }
+    case 'agy': {
+      const { AgyAdapter } = await import('./agy-adapter.js');
+      return new AgyAdapter();
+    }
     default:
       throw new Error(`Unknown agent type for adapter factory: ${agentType}`);
   }

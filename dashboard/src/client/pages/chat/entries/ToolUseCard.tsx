@@ -12,11 +12,29 @@ const STATUS_LABELS: Record<ToolUseEntry['status'], { color: string; label: stri
   failed:    { color: 'var(--color-accent-red, #D05454)', label: 'Failed' },
 };
 
-/** Extract a short display path from tool input */
+/** Extract a short, informative preview from tool input.
+ * Priority: file_path/path/command first (most identifying),
+ * then search terms (query/pattern), URL/target, paths array, project root. */
 function getToolPath(input: Record<string, unknown> | undefined): string | null {
   if (!input) return null;
-  const p = input.file_path ?? input.path ?? input.command;
-  return typeof p === 'string' ? p : null;
+  const PRIMARY_KEYS = [
+    'file_path', 'path', 'command',
+    'query', 'pattern', 'contentPattern', 'regex',
+    'url', 'target', 'topic', 'name',
+  ];
+  for (const key of PRIMARY_KEYS) {
+    const v = input[key];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  // Array of paths — show first + count hint
+  const paths = input.paths;
+  if (Array.isArray(paths) && paths.length > 0 && typeof paths[0] === 'string') {
+    return paths.length > 1 ? `${paths[0]} (+${paths.length - 1})` : paths[0];
+  }
+  // Project root as last resort
+  const root = input.project_root_path;
+  if (typeof root === 'string' && root.length > 0) return root;
+  return null;
 }
 
 /** SVG icons matching chat.html reference tool icons */
@@ -40,6 +58,14 @@ function ToolIcon({ name }: { name: string }) {
     return (
       <svg style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+      </svg>
+    );
+  }
+  // MCP-shaped tool name: "{server}/{tool}" — plug icon to distinguish
+  if (name.includes('/')) {
+    return (
+      <svg style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 2v6" /><path d="M15 2v6" /><path d="M6 8h12v4a6 6 0 0 1-12 0V8z" /><path d="M12 18v4" />
       </svg>
     );
   }

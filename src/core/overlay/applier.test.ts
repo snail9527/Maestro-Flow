@@ -13,11 +13,18 @@ import { tmpdir, homedir } from 'node:os';
 
 // `paths.home` is frozen at module import time from MAESTRO_HOME env.
 // Mock it so each test gets a fresh temp-based home directory.
+// Also mock manifest.js because tag-injector.ts (imported transitively via
+// applier → tag-injector → manifest) evaluates paths.home eagerly at
+// module scope — the manifest mock prevents that eager evaluation.
 let mockHome: string;
 vi.mock('../../config/paths.js', () => ({
   paths: {
     get home() { return mockHome; },
   },
+}));
+vi.mock('../manifest.js', () => ({
+  addFile: () => {},
+  addDir: () => {},
 }));
 
 import {
@@ -56,6 +63,21 @@ const OVERLAY_JSON = {
       section: 'execution',
       mode: 'append',
       content: 'INJECTED: run ccw cli --mode analysis',
+    },
+  ],
+};
+
+const CLAUDE_MD_OVERLAY_JSON = {
+  name: 'custom-rules',
+  description: 'Inject custom rules into CLAUDE.md',
+  targets: ['_claude-md'],
+  priority: 50,
+  enabled: true,
+  patches: [
+    {
+      section: 'my-rules',
+      mode: 'replace',
+      content: '## Custom Rules\n\nAlways use TypeScript strict mode.',
     },
   ],
 };
@@ -204,6 +226,147 @@ describe('applier', () => {
     });
   });
 
+  describe('applyOverlays (_claude-md target)', () => {
+    it('injects overlay content into CLAUDE.md via tag-injector markers', () => {
+      const targetBase = join(tmp, 'target');
+      const overlayDir = join(tmp, 'overlays');
+      mkdirSync(overlayDir, { recursive: true });
+      // No need to create CLAUDE.md — applier should create it
+      writeFileSync(
+        join(overlayDir, 'custom-rules.json'),
+        JSON.stringify(CLAUDE_MD_OVERLAY_JSON),
+        'utf-8',
+      );
+
+      const report = applyOverlays({
+        targetBase,
+        scope: 'global',
+        overlayDir,
+        logger: () => {},
+      });
+
+      expect(report.overlaysApplied).toBe(1);
+      expect(report.filesChanged).toBe(1);
+
+      const claudeMdPath = join(targetBase, '.claude', 'CLAUDE.md');
+      expect(existsSync(claudeMdPath)).toBe(true);
+      const text = readFileSync(claudeMdPath, 'utf-8');
+      expect(text).toContain('<!-- maestro:start section="overlay:custom-rules" -->');
+      expect(text).toContain('Always use TypeScript strict mode.');
+      expect(text).toContain('<!-- maestro:end section="overlay:custom-rules" -->');
+    });
+
+    it('re-apply produces byte-identical CLAUDE.md (idempotent)', () => {
+      const targetBase = join(tmp, 'target');
+      const overlayDir = join(tmp, 'overlays');
+      mkdirSync(overlayDir, { recursive: true });
+      writeFileSync(
+        join(overlayDir, 'custom-rules.json'),
+        JSON.stringify(CLAUDE_MD_OVERLAY_JSON),
+        'utf-8',
+      );
+      const logger = () => {};
+      applyOverlays({ targetBase, scope: 'global', overlayDir, logger });
+      const after1 = readFileSync(join(targetBase, '.claude', 'CLAUDE.md'), 'utf-8');
+      applyOverlays({ targetBase, scope: 'global', overlayDir, logger });
+      const after2 = readFileSync(join(targetBase, '.claude', 'CLAUDE.md'), 'utf-8');
+      expect(after2).toBe(after1);
+    });
+
+    it('records CLAUDE.md target in manifest', () => {
+      const targetBase = join(tmp, 'target');
+      const overlayDir = join(tmp, 'overlays');
+      mkdirSync(overlayDir, { recursive: true });
+      writeFileSync(
+        join(overlayDir, 'custom-rules.json'),
+        JSON.stringify(CLAUDE_MD_OVERLAY_JSON),
+        'utf-8',
+      );
+      const report = applyOverlays({
+        targetBase,
+        scope: 'global',
+        overlayDir,
+        logger: () => {},
+      });
+
+      const entry = report.manifest.appliedOverlays.find(
+        (o) => o.overlayName === 'custom-rules',
+      );
+      expect(entry).toBeDefined();
+      expect(entry!.targets).toHaveLength(1);
+      expect(entry!.targets[0].commandName).toBe('_claude-md');
+      expect(entry!.targets[0].commandPath).toContain('CLAUDE.md');
+      expect(entry!.targets[0].sectionsPatched).toEqual(['overlay:custom-rules']);
+    });
+
+    it('does not affect existing command-file overlay behavior', () => {
+      const { targetBase, overlayDir } = setupScope(tmp, { 'test-cmd': BASE_CMD });
+      // Both a regular overlay and a _claude-md overlay in the same dir
+      writeFileSync(
+        join(overlayDir, 'cli-verify.json'),
+        JSON.stringify(OVERLAY_JSON),
+        'utf-8',
+      );
+      writeFileSync(
+        join(overlayDir, 'custom-rules.json'),
+        JSON.stringify(CLAUDE_MD_OVERLAY_JSON),
+        'utf-8',
+      );
+
+      const report = applyOverlays({
+        targetBase,
+        scope: 'global',
+        overlayDir,
+        logger: () => {},
+      });
+
+      expect(report.overlaysApplied).toBe(2);
+
+      // Command file overlay works normally
+      const cmdText = readFileSync(
+        join(targetBase, '.claude', 'commands', 'test-cmd.md'),
+        'utf-8',
+      );
+      expect(cmdText).toContain('<!-- maestro-overlay:cli-verify#0');
+      expect(cmdText).toContain('INJECTED: run ccw cli');
+
+      // CLAUDE.md overlay uses tag-injector markers
+      const claudeText = readFileSync(
+        join(targetBase, '.claude', 'CLAUDE.md'),
+        'utf-8',
+      );
+      expect(claudeText).toContain('<!-- maestro:start section="overlay:custom-rules" -->');
+      expect(claudeText).toContain('Always use TypeScript strict mode.');
+    });
+
+    it('appends to existing CLAUDE.md content', () => {
+      const targetBase = join(tmp, 'target');
+      const claudeDir = join(targetBase, '.claude');
+      mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(join(claudeDir, 'CLAUDE.md'), '# Existing Content\n\nSome rules.\n', 'utf-8');
+
+      const overlayDir = join(tmp, 'overlays');
+      mkdirSync(overlayDir, { recursive: true });
+      writeFileSync(
+        join(overlayDir, 'custom-rules.json'),
+        JSON.stringify(CLAUDE_MD_OVERLAY_JSON),
+        'utf-8',
+      );
+
+      applyOverlays({
+        targetBase,
+        scope: 'global',
+        overlayDir,
+        logger: () => {},
+      });
+
+      const text = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');
+      expect(text).toContain('# Existing Content');
+      expect(text).toContain('Some rules.');
+      expect(text).toContain('<!-- maestro:start section="overlay:custom-rules" -->');
+    });
+  });
+
   describe('removeOverlayFromTargets', () => {
     it('strips markers and updates manifest', () => {
       const { targetBase, overlayDir } = setupScope(tmp, { 'test-cmd': BASE_CMD });
@@ -224,6 +387,156 @@ describe('applier', () => {
       expect(text).not.toContain('maestro-overlay');
       expect(text).not.toContain('INJECTED');
       expect(text).toContain('base execution step');
+    });
+
+    it('removes _claude-md overlay section from CLAUDE.md', () => {
+      const targetBase = join(tmp, 'target');
+      const overlayDir = join(tmp, 'overlays');
+      mkdirSync(overlayDir, { recursive: true });
+      writeFileSync(
+        join(overlayDir, 'custom-rules.json'),
+        JSON.stringify(CLAUDE_MD_OVERLAY_JSON),
+        'utf-8',
+      );
+      applyOverlays({ targetBase, scope: 'global', overlayDir, logger: () => {} });
+
+      const claudeMdPath = join(targetBase, '.claude', 'CLAUDE.md');
+      expect(readFileSync(claudeMdPath, 'utf-8')).toContain('overlay:custom-rules');
+
+      const result = removeOverlayFromTargets('custom-rules', 'global', targetBase);
+      expect(result.filesChanged).toBe(1);
+
+      const text = readFileSync(claudeMdPath, 'utf-8');
+      expect(text).not.toContain('overlay:custom-rules');
+      expect(text).not.toContain('Always use TypeScript strict mode.');
+    });
+
+    it('removing one overlay does not affect other CLAUDE.md sections', () => {
+      const targetBase = join(tmp, 'target');
+      const claudeDir = join(targetBase, '.claude');
+      mkdirSync(claudeDir, { recursive: true });
+      // Pre-populate with core section
+      writeFileSync(
+        join(claudeDir, 'CLAUDE.md'),
+        '<!-- maestro:start section="core" -->\n# Core Instructions\n<!-- maestro:end section="core" -->\n',
+        'utf-8',
+      );
+
+      const overlayDir = join(tmp, 'overlays');
+      mkdirSync(overlayDir, { recursive: true });
+      // Two _claude-md overlays
+      writeFileSync(
+        join(overlayDir, 'custom-rules.json'),
+        JSON.stringify(CLAUDE_MD_OVERLAY_JSON),
+        'utf-8',
+      );
+      writeFileSync(
+        join(overlayDir, 'other-rules.json'),
+        JSON.stringify({
+          name: 'other-rules',
+          description: 'Other overlay',
+          targets: ['_claude-md'],
+          priority: 10,
+          enabled: true,
+          patches: [{ section: 'other', mode: 'replace', content: 'Other content here.' }],
+        }),
+        'utf-8',
+      );
+      applyOverlays({ targetBase, scope: 'global', overlayDir, logger: () => {} });
+
+      // Remove only custom-rules
+      removeOverlayFromTargets('custom-rules', 'global', targetBase);
+
+      const text = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8');
+      // custom-rules section gone
+      expect(text).not.toContain('overlay:custom-rules');
+      expect(text).not.toContain('Always use TypeScript strict mode.');
+      // core and other-rules sections preserved
+      expect(text).toContain('<!-- maestro:start section="core" -->');
+      expect(text).toContain('# Core Instructions');
+      expect(text).toContain('<!-- maestro:start section="overlay:other-rules" -->');
+      expect(text).toContain('Other content here.');
+    });
+  });
+
+  describe('priority sorting', () => {
+    it('high-priority overlay section appears before low-priority in CLAUDE.md', () => {
+      const targetBase = join(tmp, 'target');
+      const overlayDir = join(tmp, 'overlays');
+      mkdirSync(overlayDir, { recursive: true });
+
+      writeFileSync(
+        join(overlayDir, 'low-prio.json'),
+        JSON.stringify({
+          name: 'low-prio',
+          description: 'Low priority overlay',
+          targets: ['_claude-md'],
+          priority: 10,
+          enabled: true,
+          patches: [{ section: 'low', mode: 'replace', content: 'LOW_PRIORITY_CONTENT' }],
+        }),
+        'utf-8',
+      );
+      writeFileSync(
+        join(overlayDir, 'high-prio.json'),
+        JSON.stringify({
+          name: 'high-prio',
+          description: 'High priority overlay',
+          targets: ['_claude-md'],
+          priority: 100,
+          enabled: true,
+          patches: [{ section: 'high', mode: 'replace', content: 'HIGH_PRIORITY_CONTENT' }],
+        }),
+        'utf-8',
+      );
+
+      applyOverlays({ targetBase, scope: 'global', overlayDir, logger: () => {} });
+
+      const text = readFileSync(join(targetBase, '.claude', 'CLAUDE.md'), 'utf-8');
+      const highIdx = text.indexOf('HIGH_PRIORITY_CONTENT');
+      const lowIdx = text.indexOf('LOW_PRIORITY_CONTENT');
+      expect(highIdx).toBeGreaterThan(-1);
+      expect(lowIdx).toBeGreaterThan(-1);
+      expect(highIdx).toBeLessThan(lowIdx);
+    });
+
+    it('overlays without priority default to 0 and appear after prioritized ones', () => {
+      const targetBase = join(tmp, 'target');
+      const overlayDir = join(tmp, 'overlays');
+      mkdirSync(overlayDir, { recursive: true });
+
+      writeFileSync(
+        join(overlayDir, 'no-prio.json'),
+        JSON.stringify({
+          name: 'no-prio',
+          description: 'No priority field',
+          targets: ['_claude-md'],
+          enabled: true,
+          patches: [{ section: 'default', mode: 'replace', content: 'NO_PRIORITY_CONTENT' }],
+        }),
+        'utf-8',
+      );
+      writeFileSync(
+        join(overlayDir, 'has-prio.json'),
+        JSON.stringify({
+          name: 'has-prio',
+          description: 'Has priority',
+          targets: ['_claude-md'],
+          priority: 50,
+          enabled: true,
+          patches: [{ section: 'prio', mode: 'replace', content: 'HAS_PRIORITY_CONTENT' }],
+        }),
+        'utf-8',
+      );
+
+      applyOverlays({ targetBase, scope: 'global', overlayDir, logger: () => {} });
+
+      const text = readFileSync(join(targetBase, '.claude', 'CLAUDE.md'), 'utf-8');
+      const prioIdx = text.indexOf('HAS_PRIORITY_CONTENT');
+      const noPrioIdx = text.indexOf('NO_PRIORITY_CONTENT');
+      expect(prioIdx).toBeGreaterThan(-1);
+      expect(noPrioIdx).toBeGreaterThan(-1);
+      expect(prioIdx).toBeLessThan(noPrioIdx);
     });
   });
 

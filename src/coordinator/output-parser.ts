@@ -6,6 +6,8 @@
 import type { CommandNode, ExtractionRule, OutputParser, ParsedResult } from './graph-types.js';
 
 const RESULT_MARKER = '--- COORDINATE RESULT ---';
+const COMPLETION_MARKER = '--- COMPLETION STATUS ---';
+const COMPLETION_END = '--- END STATUS ---';
 
 const FIELD_PATTERNS: Record<string, RegExp> = {
   status: /^STATUS:\s*(.+)/i,
@@ -104,6 +106,39 @@ function applyExtractRules(
   }
 }
 
+/**
+ * Parse the optional COMPLETION STATUS block from command output.
+ * Enriches structured result with completion_status field.
+ */
+function parseCompletionStatus(
+  rawOutput: string,
+  structured: ParsedResult['structured'],
+): void {
+  const compIdx = rawOutput.lastIndexOf(COMPLETION_MARKER);
+  if (compIdx === -1) return;
+
+  const compEnd = rawOutput.indexOf(COMPLETION_END, compIdx);
+  const compBlock = rawOutput.slice(
+    compIdx + COMPLETION_MARKER.length,
+    compEnd > compIdx ? compEnd : undefined,
+  );
+
+  const statusMatch = compBlock.match(/^STATUS:\s*(.+)/im);
+  if (statusMatch) {
+    structured.completion_status = statusMatch[1].trim();
+  }
+
+  const concernsMatch = compBlock.match(/^CONCERNS:\s*(.+)/im);
+  if (concernsMatch) {
+    structured.completion_concerns = concernsMatch[1].trim();
+  }
+
+  const nextMatch = compBlock.match(/^NEXT:\s*(.+)/im);
+  if (nextMatch) {
+    structured.completion_next = nextMatch[1].trim();
+  }
+}
+
 export class DefaultOutputParser implements OutputParser {
   parse(rawOutput: string, node: CommandNode): ParsedResult {
     if (!rawOutput || rawOutput.trim() === '') {
@@ -115,6 +150,9 @@ export class DefaultOutputParser implements OutputParser {
     if (lastIdx !== -1) {
       const blockText = rawOutput.slice(lastIdx + RESULT_MARKER.length);
       const structured = parseResultBlock(blockText);
+
+      // Enrich with completion status if present
+      parseCompletionStatus(rawOutput, structured);
 
       if (node.extract) {
         applyExtractRules(rawOutput, node.extract, structured);

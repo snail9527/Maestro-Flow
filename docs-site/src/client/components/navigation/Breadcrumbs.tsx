@@ -37,8 +37,10 @@ export function Breadcrumbs({ categories, className = '' }: BreadcrumbsProps) {
     const categoryId = pathParts[0];
     const category = categories.find((c) => c.id === categoryId);
     if (category) {
+      const categoryLabel = t(`categories.${categoryId}`) !== `categories.${categoryId}`
+        ? t(`categories.${categoryId}`) : category.name;
       breadcrumbs.push({
-        label: category.name,
+        label: categoryLabel,
         href: `/${categoryId}`,
         isCurrent: pathParts.length === 1,
       });
@@ -61,7 +63,7 @@ export function Breadcrumbs({ categories, className = '' }: BreadcrumbsProps) {
   return (
     <nav
       className={className}
-      aria-label="Breadcrumb"
+      aria-label={t('breadcrumbs.aria_label')}
       itemScope
       itemType="https://schema.org/BreadcrumbList"
     >

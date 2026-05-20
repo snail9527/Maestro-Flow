@@ -1,6 +1,6 @@
 ---
 name: manage-wiki
-description: Wiki knowledge graph management — health dashboard, orphan cleanup, entry search, and graph statistics
+description: Manage wiki graph -- health, cleanup, search, stats
 argument-hint: "[health|search|cleanup|stats] [options]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
@@ -27,7 +27,7 @@ $ARGUMENTS — subcommand and optional flags.
 | `stats` | Graph statistics — type distribution, tag frequency, growth |
 
 **Flags:**
-- `--type <type>` — Filter: spec, knowhow, note, lesson, issue
+- `--type <type>` — Filter: spec, knowhow, note, issue
 - `--fix` — Auto-fix issues during cleanup
 - `--json` — JSON output
 </context>

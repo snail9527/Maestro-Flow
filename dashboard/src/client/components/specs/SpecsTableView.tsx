@@ -238,7 +238,7 @@ export function SpecsTableView() {
               {chip.value !== 'all' && (
                 <span
                   className="w-[6px] h-[6px] rounded-full"
-                  style={{ background: active ? '#fff' : DOT_COLORS[chip.value as SpecType] }}
+                  style={{ background: active ? 'var(--color-text-inverse)' : DOT_COLORS[chip.value as SpecType] }}
                 />
               )}
               {chip.label}
@@ -287,7 +287,7 @@ export function SpecsTableView() {
                 >
                   <span
                     className="w-[6px] h-[6px] rounded-full"
-                    style={{ background: active ? '#fff' : color }}
+                    style={{ background: active ? 'var(--color-text-inverse)' : color }}
                   />
                   {cat.charAt(0).toUpperCase() + cat.slice(1)}
                   <span className="text-[10px] font-mono opacity-70">
@@ -402,7 +402,7 @@ export function SpecsTableView() {
                   if (col.key === 'id')
                     return (
                       <td key={col.key} className="px-3 py-[10px] border-b-2 align-top" style={{ background: bg, borderBottomColor: borderColor }}>
-                        <span className="font-mono text-[11px] font-semibold" style={{ color: '#9178B5' }}>NEW</span>
+                        <span className="font-mono text-[11px] font-semibold" style={{ color: 'var(--color-status-planning)' }}>NEW</span>
                       </td>
                     );
                   if (col.key === 'type')

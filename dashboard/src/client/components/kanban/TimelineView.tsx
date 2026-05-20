@@ -146,7 +146,7 @@ export function TimelineView({ onSelectPhase, onSelectTask }: TimelineViewProps)
           ? phase.execution.tasks_completed / phase.execution.tasks_total
           : 0;
         // Dim future phases
-        const opacity = phase.status === 'pending' ? 0.5 : phase.status === 'completed' ? 1 : 0.85;
+        const opacity = phase.status === 'not_started' ? 0.5 : phase.status === 'completed' ? 1 : 0.85;
         const hasTasks = phase.plan.task_count > 0;
         const isExpanded = expandedPhases.has(phase.phase);
 

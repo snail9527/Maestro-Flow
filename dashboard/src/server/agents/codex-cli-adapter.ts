@@ -4,6 +4,9 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
+import { existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { createRequire } from 'node:module';
 import type {
   AgentConfig,
   AgentProcess,
@@ -12,7 +15,9 @@ import type {
 import { BaseAgentAdapter } from './base-adapter.js';
 import { EntryNormalizer } from './entry-normalizer.js';
 import { loadEnvFile } from './env-file-loader.js';
-import { StreamMonitor } from './stream-monitor.js';
+import { StreamMonitor, DEFAULT_STREAM_TIMEOUT_MS } from './stream-monitor.js';
+import { createStaleHandler } from './stale-handler.js';
+import { killProcessTree } from './process-tree-kill.js';
 import { cleanSpawnEnv } from './env-cleanup.js';
 
 // ---------------------------------------------------------------------------
@@ -52,19 +57,127 @@ interface CodexItem {
   path?: string;
   action?: string;
   diff?: string;
+  // command_execution fields (codex shell tool)
+  command?: string;
+  aggregated_output?: string;
+  exit_code?: number;
+  status?: string;
+  // mcp_tool_call fields
+  server?: string;
+  tool?: string;
+  result?: unknown;
+  error?: string;
+}
+
+interface CodexError {
+  type: 'error';
+  message?: string;
+}
+
+interface CodexTurnFailed {
+  type: 'turn.failed';
+  error?: { message?: string };
 }
 
 type CodexMessage =
   | CodexThreadStarted
   | CodexTurnStarted
   | CodexItemCompleted
-  | CodexTurnCompleted;
+  | CodexTurnCompleted
+  | CodexError
+  | CodexTurnFailed;
 
 // ---------------------------------------------------------------------------
 // Stderr error pattern
 // ---------------------------------------------------------------------------
 
 const STDERR_ERROR_RE = /\b(error|fatal)\b/i;
+
+// ---------------------------------------------------------------------------
+// Native binary resolution — bypass shell/shim layers on Windows
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the native codex binary path by replicating the logic from
+ * `@openai/codex/bin/codex.js`. On Windows, `shell: true` creates a
+ * fragile process chain (cmd.exe → codex.cmd → node codex.js → codex.exe)
+ * where intermediate processes can exit before the native binary finishes,
+ * breaking the stdout pipe. Resolving the native binary directly and spawning
+ * without `shell: true` eliminates this race condition.
+ *
+ * Returns the absolute path to the native binary, or null if not found
+ * (in which case the adapter falls back to shell-based spawn).
+ */
+function resolveCodexNativeBinary(): string | null {
+  const isWin = process.platform === 'win32';
+  const binaryName = isWin ? 'codex.exe' : 'codex';
+
+  const targetTriples: Record<string, Record<string, string>> = {
+    win32:  { x64: 'x86_64-pc-windows-msvc', arm64: 'aarch64-pc-windows-msvc' },
+    linux:  { x64: 'x86_64-unknown-linux-musl', arm64: 'aarch64-unknown-linux-musl' },
+    darwin: { x64: 'x86_64-apple-darwin', arm64: 'aarch64-apple-darwin' },
+  };
+
+  const triple = targetTriples[process.platform]?.[process.arch];
+  if (!triple) return null;
+
+  const platformPackages: Record<string, string> = {
+    'x86_64-pc-windows-msvc':     '@openai/codex-win32-x64',
+    'aarch64-pc-windows-msvc':    '@openai/codex-win32-arm64',
+    'x86_64-unknown-linux-musl':  '@openai/codex-linux-x64',
+    'aarch64-unknown-linux-musl': '@openai/codex-linux-arm64',
+    'x86_64-apple-darwin':        '@openai/codex-darwin-x64',
+    'aarch64-apple-darwin':       '@openai/codex-darwin-arm64',
+  };
+
+  const platformPkg = platformPackages[triple];
+  if (!platformPkg) return null;
+
+  // Strategy 1: resolve via npm global install (most common)
+  try {
+    const npmGlobal = isWin
+      ? join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@openai', 'codex')
+      : '';
+
+    // Use createRequire from the codex package location
+    const codexPkgPaths = [
+      npmGlobal ? join(npmGlobal, 'package.json') : '',
+      // Also try resolving from cwd
+    ].filter(Boolean);
+
+    for (const basePath of codexPkgPaths) {
+      try {
+        const req = createRequire(basePath);
+        const pkgJsonPath = req.resolve(`${platformPkg}/package.json`);
+        const vendorRoot = join(dirname(pkgJsonPath), 'vendor');
+        const candidate = join(vendorRoot, triple, 'codex', binaryName);
+        if (existsSync(candidate)) return candidate;
+      } catch { /* continue */ }
+    }
+  } catch { /* continue */ }
+
+  // Strategy 2: look for local vendor directory relative to codex shim
+  try {
+    const shimPath = isWin
+      ? join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@openai', 'codex', 'vendor')
+      : '';
+    if (shimPath) {
+      const candidate = join(shimPath, triple, 'codex', binaryName);
+      if (existsSync(candidate)) return candidate;
+    }
+  } catch { /* continue */ }
+
+  return null;
+}
+
+// Cache the resolved binary path (or null) to avoid repeated filesystem lookups
+let _cachedCodexBinary: string | null | undefined;
+function getCodexBinary(): string | null {
+  if (_cachedCodexBinary === undefined) {
+    _cachedCodexBinary = resolveCodexNativeBinary();
+  }
+  return _cachedCodexBinary;
+}
 
 // ---------------------------------------------------------------------------
 // Adapter implementation
@@ -77,6 +190,8 @@ export class CodexCliAdapter extends BaseAgentAdapter {
   private readonly readlineInterfaces = new Map<string, ReadlineInterface>();
   private readonly streamMonitors = new Map<string, StreamMonitor>();
   private readonly stoppedEmitted = new Set<string>();
+  /** Accumulates assistant message text within a turn; flushed on turn.completed */
+  private readonly pendingMessages = new Map<string, string[]>();
 
   // --- Lifecycle hooks -----------------------------------------------------
 
@@ -97,18 +212,39 @@ export class CodexCliAdapter extends BaseAgentAdapter {
       args.push('--profile', config.settingsFile);
     }
 
+    // Reasoning effort → Codex config override (top-level model_reasoning_effort key)
+    // Codex supports: low, medium, high, xhigh; map 'max' → 'xhigh'
+    if (config.reasoningEffort) {
+      const effort = config.reasoningEffort === 'max' ? 'xhigh' : config.reasoningEffort;
+      args.push('-c', `model_reasoning_effort="${effort}"`);
+    }
+
     const envFromFile = config.envFile ? loadEnvFile(config.envFile) : {};
     const envOverrides: Record<string, string | undefined> = { ...envFromFile, ...config.env };
     if (config.apiKey) envOverrides.OPENAI_API_KEY = config.apiKey;
     const childEnv = cleanSpawnEnv(envOverrides);
 
-    const child = spawn('codex', args, {
-      cwd: config.workDir,
-      env: childEnv,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: true,
-      windowsHide: true,
-    });
+    // Prefer the resolved native binary to avoid the fragile shell process
+    // chain on Windows (cmd.exe → codex.cmd → node codex.js → codex.exe).
+    // When the native binary is found, spawn directly without shell: true.
+    const nativeBinary = getCodexBinary();
+    const child = nativeBinary
+      ? spawn(nativeBinary, args, {
+          cwd: config.workDir,
+          env: childEnv,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+          // POSIX: own process group so killProcessTree can signal the tree.
+          detached: process.platform !== 'win32',
+        })
+      : spawn('codex', args, {
+          cwd: config.workDir,
+          env: childEnv,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: true,
+          windowsHide: true,
+          detached: process.platform !== 'win32',
+        });
 
     if (!child.stdout || !child.stdin || !child.stderr) {
       throw new Error('Failed to spawn Codex CLI: stdio streams not available');
@@ -118,13 +254,21 @@ export class CodexCliAdapter extends BaseAgentAdapter {
     child.stdin.write(config.prompt);
     child.stdin.end();
 
-    // Heartbeat monitor: detect stale streams (60s silence)
-    const monitor = new StreamMonitor(() => {
-      this.emitEntry(
+    // Heartbeat monitor: detect stale streams and terminate the process tree
+    // (shared cascade with claude/gemini/qwen/opencode — see stale-handler.ts).
+    const staleTimeoutMs = config.streamTimeoutMs ?? DEFAULT_STREAM_TIMEOUT_MS;
+    const monitor = new StreamMonitor(
+      createStaleHandler({
         processId,
-        EntryNormalizer.error(processId, 'Stream stale: no output for 60s', 'stream_stale'),
-      );
-    });
+        child,
+        timeoutMs: staleTimeoutMs,
+        onStaleDetected: (message) =>
+          this.emitEntry(processId, EntryNormalizer.error(processId, message, 'stream_stale')),
+        isStopped: () => this.stoppedEmitted.has(processId),
+        emitStopped: (reason) => this.emitStopped(processId, reason),
+      }),
+      staleTimeoutMs,
+    );
     this.streamMonitors.set(processId, monitor);
 
     // Line-by-line parsing of NDJSON stdout
@@ -145,9 +289,12 @@ export class CodexCliAdapter extends BaseAgentAdapter {
 
     // Stderr handling: Codex sends warnings, reasoning, and progress to stderr.
     // Try JSON parse first to detect structured messages (warnings/errors).
+    // Stderr activity proves the process is alive (e.g. waiting for MCP tool
+    // response), so reset the stale-stream heartbeat to avoid false timeouts.
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString().trim();
       if (text.length === 0) return;
+      monitor.heartbeat();
 
       for (const line of text.split('\n')) {
         const trimmed = line.trim();
@@ -205,13 +352,13 @@ export class CodexCliAdapter extends BaseAgentAdapter {
       );
     }
 
-    // Graceful SIGTERM
-    child.kill('SIGTERM');
+    // Graceful SIGTERM — whole process tree (cmd.exe/codex.cmd grandchildren)
+    killProcessTree(child.pid, 'SIGTERM');
 
     // SIGKILL fallback after 5 seconds
     const killTimer = setTimeout(() => {
       if (!child.killed) {
-        child.kill('SIGKILL');
+        killProcessTree(child.pid, 'SIGKILL');
       }
     }, 5000);
 
@@ -269,6 +416,9 @@ export class CodexCliAdapter extends BaseAgentAdapter {
       }
 
       case 'turn.completed': {
+        // Flush accumulated assistant messages as final output
+        this.flushPendingMessages(processId);
+
         const usage = (msg as CodexTurnCompleted).usage;
         if (usage) {
           this.emitEntry(
@@ -283,6 +433,24 @@ export class CodexCliAdapter extends BaseAgentAdapter {
         break;
       }
 
+      case 'error': {
+        const errorMsg = (msg as CodexError).message ?? 'Unknown codex error';
+        this.emitEntry(
+          processId,
+          EntryNormalizer.error(processId, errorMsg, 'codex_error'),
+        );
+        break;
+      }
+
+      case 'turn.failed': {
+        const failedMsg = (msg as CodexTurnFailed).error?.message ?? 'Turn failed';
+        this.emitEntry(
+          processId,
+          EntryNormalizer.error(processId, failedMsg, 'turn_failed'),
+        );
+        break;
+      }
+
       // turn.started and unknown types are silently skipped
       default:
         break;
@@ -294,6 +462,55 @@ export class CodexCliAdapter extends BaseAgentAdapter {
   private classifyItem(item: CodexItem, processId: string): void {
     const itemType = item.type ?? '';
     const itemName = (item.name ?? '').toLowerCase();
+
+    // Reasoning / thinking content — route to thinking, not assistant_message.
+    // Codex newer builds may surface model reasoning as items; without this
+    // branch, reasoning text would pollute the final assistant reply extraction.
+    if (itemType === 'reasoning' || itemType === 'agent_reasoning') {
+      const text = this.extractItemText(item);
+      if (text.length > 0) {
+        this.emitEntry(processId, EntryNormalizer.thinking(processId, text));
+      }
+      return;
+    }
+
+    // Codex shell tool: explicit `command_execution` item shape
+    // (id, command, aggregated_output, exit_code, status). Emit as command_exec
+    // boundary so extractLastReply can split segments correctly.
+    if (itemType === 'command_execution') {
+      const command = item.command ?? item.name ?? 'shell';
+      this.emitEntry(
+        processId,
+        EntryNormalizer.commandExec(
+          processId,
+          command,
+          typeof item.exit_code === 'number' ? item.exit_code : undefined,
+          item.aggregated_output ?? item.output ?? '',
+        ),
+      );
+      return;
+    }
+
+    // Codex MCP tool call: explicit `mcp_tool_call` item shape
+    // (server, tool, arguments, result, error, status). Emit as tool_use
+    // boundary so extractLastReply can split segments correctly.
+    if (itemType === 'mcp_tool_call') {
+      const name = `${item.server ?? 'mcp'}/${item.tool ?? itemName ?? '?'}`;
+      const input = this.parseArguments(item.arguments);
+      const status = this.codexStatusToToolStatus(item);
+      const resultText = item.error
+        ? String(item.error)
+        : item.result === undefined
+          ? ''
+          : typeof item.result === 'string'
+            ? item.result
+            : JSON.stringify(item.result);
+      this.emitEntry(
+        processId,
+        EntryNormalizer.toolUse(processId, name, input, status, resultText),
+      );
+      return;
+    }
 
     // Function call that looks like a command execution
     if (
@@ -321,14 +538,105 @@ export class CodexCliAdapter extends BaseAgentAdapter {
       return;
     }
 
-    // Default: treat as assistant message
-    const text = this.extractItemText(item);
-    if (text.length > 0) {
+    // Safety net: any item whose type smells like a tool/shell call but isn't
+    // handled above (e.g. future codex types like `web_search_call`,
+    // `local_shell_call`, `custom_tool_call`, `*_output`). Emit as boundary
+    // tool_use to prevent JSON.stringify pollution of assistant_message.
+    if (this.isToolLikeType(itemType)) {
+      const name = item.name ?? item.tool ?? itemType;
+      const output =
+        typeof item.output === 'string'
+          ? item.output
+          : typeof item.aggregated_output === 'string'
+            ? item.aggregated_output
+            : item.result !== undefined
+              ? typeof item.result === 'string'
+                ? item.result
+                : JSON.stringify(item.result)
+              : '';
+      const status = this.codexStatusToToolStatus(item);
       this.emitEntry(
         processId,
-        EntryNormalizer.assistantMessage(processId, text, false),
+        EntryNormalizer.toolUse(
+          processId,
+          name,
+          this.parseArguments(item.arguments),
+          status,
+          output,
+        ),
+      );
+      return;
+    }
+
+    // Default: treat as assistant message — accumulate within turn,
+    // emit as partial now (for streaming display) and flush final on turn.completed
+    const text = this.extractItemText(item);
+    if (text.length > 0) {
+      const pending = this.pendingMessages.get(processId);
+      if (pending) {
+        pending.push(text);
+      } else {
+        this.pendingMessages.set(processId, [text]);
+      }
+      this.emitEntry(
+        processId,
+        EntryNormalizer.assistantMessage(processId, text, true),
       );
     }
+  }
+
+  /** Map codex item status/error fields to ToolUseEntry status. */
+  private codexStatusToToolStatus(item: CodexItem): 'pending' | 'running' | 'completed' | 'failed' {
+    if (item.error) return 'failed';
+    switch (item.status) {
+      case 'error':
+      case 'failed':
+        return 'failed';
+      case 'pending':
+      case 'queued':
+        return 'pending';
+      case 'running':
+      case 'in_progress':
+        return 'running';
+      case 'success':
+      case 'completed':
+      case 'done':
+      default:
+        return 'completed';
+    }
+  }
+
+  /** Parse codex function/tool `arguments` (JSON string) into an object; tolerate non-JSON. */
+  private parseArguments(raw: unknown): Record<string, unknown> {
+    if (raw === undefined || raw === null) return {};
+    if (typeof raw === 'object') return raw as Record<string, unknown>;
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return {};
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, unknown>;
+        }
+        return { value: parsed };
+      } catch {
+        return { raw };
+      }
+    }
+    return { value: raw };
+  }
+
+  /** Heuristic: does this item.type look like a tool/shell call we should treat as a boundary? */
+  private isToolLikeType(type: string): boolean {
+    if (!type) return false;
+    return (
+      type.endsWith('_call') ||
+      type.endsWith('_call_output') ||
+      type.endsWith('_call_end') ||
+      type.endsWith('_execution') ||
+      type.endsWith('_output') ||
+      /tool|shell|exec|search|patch|file_change/.test(type)
+    );
   }
 
   private isCommandCall(name: string): boolean {
@@ -343,6 +651,19 @@ export class CodexCliAdapter extends BaseAgentAdapter {
     if (/create|new/.test(name)) return 'create';
     if (/delete|remove/.test(name)) return 'delete';
     return 'modify';
+  }
+
+  /** Flush accumulated partial messages as a single final assistant_message. */
+  private flushPendingMessages(processId: string): void {
+    const pending = this.pendingMessages.get(processId);
+    if (!pending || pending.length === 0) return;
+    this.pendingMessages.delete(processId);
+
+    const finalText = pending.join('\n\n');
+    this.emitEntry(
+      processId,
+      EntryNormalizer.assistantMessage(processId, finalText, false),
+    );
   }
 
   private extractItemText(item: CodexItem): string {
@@ -370,6 +691,9 @@ export class CodexCliAdapter extends BaseAgentAdapter {
   private emitStopped(processId: string, reason: string): void {
     if (this.stoppedEmitted.has(processId)) return;
     this.stoppedEmitted.add(processId);
+
+    // Flush any pending messages that weren't flushed by turn.completed
+    this.flushPendingMessages(processId);
 
     this.emitEntry(
       processId,
@@ -427,6 +751,7 @@ export class CodexCliAdapter extends BaseAgentAdapter {
       this.streamMonitors.delete(processId);
     }
     this.childProcesses.delete(processId);
+    this.pendingMessages.delete(processId);
     // Note: stoppedEmitted is intentionally NOT cleared here — it must persist
     // to guard against the readline close fallback timer firing after cleanup.
   }

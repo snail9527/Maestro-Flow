@@ -16,7 +16,9 @@ import type {
 import { BaseAgentAdapter } from './base-adapter.js';
 import { EntryNormalizer } from './entry-normalizer.js';
 import { loadEnvFile } from './env-file-loader.js';
-import { StreamMonitor } from './stream-monitor.js';
+import { StreamMonitor, DEFAULT_STREAM_TIMEOUT_MS } from './stream-monitor.js';
+import { createStaleHandler } from './stale-handler.js';
+import { killProcessTree } from './process-tree-kill.js';
 import { cleanSpawnEnv } from './env-cleanup.js';
 
 /**
@@ -95,6 +97,11 @@ interface ClaudeSystemMessage {
   message?: string;
 }
 
+interface ClaudeUserMessage {
+  type: 'user';
+  message?: { role: string; content: unknown };
+}
+
 type ClaudeStreamMessage =
   | ClaudeAssistantMessage
   | ClaudeContentBlockStart
@@ -103,7 +110,8 @@ type ClaudeStreamMessage =
   | ClaudeToolUseMessage
   | ClaudeToolResultMessage
   | ClaudePermissionMessage
-  | ClaudeSystemMessage;
+  | ClaudeSystemMessage
+  | ClaudeUserMessage;
 
 // ---------------------------------------------------------------------------
 // Adapter implementation
@@ -164,6 +172,11 @@ export class ClaudeCodeAdapter extends BaseAgentAdapter {
       args.push('--settings', config.settingsFile);
     }
 
+    // Reasoning effort level (low, medium, high, max)
+    if (config.reasoningEffort) {
+      args.push('--effort', config.reasoningEffort);
+    }
+
     // Map approvalMode to Claude Code permission flags.
     // 'auto' → bypass all permission prompts (yolo) — required for non-interactive
     // --print mode where stdin is closed and no approval responder exists.
@@ -190,6 +203,8 @@ export class ClaudeCodeAdapter extends BaseAgentAdapter {
           env: childEnv,
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
+          // POSIX: own process group so killProcessTree can signal the tree.
+          detached: process.platform !== 'win32',
         })
       : spawn('claude', args, {
           cwd: config.workDir,
@@ -197,6 +212,7 @@ export class ClaudeCodeAdapter extends BaseAgentAdapter {
           stdio: ['pipe', 'pipe', 'pipe'],
           shell: true,
           windowsHide: true,
+          detached: process.platform !== 'win32',
         });
 
     if (!child.stdout || !child.stdin || !child.stderr) {
@@ -217,35 +233,23 @@ export class ClaudeCodeAdapter extends BaseAgentAdapter {
       child.stdin.end();
     }
 
-    // Heartbeat monitor: detect stale streams (60s silence).
-    // When stale, close stdin and kill the process — Claude CLI keeps stdout
-    // open indefinitely even after finishing, so passive detection doesn't work.
-    const monitor = new StreamMonitor(() => {
-      this.emitEntry(
+    // Heartbeat monitor: detect stale streams. When stale, close stdin and
+    // kill the whole process tree — Claude CLI keeps stdout open indefinitely
+    // even after finishing, so passive detection doesn't work. Shared cascade
+    // with the other stream adapters (see stale-handler.ts).
+    const staleTimeoutMs = config.streamTimeoutMs ?? DEFAULT_STREAM_TIMEOUT_MS;
+    const monitor = new StreamMonitor(
+      createStaleHandler({
         processId,
-        EntryNormalizer.error(processId, 'Stream stale: no output for 60s', 'stream_stale'),
-      );
-      // Close stdin to signal the process to exit naturally
-      if (child.stdin?.writable) {
-        child.stdin.end();
-      }
-      // If the process still doesn't exit after 5s, force kill it.
-      // The exit/close/readline handlers will then emit stopped.
-      setTimeout(() => {
-        if (!this.stoppedEmitted.has(processId)) {
-          child.kill('SIGTERM');
-          setTimeout(() => {
-            if (!this.stoppedEmitted.has(processId)) {
-              child.kill('SIGKILL');
-              // Last resort: force emit stopped if kill signals are ignored (Windows)
-              setTimeout(() => {
-                this.emitStopped(processId, 'Force stopped (stale stream fallback)');
-              }, 2000);
-            }
-          }, 3000);
-        }
-      }, 5000);
-    });
+        child,
+        timeoutMs: staleTimeoutMs,
+        onStaleDetected: (message) =>
+          this.emitEntry(processId, EntryNormalizer.error(processId, message, 'stream_stale')),
+        isStopped: () => this.stoppedEmitted.has(processId),
+        emitStopped: (reason) => this.emitStopped(processId, reason),
+      }),
+      staleTimeoutMs,
+    );
     this.streamMonitors.set(processId, monitor);
 
     // Line-by-line parsing of stream-json stdout
@@ -314,13 +318,13 @@ export class ClaudeCodeAdapter extends BaseAgentAdapter {
       child.stdin.end();
     }
 
-    // Graceful SIGTERM
-    child.kill('SIGTERM');
+    // Graceful SIGTERM — whole process tree (shell/grandchildren on Windows)
+    killProcessTree(child.pid, 'SIGTERM');
 
     // SIGKILL fallback after 5 seconds
     const killTimer = setTimeout(() => {
       if (!child.killed) {
-        child.kill('SIGKILL');
+        killProcessTree(child.pid, 'SIGKILL');
       }
       // Final fallback: if neither exit nor close events fire (Windows),
       // force-emit stopped after kill attempt.
@@ -506,8 +510,10 @@ export class ClaudeCodeAdapter extends BaseAgentAdapter {
         break;
       }
 
-      case 'system': {
-        // System messages are informational; skip silently
+      case 'system':
+      case 'user': {
+        // System and user messages are informational; skip silently.
+        // 'user' messages are echoes of stdin input in stream-json mode.
         break;
       }
 
@@ -583,11 +589,11 @@ export class ClaudeCodeAdapter extends BaseAgentAdapter {
         return;
       }
 
-      // Force kill — exit/close/readline handlers will emit stopped
-      child.kill('SIGTERM');
+      // Force kill the tree — exit/close/readline handlers will emit stopped
+      killProcessTree(child.pid, 'SIGTERM');
       setTimeout(() => {
         if (!this.stoppedEmitted.has(processId)) {
-          child.kill('SIGKILL');
+          killProcessTree(child.pid, 'SIGKILL');
           setTimeout(() => {
             this.emitStopped(processId, 'Force stopped after result (kill fallback)');
           }, 2000);

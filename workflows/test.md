@@ -416,6 +416,16 @@ If re-verify still has gaps: report remaining gaps, suggest manual intervention.
 
 ---
 
+### Step 12.5: UAT Confidence Scoring
+
+Dimensions (4): scenario_coverage, diagnostic_depth, observation_quality, closure_completeness. Factors (weights): requirements_mapped(.30), observation_specificity(.25), user_validation(.20), diagnostic_depth(.15), consistency(.10). Score at: init (Step 5), per user response (Step 8), after gap-fix loop (Step 12).
+
+Quality mechanisms: Pressure Pass — >80% pass → ask user to try edge case. Devil's Advocate — >70% first-try pass → challenge scenario difficulty. Stall Detection — 2 gap-fix iterations without improvement → stop.
+
+Readiness Gate (blocks Step 13): scenario_coverage < 40% | blocker gap without diagnosis | no pressure pass (if >80%) | unresolved gaps without acknowledgment. Append confidence summary to uat.md.
+
+---
+
 ### Step 13: Report
 
 ```

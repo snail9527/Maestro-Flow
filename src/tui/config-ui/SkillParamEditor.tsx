@@ -11,6 +11,7 @@ import {
   unsetSkillParam,
   type SkillConfigFile,
 } from '../../config/skill-config.js';
+import { C, SYM, SP, pad, wrapCursor, KeyHints, SectionHeader, CursorMarker } from '../shared/index.js';
 
 export interface SkillParamEditorProps {
   skillName: string;
@@ -244,8 +245,4 @@ function parseInputValue(raw: string, param: SkillParamDef): string | boolean | 
     return isNaN(num) ? raw : num;
   }
   return raw;
-}
-
-function pad(s: string, width: number): string {
-  return s.length >= width ? s.slice(0, width) : s + ' '.repeat(width - s.length);
 }

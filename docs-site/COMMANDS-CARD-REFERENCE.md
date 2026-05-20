@@ -1,19 +1,19 @@
 # Maestro Commands Quick Reference
 
-> Auto-generated cross-checked card layout — 54 commands, 7 categories
+> Auto-generated cross-checked card layout — 58 commands, 7 categories
 
 ---
 
-## Maestro (24 commands)
+## Maestro (25 commands)
 *Intelligent coordinator and core workflow commands — init, plan, execute, verify, and lifecycle management*
 
 ### `maestro` — 指挥家
 
-**Usage:** `/maestro "intent text" [-y] [-c] [--dry-run] [--chain <name>] [--exec auto|cli|skill] [--tool <name>]`
+**Usage:** `/maestro "intent text" [-y] [-c] [--dry-run] [--exec auto|cli|internal] [--tool <name>] [--super]`
 
 智能协调器 — 分析用户意图，读取项目状态，选择并执行最优命令链
 
-**Flags:** -y (自动模式) · -c (恢复会话) · --dry-run (演练) · --chain (强制指定链) · --exec auto|cli|skill (执行引擎) · --tool <name> (指定工具)
+**Flags:** -y (自动模式) · -c (恢复会话) · --dry-run (演练) · --exec auto|cli|internal (执行引擎) · --tool <name> (指定工具) · --super (超级模式)
 
 ---
 
@@ -87,6 +87,16 @@
 
 ---
 
+### `maestro-collab` — 多 CLI 协作
+
+**Usage:** `/maestro-collab "<requirement>" [--tools gemini,qwen,claude] [--mode analysis|write] [--rule <template>] [-y]`
+
+多 CLI 协作分析：将同一需求扇出到多个 CLI 工具并行分析，交叉验证输出中的共识与冲突，合成统一报告和标准下游产物（context.md + conclusions.json）
+
+**Flags:** "<requirement>" (需求描述) · --tools <list> (指定 CLI 工具，逗号分隔) · --mode analysis|write (委派模式) · --rule <template> (共享规则模板) · -y (跳过确认)
+
+---
+
 ### `maestro-roadmap` — 路线图
 
 **Usage:** `/maestro-roadmap <requirement> [-y] [-c] [-m progressive|direct|auto] [--from-brainstorm SESSION-ID] [--revise [instructions]] [--review]`
@@ -97,9 +107,9 @@
 
 ---
 
-### `maestro-ui-design` — UI 设计
+### `maestro-impeccable` — UI 生产管线
 
-**Usage:** `/maestro-ui-design <phase|topic> [--styles N] [--stack <stack>] [--targets <pages>] [--layouts N] [--refine] [--persist] [--full] [-y]`
+**Usage:** `/maestro-impeccable <intent|target> [--chain build|improve|enhance|harden|live] [--enhance <cmd>] [--threshold <score>] [--max-loops <n>] [-y]`
 
 通过 ui-ux-pro-max 生成多种风格的 UI 设计原型，用户选择最佳方案，固化为代码参考文档
 
@@ -247,7 +257,7 @@ CLI 协调器：分析用户意图 → 选择命令链 → 通过 maestro delega
 
 ---
 
-## Specification (4 commands)
+## Specification (6 commands)
 *Project specifications, conventions, and codebase knowledge management*
 
 ### `spec-setup` — 规格设置
@@ -258,23 +268,43 @@ CLI 协调器：分析用户意图 → 选择命令链 → 通过 maestro delega
 
 ---
 
-### `spec-add` — 添加规范
+### `spec-add` — Add Spec Entry
 
 **Usage:** `/spec-add [--scope project|global|team|personal] <category> <content>`
 
-向知识库添加规范条目：支持 project/global/team/personal 四种作用域，包含 bug、pattern、decision、rule 等分类
+Add knowledge entries to the spec system with role tagging. Supports tools category for reusable process definitions, and ref mode for long procedures.
 
-**Flags:** --scope project|global|team|personal (作用域) · <category> (必填：分类) · <content> (必填：条目内容)
+**Flags:** --scope (scope) · <category> (target file) · --ref (knowhow reference) · --knowhow-type (knowhow document type: asset|blueprint|document|template|recipe|reference|decision)
 
 ---
 
-### `spec-load` — 加载规范
+### `spec-load` — Load Specs by Role
 
-**Usage:** `/spec-load [--category <type>] [--keyword <word>] [--with-lessons]`
+**Usage:** `/spec-load [--category <category>] [--keyword <word>]`
 
-加载与当前上下文相关的规范和学习记录，供代理在执行前注入上下文。支持按分类和关键词过滤
+Load specs by role: primary role doc in full + cross-file entries with matching roles attribute. Role-based loading replaces category-based loading.
 
-**Flags:** --category <type> (按分类过滤) · --keyword <word> (关键词搜索) · --with-lessons (包含学习记录)
+**Flags:** --category <category> (implement|plan|test|review|analyze) · --keyword <word> (keyword filter) · --with-lessons (include learning records)
+
+---
+
+### `maestro-tools-register` — Register Tool Spec
+
+**Usage:** `/maestro-tools-register <description>`
+
+Codify reusable business processes as tool specs (e.g. payment reconciliation, OAuth integration, E2E verification). Register during planning, after execution, before testing, or during retrospective. Auto-discovered by agents via spec load and spec-injector.
+
+**Modes:** extract (from code/docs) · generate (from description) · optimize (improve existing)
+
+---
+
+### `maestro-tools-execute` — Execute Tool Spec
+
+**Usage:** `/maestro-tools-execute [tool-name | --category <category>]`
+
+Load registered tool specs and execute step-by-step. Supports direct invocation by name or role-based recommendation with interactive selection.
+
+**Flags:** <tool-name> (direct) · --category <category> (list available tools for role)
 
 ---
 
@@ -288,7 +318,7 @@ CLI 协调器：分析用户意图 → 选择命令链 → 通过 maestro delega
 
 ---
 
-## Quality (9 commands)
+## Quality (10 commands)
 *Testing, debugging, code review, refactoring, and quality assurance*
 
 ### `quality-review` — 代码审查
@@ -323,11 +353,11 @@ CLI 协调器：分析用户意图 → 选择命令链 → 通过 maestro delega
 
 ### `quality-debug` — 调试
 
-**Usage:** `/quality-debug [issue description] [--from-uat <phase>] [--from-auto-test <phase>] [--parallel]`
+**Usage:** `/quality-debug [issue description] [--from-uat <phase>] [--parallel]`
 
-并行假设驱动调试 via CSV wave：Wave 1 并行假设验证，Wave 2 并行修复确认假设，可从 UAT 或自动测试失败直接触发
+并行假设驱动调试 via CSV wave：Wave 1 并行假设验证，Wave 2 并行修复确认假设，可从 UAT 失败直接触发
 
-**Flags:** [issue description] (问题描述) · --from-uat <phase> (从 UAT 触发) · --from-auto-test <phase> (从自动测试触发) · --parallel (并行调试模式)
+**Flags:** [issue description] (问题描述) · --from-uat <phase> (从 UAT 触发) · --parallel (并行调试模式)
 
 ---
 
@@ -354,6 +384,12 @@ CLI 协调器：分析用户意图 → 选择命令链 → 通过 maestro delega
 ### ~~`quality-business-test`~~ — 已合并
 
 > **已废弃**：功能已合并入 `quality-auto-test`（spec 路由模式）。使用 `/quality-auto-test <phase>` 替代，当检测到 REQ-*.md 时自动进入 spec 路由。
+
+---
+
+### ~~`quality-integration-test`~~ — 已合并
+
+> **已废弃**：功能已合并入 `quality-auto-test`（统一自动测试）。使用 `/quality-auto-test <phase>` 替代。
 
 ---
 
@@ -394,7 +430,7 @@ CLI 协调器：分析用户意图 → 选择命令链 → 通过 maestro delega
 
 将当前会话的经验捕获为记忆：compact（会话压缩摘要）或 tip（单个专业提示）。带 JSON 索引便于后续检索
 
-**Flags:** [type] (知识类型: session|tip|template|recipe|reference|decision) · [description] (描述) · --lang <lang> (编程语言) · --source <url> (来源URL) · --tag tag1,tag2 (标签)
+**Flags:** [type] (知识类型: session|tip|template|recipe|reference|decision) · [description] (描述) · --lang <lang> (编程语言) · --source <url> (来源URL) · --tag tag1,tag2 (标签) · --title <title> (显式标题)
 
 ---
 
@@ -452,7 +488,7 @@ CLI 协调器：分析用户意图 → 选择命令链 → 通过 maestro delega
 
 **Usage:** `/manage-learn [<text>|tip <text>|list|search|show <id>] [--category ...] [--tag t1,t2] [--phase N] [--confidence ...]`
 
-统一原子知识捕获：洞察（模式、陷阱、技术）和提示（跨会话恢复笔记），存储到 .workflow/learning/lessons.jsonl
+统一原子知识捕获：洞察（模式、陷阱、技术）和提示（跨会话恢复笔记），存储到 .workflow/specs/learnings.md
 
 **Flags:** [<text>] (洞察文本) · [tip <text>] (提示模式) · [list] (列表) · [search] (搜索) · [show <id>] (查看) · --category ... (分类) · --tag t1,t2 (标签) · --phase N (阶段) · --confidence ... (置信度)
 

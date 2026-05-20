@@ -43,8 +43,13 @@ const RequirementBoardPage = lazy(() =>
   import('@/client/pages/RequirementBoardPage.js').then((m) => ({ default: m.RequirementBoardPage })),
 );
 
-const SupervisorPage = lazy(() =>
-  import('@/client/pages/SupervisorPage.js').then((m) => ({ default: m.SupervisorPage })),
+// SupervisorPage hidden — replaced by MaestroCoordinatePage
+// const SupervisorPage = lazy(() =>
+//   import('@/client/pages/SupervisorPage.js').then((m) => ({ default: m.SupervisorPage })),
+// );
+
+const MaestroCoordinatePage = lazy(() =>
+  import('@/client/pages/MaestroCoordinatePage.js').then((m) => ({ default: m.MaestroCoordinatePage })),
 );
 
 const CollabPage = lazy(() =>
@@ -151,11 +156,12 @@ export function App() {
               </Suspense>
             }
           />
+          {/* Maestro Coordinate — session monitor */}
           <Route
-            path="supervisor"
+            path="maestro-coordinate"
             element={
               <Suspense fallback={<LazyFallback />}>
-                <SupervisorPage />
+                <MaestroCoordinatePage />
               </Suspense>
             }
           />

@@ -4,6 +4,7 @@ import {
   loadSkillConfigSources,
   type SkillConfigFile,
 } from '../../config/skill-config.js';
+import { C, SYM } from '../shared/index.js';
 
 export interface ConfigSourcesViewProps {
   workDir: string;
@@ -25,7 +26,7 @@ export function ConfigSourcesView({ workDir, onBack }: ConfigSourcesViewProps) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text bold color="cyan">Skill Config Sources</Text>
+      <Text bold color={C.primary}>Skill Config Sources</Text>
       <Text> </Text>
 
       {/* Global */}
@@ -34,7 +35,7 @@ export function ConfigSourcesView({ workDir, onBack }: ConfigSourcesViewProps) {
       {data.global ? (
         <SkillConfigSection config={data.global} indent={2} />
       ) : (
-        <Text dimColor color="yellow">  (not found)</Text>
+        <Text dimColor color={C.warning}>  (not found)</Text>
       )}
 
       <Text> </Text>
@@ -45,7 +46,7 @@ export function ConfigSourcesView({ workDir, onBack }: ConfigSourcesViewProps) {
       {data.workspace ? (
         <SkillConfigSection config={data.workspace} indent={2} />
       ) : (
-        <Text dimColor color="yellow">  (not found)</Text>
+        <Text dimColor color={C.warning}>  (not found)</Text>
       )}
 
       <Text> </Text>
@@ -70,14 +71,14 @@ function SkillConfigSection({ config, indent }: { config: SkillConfigFile; inden
           <Box key={name} flexDirection="column">
             <Box gap={1}>
               <Text>{pad}</Text>
-              <Text color="green">●</Text>
+              <Text color={C.success}>{SYM.dot}</Text>
               <Text bold>{name}</Text>
               <Text dimColor>({params.length} param{params.length !== 1 ? 's' : ''})</Text>
             </Box>
             {params.map(([param, value]) => (
               <Box key={param} gap={1}>
                 <Text>{pad}  </Text>
-                <Text color="yellow">{param}</Text>
+                <Text color={C.warning}>{param}</Text>
                 <Text>= {String(value)}</Text>
               </Box>
             ))}

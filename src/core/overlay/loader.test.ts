@@ -74,6 +74,28 @@ describe('loader', () => {
       });
       expect(errs).toEqual([]);
     });
+
+    it('accepts arbitrary section names when targets include _claude-md', () => {
+      const errs = validateOverlayMeta({
+        name: 'claude-md-overlay',
+        targets: ['_claude-md'],
+        patches: [
+          { section: 'my-custom-section', mode: 'replace', content: 'hello' },
+        ],
+      });
+      expect(errs).toEqual([]);
+    });
+
+    it('still rejects unknown sections for non-_claude-md targets', () => {
+      const errs = validateOverlayMeta({
+        name: 'regular-overlay',
+        targets: ['some-cmd'],
+        patches: [
+          { section: 'my-custom-section', mode: 'append', content: 'hello' },
+        ],
+      });
+      expect(errs.join(' ')).toContain('my-custom-section');
+    });
   });
 
   describe('loadOverlay', () => {

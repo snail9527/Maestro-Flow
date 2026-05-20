@@ -473,5 +473,141 @@ export function createSettingsRoutes(workflowRoot: string | (() => string)): Hon
     }
   });
 
+  // -----------------------------------------------------------------------
+  // GET /api/settings/spec-injection — read spec injection config
+  // -----------------------------------------------------------------------
+  app.get('/api/settings/spec-injection', async (c) => {
+    const p = getPaths();
+
+    // Default agent-type → categories mapping (reference data for UI)
+    const agentCategoryMap: Record<string, string[]> = {
+      'code-developer': ['coding', 'learning', 'ui'],
+      'tdd-developer': ['coding', 'test'],
+      'workflow-executor': ['coding'],
+      'universal-executor': ['coding', 'ui'],
+      'test-fix-agent': ['coding', 'test'],
+      'cli-lite-planning-agent': ['arch'],
+      'action-planning-agent': ['arch'],
+      'workflow-planner': ['arch'],
+      'workflow-reviewer': ['review'],
+      'debug-explore-agent': ['debug'],
+      'workflow-debugger': ['debug'],
+      'general': ['coding', 'learning'],
+    };
+
+    // Default category → filename mapping (reference data for UI)
+    const categoryFileMap: Record<string, string> = {
+      coding: 'coding-conventions.md',
+      arch: 'architecture-constraints.md',
+      debug: 'debug-notes.md',
+      test: 'test-conventions.md',
+      review: 'review-standards.md',
+      learning: 'learnings.md',
+      ui: 'ui-conventions.md',
+    };
+
+    const validCategories = ['coding', 'arch', 'debug', 'test', 'review', 'learning', 'ui'];
+
+    let config: Record<string, unknown> = {};
+    try {
+      const raw = await readFile(p.dashboardConfig, 'utf-8');
+      const json = JSON.parse(raw) as Record<string, unknown>;
+      config = (json['specInjection'] as Record<string, unknown>) ?? {};
+    } catch {
+      // No config yet
+    }
+
+    return c.json({
+      config,
+      defaults: { agentCategoryMap, categoryFileMap, validCategories },
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // PUT /api/settings/spec-injection — write spec injection config
+  // -----------------------------------------------------------------------
+  app.put('/api/settings/spec-injection', async (c) => {
+    try {
+      const p = getPaths();
+      const body = await c.req.json();
+
+      let config: Record<string, unknown> = {};
+      try {
+        const raw = await readFile(p.dashboardConfig, 'utf-8');
+        config = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // Start with empty config
+      }
+
+      config['specInjection'] = body;
+
+      await writeFile(p.dashboardConfig, JSON.stringify(config, null, 2), 'utf-8');
+      return c.json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Write failed';
+      return c.json({ ok: false, error: message }, 500);
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // Workflow config — exclude keys managed by other settings sections
+  // -----------------------------------------------------------------------
+
+  /** Keys owned by dashboard settings / commander — never exposed via workflow-config API */
+  const DASHBOARD_OWNED_KEYS = new Set(['settings', 'dashboard', 'commander', 'specInjection']);
+
+  function isWorkflowKey(key: string): boolean {
+    return !DASHBOARD_OWNED_KEYS.has(key);
+  }
+
+  // -----------------------------------------------------------------------
+  // GET /api/workflow-config — read all workflow configuration dynamically
+  // -----------------------------------------------------------------------
+  app.get('/api/workflow-config', async (c) => {
+    const p = getPaths();
+    try {
+      const raw = await readFile(p.dashboardConfig, 'utf-8');
+      const json = JSON.parse(raw) as Record<string, unknown>;
+      const result: Record<string, unknown> = {};
+      for (const key of Object.keys(json)) {
+        if (isWorkflowKey(key)) result[key] = json[key];
+      }
+      return c.json(result);
+    } catch {
+      return c.json({});
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // PUT /api/workflow-config — write workflow configuration (dynamic keys)
+  // -----------------------------------------------------------------------
+  app.put('/api/workflow-config', async (c) => {
+    try {
+      const p = getPaths();
+      const body = (await c.req.json()) as Record<string, unknown>;
+
+      let config: Record<string, unknown> = {};
+      try {
+        const raw = await readFile(p.dashboardConfig, 'utf-8');
+        config = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // Start with empty config
+      }
+
+      // Merge only workflow keys from body, preserve dashboard-owned keys
+      for (const key of Object.keys(body)) {
+        if (isWorkflowKey(key)) {
+          config[key] = body[key];
+        }
+      }
+
+      await writeFile(p.dashboardConfig, JSON.stringify(config, null, 2), 'utf-8');
+      return c.json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Write failed';
+      return c.json({ ok: false, error: message }, 500);
+    }
+  });
+
   return app;
 }

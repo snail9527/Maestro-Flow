@@ -17,6 +17,7 @@ import { NOTIFY_PREFIX } from './constants.js';
 interface MonitorInput {
   session_id?: string;
   cwd?: string;
+  hook_event_name?: string;
 }
 
 interface NotifyEntry {
@@ -70,7 +71,7 @@ export function evaluateDelegateNotifications(data: MonitorInput): HookOutput | 
 
   return {
     hookSpecificOutput: {
-      hookEventName: 'PostToolUse',
+      hookEventName: data.hook_event_name || 'PostToolUse',
       additionalContext: lines.join('\n'),
     },
   };

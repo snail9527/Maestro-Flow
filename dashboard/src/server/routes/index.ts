@@ -30,7 +30,9 @@ import { createRoomMcpRoutes } from './room-mcp.js';
 import { createCommanderRoutes } from '../commander/commander-routes.js';
 import { createCoordinatorRoutes } from '../coordinator/coordinator-routes.js';
 import { createRequirementRoutes } from './requirements.js';
-import { createSupervisorRoutes } from './supervisor.js';
+// Supervisor routes hidden — replaced by MaestroCoordinatePage
+// import { createSupervisorRoutes } from './supervisor.js';
+import { createMaestroCoordinateRoutes } from './maestro-coordinate.js';
 import { createWorkspaceRoutes } from './workspace.js';
 import { createGitRoutes } from './git.js';
 import { createCsvWaveRoutes } from './csv-waves.js';
@@ -93,6 +95,9 @@ export function createRoutes(
 
   // CSV Wave routes (reads from .workflow/.csv-wave/)
   routes.route('/', createCsvWaveRoutes(getRoot));
+
+  // Maestro Coordinate routes (reads from .workflow/.maestro/)
+  routes.route('/', createMaestroCoordinateRoutes(getRoot));
 
   // SSE events route (depends on StateManager, EventBus, SSEHub)
   routes.route('/', createEventsRoute(stateManager, eventBus, sseHub));
@@ -167,15 +172,15 @@ export function createRoutes(
   // Observability routes (cross-component event timeline)
   routes.route('/', createObservabilityRoutes(workflowRoot));
 
-  // Supervisor routes (depends on learning, scheduler, extensions, prompts)
-  if (supervisorDeps) {
-    routes.route('/', createSupervisorRoutes(
-      supervisorDeps.learningService,
-      supervisorDeps.schedulerService,
-      supervisorDeps.extensionManager,
-      supervisorDeps.promptRegistry,
-    ));
-  }
+  // Supervisor routes hidden — replaced by MaestroCoordinatePage
+  // if (supervisorDeps) {
+  //   routes.route('/', createSupervisorRoutes(
+  //     supervisorDeps.learningService,
+  //     supervisorDeps.schedulerService,
+  //     supervisorDeps.extensionManager,
+  //     supervisorDeps.promptRegistry,
+  //   ));
+  // }
 
   return routes;
 }

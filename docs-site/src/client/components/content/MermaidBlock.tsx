@@ -14,19 +14,19 @@ function initMermaid() {
     startOnLoad: false,
     theme: 'base',
     themeVariables: {
-      mainBkg: '#302D28',
-      primaryBorderColor: '#5A554F',
-      primaryTextColor: '#E8E5DE',
-      lineColor: '#78756F',
+      mainBkg: '#FFFFFF',
+      primaryBorderColor: '#BDC1C6',
+      primaryTextColor: '#353841',
+      lineColor: '#80868B',
       edgeLabelBackground: 'transparent',
-      clusterBkg: 'rgba(255,255,255,0.03)',
-      clusterBorder: '#4A4740',
-      secondaryColor: '#302D28',
-      secondaryBorderColor: '#5AC78B',
-      secondaryTextColor: '#E8E5DE',
-      tertiaryColor: '#302D28',
-      tertiaryBorderColor: '#6BA8E8',
-      tertiaryTextColor: '#E8E5DE',
+      clusterBkg: '#F1F3F4',
+      clusterBorder: '#E0E0E0',
+      secondaryColor: '#E8F0FE',
+      secondaryBorderColor: '#8AB4F8',
+      secondaryTextColor: '#353841',
+      tertiaryColor: '#F1F3F4',
+      tertiaryBorderColor: '#A8C7FA',
+      tertiaryTextColor: '#353841',
       lineWidth: '1.5px',
       fontFamily: 'Inter, system-ui, sans-serif',
       fontSize: '13px',
@@ -132,7 +132,7 @@ export function MermaidBlock({ chart }: MermaidBlockProps) {
     <>
       {/* Inline diagram — click to expand */}
       <div
-        className="bg-bg-code rounded-[var(--radius-lg)] p-[var(--spacing-5)] my-[var(--spacing-4)] overflow-x-auto cursor-zoom-in relative"
+        className="bg-white border border-[#e0e0e0] rounded-[var(--radius-lg)] p-[var(--spacing-5)] my-[var(--spacing-4)] overflow-x-auto cursor-zoom-in relative"
         onClick={() => setExpanded(true)}
       >
         <div className="mermaid-diagram" dangerouslySetInnerHTML={{ __html: svg }} />
@@ -172,7 +172,7 @@ export function MermaidBlock({ chart }: MermaidBlockProps) {
             onWheel={handleWheel}
           >
             <div
-              className="mermaid-diagram bg-bg-code rounded-[var(--radius-lg)] p-[var(--spacing-8)]"
+              className="mermaid-diagram bg-white border border-[#e0e0e0] rounded-[var(--radius-lg)] p-[var(--spacing-8)]"
               style={{ width: `${scale * 90}vw`, maxWidth: 'none' }}
               dangerouslySetInnerHTML={{ __html: svg }}
             />

@@ -2,14 +2,21 @@
   "nav": {
     "home": "首页",
     "search": "搜索",
-    "categories": "分类"
+    "categories": "分类",
+    "changelog": "更新日志",
+    "github": "GitHub"
   },
   "sidebar": {
     "toggle": "切换侧边栏",
     "categories": "分类",
+    "aria_nav": "命令分类",
     "commands": "命令",
     "skills": "技能",
     "codex_skills": "Codex 技能",
+    "guides": "指南",
+    "quick_start": "快速入门",
+    "badge_skill": "技能",
+    "badge_codex": "Codex",
     "expand_all": "全部展开",
     "collapse_all": "全部折叠"
   },
@@ -42,7 +49,9 @@
       "codex_skill": "Codex 技能"
     },
     "results_count": "{count} 个结果",
-    "searching": "搜索中..."
+    "searching": "搜索中...",
+    "empty_title": "搜索 Maestro 文档",
+    "empty_description": "输入关键词搜索命令、Claude 技能和 Codex 技能。"
   },
   "breadcrumbs": {
     "home": "首页",
@@ -78,6 +87,11 @@
     "team": "多智能体协作技能，用于编排并行工作流",
     "learn": "代码模式提取、引导阅读、系统调查、学习复盘和多视角分析",
     "wiki": "知识图谱管理、关联发现和知识摘要生成"
+  },
+  "guides": {
+    "title": "指南",
+    "description": "深入了解 Maestro 的各个子系统 — 命令体系、Overlay 扩展、团队协作、并行开发等",
+    "back_to_all": "所有指南"
   },
   "landing": {
     "title": "Maestro 文档",
@@ -116,6 +130,18 @@
     "section_success_criteria": "成功标准",
     "section_documentation": "文档",
     "section_workflow": "工作流衔接",
+    "workflow_previous": "前置命令",
+    "workflow_next": "后继命令",
     "related_guides": "相关指南"
+  },
+  "toc": {
+    "aria_label": "目录",
+    "on_this_page": "本页目录"
+  },
+  "changelog": {
+    "title": "更新日志",
+    "description": "Maestro Flow 的版本更新记录",
+    "back_to_home": "返回首页",
+    "latest": "最新"
   }
 }

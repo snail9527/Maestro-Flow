@@ -9,6 +9,7 @@ import {
   resetSkillConfig,
   type SkillConfigFile,
 } from '../../config/skill-config.js';
+import { C, SYM, SP, pad, truncate, wrapCursor, KeyHints, SectionHeader } from '../shared/index.js';
 
 export interface SkillsListProps {
   config: SkillConfigFile;
@@ -61,8 +62,8 @@ export function SkillsList({ config, commandDefs, workDir, onBack, onEdit, onRel
     }
 
     if (key.escape) { onBack(); return; }
-    if (key.upArrow) setCursor(c => c > 0 ? c - 1 : filtered.length - 1);
-    if (key.downArrow) setCursor(c => c < filtered.length - 1 ? c + 1 : 0);
+    if (key.upArrow) setCursor(c => wrapCursor(c, -1, filtered.length));
+    if (key.downArrow) setCursor(c => wrapCursor(c, 1, filtered.length));
     if (key.return && filtered.length > 0) {
       onEdit(filtered[cursor].name);
     }
@@ -80,8 +81,8 @@ export function SkillsList({ config, commandDefs, workDir, onBack, onEdit, onRel
   });
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Text bold color="cyan">Skills ({filtered.length}/{allSkills.length})</Text>
+    <Box flexDirection="column" paddingX={SP.detailPadX}>
+      <SectionHeader title={`Skills (${filtered.length}/${allSkills.length})`} />
 
       {filterMode ? (
         <Box gap={1}>
@@ -116,10 +117,10 @@ export function SkillsList({ config, commandDefs, workDir, onBack, onEdit, onRel
 
         return (
           <Box key={skill.name} gap={1}>
-            <Text color={hasConfig ? 'green' : color}>{active ? '▸' : ' '}{hasConfig ? '●' : ' '}</Text>
+            <Text color={hasConfig ? C.success : color}>{active ? SYM.cursor : ' '}{hasConfig ? SYM.dot : ' '}</Text>
             <Text bold={active} color={color}>{pad(skill.name, 28)}</Text>
             <Text color={color}>{pad(String(skill.configurable), 8)}</Text>
-            <Text color={hasConfig ? 'yellow' : undefined} dimColor={!hasConfig}>{pad(hasConfig ? String(skill.configured) : '—', 6)}</Text>
+            <Text color={hasConfig ? C.warning : undefined} dimColor={!hasConfig}>{pad(hasConfig ? String(skill.configured) : '—', 6)}</Text>
             <Text dimColor>{hint || '(no params)'}</Text>
           </Box>
         );
@@ -129,12 +130,7 @@ export function SkillsList({ config, commandDefs, workDir, onBack, onEdit, onRel
         <Text dimColor>  Page {Math.floor(cursor / PAGE_SIZE) + 1}/{Math.ceil(filtered.length / PAGE_SIZE)}</Text>
       )}
 
-      <Text> </Text>
-      <Text dimColor>[↑↓] Navigate  [Enter] Edit  [/] Filter  [x] Clear defaults  [Esc] Back</Text>
+      <KeyHints hints="[↑↓] Navigate  [Enter] Edit  [/] Filter  [x] Clear defaults  [Esc] Back" />
     </Box>
   );
-}
-
-function pad(s: string, width: number): string {
-  return s.length >= width ? s.slice(0, width) : s + ' '.repeat(width - s.length);
 }

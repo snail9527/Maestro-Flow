@@ -5,6 +5,7 @@ import {
   type HookLevel,
 } from '../../commands/hooks.js';
 import { t } from '../../i18n/index.js';
+import { C, SYM, SP, wrapCursor, parseNumberKey, KeyHints, SectionHeader } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // HooksConfig -- Hook level selection panel (radio-style)
@@ -22,15 +23,14 @@ export function HooksConfig({ level, onLevelChange }: HooksConfigProps) {
   useInput(
     (input, key) => {
       if (key.upArrow) {
-        setIndex((i) => (i <= 0 ? HOOK_LEVELS.length - 1 : i - 1));
+        setIndex((i) => wrapCursor(i, -1, HOOK_LEVELS.length));
       } else if (key.downArrow) {
-        setIndex((i) => (i >= HOOK_LEVELS.length - 1 ? 0 : i + 1));
+        setIndex((i) => wrapCursor(i, 1, HOOK_LEVELS.length));
       } else if (input === ' ') {
         onLevelChange(HOOK_LEVELS[index]);
       } else {
-        const num = parseInt(input, 10);
-        if (!isNaN(num) && num >= 1 && num <= HOOK_LEVELS.length) {
-          const idx = num - 1;
+        const idx = parseNumberKey(input, HOOK_LEVELS.length);
+        if (idx !== null) {
           setIndex(idx);
           onLevelChange(HOOK_LEVELS[idx]);
         }
@@ -40,11 +40,9 @@ export function HooksConfig({ level, onLevelChange }: HooksConfigProps) {
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">
-        {t.install.hooksTitle}
-      </Text>
+      <SectionHeader title={t.install.hooksTitle} />
 
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginTop={SP.sectionGap}>
         {HOOK_LEVELS.map((lvl, i) => {
           const isActive = lvl === level;
           const isHighlighted = i === index;
@@ -53,13 +51,13 @@ export function HooksConfig({ level, onLevelChange }: HooksConfigProps) {
 
           return (
             <Box key={lvl}>
-              <Text color={isHighlighted ? 'cyan' : 'gray'}>
+              <Text color={isHighlighted ? C.primary : C.neutral}>
                 [{i + 1}]
               </Text>
-              <Text color={isActive ? 'green' : 'gray'}>
-                {' '}{isActive ? '(x)' : '( )'}{' '}
+              <Text color={isActive ? C.success : C.neutral}>
+                {' '}{isActive ? SYM.radioOn : SYM.radioOff}{' '}
               </Text>
-              <Text color={isHighlighted ? 'cyan' : undefined} bold={isHighlighted}>
+              <Text color={isHighlighted ? C.primary : undefined} bold={isHighlighted}>
                 {label}
               </Text>
               <Text dimColor> -- {desc}</Text>
@@ -68,11 +66,7 @@ export function HooksConfig({ level, onLevelChange }: HooksConfigProps) {
         })}
       </Box>
 
-      <Box marginTop={1}>
-        <Text dimColor>
-          [Up/Down] Navigate  [Space/1-{HOOK_LEVELS.length}] Select  [Enter] Done  [Esc] Back
-        </Text>
-      </Box>
+      <KeyHints hints={`[↑↓] Navigate  [Space/1-${HOOK_LEVELS.length}] Select  [Enter] Done  [Esc] Back`} />
     </Box>
   );
 }

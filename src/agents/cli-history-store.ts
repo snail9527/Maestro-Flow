@@ -252,6 +252,7 @@ export class CliHistoryStore {
    */
   getOutput(execId: string, options?: {
     includeAll?: boolean;
+    lastReply?: boolean;
     offset?: number;
     limit?: number;
   }): string {
@@ -262,24 +263,33 @@ export class CliHistoryStore {
       return '';
     }
 
-    const { includeAll = false, offset, limit } = options ?? {};
-    const parts: string[] = [];
+    const { includeAll = false, lastReply = false, offset, limit } = options ?? {};
+
+    // Parse entries once
+    const entries: EntryLike[] = [];
     for (const line of raw.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
-        const entry = JSON.parse(trimmed) as EntryLike;
-        if (entry.type === 'assistant_message') {
-          parts.push(String(entry.content ?? ''));
-        } else if (includeAll && entry.type === 'thinking') {
-          parts.push(`[Thinking] ${String(entry.content ?? '')}\n`);
-        }
+        entries.push(JSON.parse(trimmed) as EntryLike);
       } catch {
         // skip
       }
     }
 
-    let result = parts.join('');
+    let result = lastReply
+      ? this.extractLastReply(entries)
+      : this.extractFullOutput(entries, includeAll);
+
+    // Append error summary so critical failures (e.g. MCP 413, stream stale)
+    // are visible regardless of extraction mode (lastReply or fullOutput).
+    const errors = entries
+      .filter((e) => e.type === 'error')
+      .map((e) => String(e.message ?? e.content ?? ''));
+    if (errors.length > 0) {
+      const deduped = [...new Set(errors)];
+      result += `\n\n--- Errors (${deduped.length}) ---\n${deduped.join('\n')}`;
+    }
 
     if (offset !== undefined && offset > 0) {
       result = result.slice(offset);
@@ -289,6 +299,57 @@ export class CliHistoryStore {
     }
 
     return result;
+  }
+
+  /** Extract only the last segment of assistant messages after the last tool/command boundary. */
+  private extractLastReply(entries: EntryLike[]): string {
+    // Split partial assistant messages into segments at boundary entries
+    // (tool_use, command_exec, file_change, user_message).
+    const BOUNDARY_TYPES = new Set(['tool_use', 'command_exec', 'file_change', 'user_message']);
+    const segments: string[][] = [[]];
+    for (const entry of entries) {
+      if (entry.type === 'assistant_message' && entry.partial === true) {
+        segments[segments.length - 1].push(String(entry.content ?? ''));
+      } else if (BOUNDARY_TYPES.has(entry.type)) {
+        segments.push([]);
+      }
+    }
+
+    // Find last non-empty segment
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (segments[i].length > 0) {
+        return segments[i].join('');
+      }
+    }
+
+    // Fallback: if no partial segments, use the last non-partial message
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].type === 'assistant_message' && !entries[i].partial) {
+        return String(entries[i].content ?? '');
+      }
+    }
+
+    return '';
+  }
+
+  /** Extract all assistant output, preferring non-partial messages with partial fallback. */
+  private extractFullOutput(entries: EntryLike[], includeAll: boolean): string {
+    const parts: string[] = [];
+    const partialParts: string[] = [];
+    for (const entry of entries) {
+      if (entry.type === 'assistant_message') {
+        if (entry.partial === true) {
+          partialParts.push(String(entry.content ?? ''));
+        } else {
+          parts.push(String(entry.content ?? ''));
+        }
+      } else if (includeAll && entry.type === 'thinking') {
+        parts.push(`[Thinking] ${String(entry.content ?? '')}\n`);
+      }
+    }
+    // Prefer final (non-partial) messages; fall back to partials when no final
+    // messages exist (e.g. Gemini CLI only emits delta messages).
+    return parts.length > 0 ? parts.join('') : partialParts.join('');
   }
 
   /** Return total character count of assistant output (for pagination metadata). */

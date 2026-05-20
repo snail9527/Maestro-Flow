@@ -4,6 +4,63 @@ Dual verification: Goal-Backward structural verification + Nyquist test coverage
 
 ---
 
+## Iron Law
+
+**NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE IN THIS MESSAGE.**
+
+Before any success/completion claim:
+1. IDENTIFY — What command proves this claim?
+2. RUN — Execute the FULL command (fresh, in this message — never cite prior runs)
+3. READ — Read FULL output, check exit code, count failures
+4. VERIFY — Does the output actually confirm the claim?
+5. ONLY THEN — Make the claim, with evidence inline
+
+---
+
+## Forbidden Wording
+
+These phrases are BANNED in verification reports and completion claims:
+- "Should work now"
+- "Probably passes"
+- "Seems correct"
+- "Looks good"
+- "I'm confident that..."
+- "Based on my review, this is complete"
+- Any expression of satisfaction BEFORE running verification commands
+
+Replace with evidence: `"Tests pass: 42/42 green (exit 0)"`, `"All 5 truths VERIFIED with file:line evidence"`.
+
+---
+
+## Red Flags — These Thoughts Mean STOP
+
+If you catch yourself thinking any of these, STOP and run verification first:
+
+- "I just wrote this code, it definitely works"
+- "The changes are too small to break anything"
+- "I already verified this earlier in the conversation"
+- "The tests passed before, they'll pass now"
+- "I can see from the code that it's correct"
+- "Let me just mark this complete and move on"
+
+All of these mean: **run the verification command NOW, read the output, then report**.
+
+---
+
+## Rationalization Table
+
+| Excuse | Why It's Wrong |
+|--------|----------------|
+| "I just made a one-line change" | One-line changes cause the most insidious bugs |
+| "Tests passed earlier" | Code changed since then — earlier results are stale |
+| "I can read the code is correct" | Reading is not running — subtle runtime errors are invisible in code review |
+| "The build succeeded" | Build success ≠ functional correctness |
+| "It works for the happy path" | Edge cases, error paths, and boundary conditions need verification too |
+| "Verification would take too long" | Skipping verification costs more time when bugs surface later |
+| "The agent said it's done" | Agent reports are claims, not evidence — verify independently |
+
+---
+
 ## Prerequisites
 
 - Phase execution completed (or partially completed)
@@ -42,7 +99,7 @@ Milestone mode creates output dir: .workflow/scratch/verify-{milestone_slug}-{da
 ## V0: Load Project Specs
 
 ```
-specs_content = maestro spec load --category quality
+specs_content = maestro spec load --category review
 ```
 
 Pass specs_content to verifier agent as quality standards context.

@@ -46,6 +46,8 @@ You perform focused code review for a single dimension (e.g., security, performa
 - `phase_context`: Phase goal, success criteria, task descriptions
 - `specs_context`: Project coding conventions, architecture constraints, quality rules (optional)
 - `tech_stack`: Language, framework, test framework (optional)
+- `codebase_context` (optional): `.workflow/codebase/ARCHITECTURE.md` content — component boundaries, layer rules, dependency direction. Use for architecture dimension and cross-referencing layer violations.
+- `wiki_context` (optional): Related wiki entries from `maestro wiki search` — architecture decisions and constraints to evaluate code against.
 
 ## Output
 Return a JSON array of findings:

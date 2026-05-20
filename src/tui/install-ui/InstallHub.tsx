@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { type HookLevel } from '../../commands/hooks.js';
 import { t } from '../../i18n/index.js';
+import { C, SYM, SP, wrapCursor, parseNumberKey, KeyHints, SectionHeader } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // InstallHub — menu hub with status for each install category
@@ -32,9 +33,9 @@ export function InstallHub({ items, onToggle, onEnter, onInstall, onBack }: Inst
 
   useInput((input, key) => {
     if (key.upArrow) {
-      setIndex((i) => (i <= 0 ? totalRows - 1 : i - 1));
+      setIndex((i) => wrapCursor(i, -1, totalRows));
     } else if (key.downArrow) {
-      setIndex((i) => (i >= totalRows - 1 ? 0 : i + 1));
+      setIndex((i) => wrapCursor(i, 1, totalRows));
     } else if (key.return) {
       if (index < items.length) {
         onEnter(items[index].id);
@@ -46,27 +47,27 @@ export function InstallHub({ items, onToggle, onEnter, onInstall, onBack }: Inst
     } else if (key.escape) {
       onBack();
     } else {
-      const num = parseInt(input, 10);
-      if (!isNaN(num) && num >= 1 && num <= items.length) {
-        onToggle(items[num - 1].id);
+      const idx = parseNumberKey(input, items.length);
+      if (idx !== null) {
+        onToggle(items[idx].id);
       }
     }
   });
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">{t.install.hubTitle}</Text>
+      <SectionHeader title={t.install.hubTitle} />
       <Text dimColor>{t.install.hubHint}</Text>
 
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginTop={SP.sectionGap}>
         {items.map((item, i) => {
           const hl = i === index;
           return (
             <Box key={item.id}>
-              <Text color={hl ? 'cyan' : 'gray'}>[{i + 1}]</Text>
-              <Text color={item.enabled ? 'green' : 'gray'}> {item.enabled ? '[x]' : '[ ]'} </Text>
-              <Text color={hl ? 'cyan' : undefined} bold={hl}>
-                {item.label.padEnd(14)}
+              <Text color={hl ? C.primary : C.neutral}>[{i + 1}]</Text>
+              <Text color={item.enabled ? (hl ? C.successBright : C.success) : C.neutral}> {item.enabled ? SYM.checkOn : SYM.checkOff} </Text>
+              <Text color={hl ? C.primary : undefined} bold={hl}>
+                {item.label.padEnd(SP.labelWidth)}
               </Text>
               <Text dimColor>{item.summary}</Text>
             </Box>
@@ -74,18 +75,14 @@ export function InstallHub({ items, onToggle, onEnter, onInstall, onBack }: Inst
         })}
 
         {/* Install action row */}
-        <Box marginTop={1}>
-          <Text color={index === items.length ? 'greenBright' : 'gray'} bold={index === items.length}>
-            {index === items.length ? '>' : ' '} {t.install.hubInstall}
+        <Box marginTop={SP.sectionGap}>
+          <Text color={index === items.length ? C.successBright : C.neutral} bold={index === items.length}>
+            {index === items.length ? SYM.cursor : SYM.cursorBlank} {t.install.hubInstall}
           </Text>
         </Box>
       </Box>
 
-      <Box marginTop={1}>
-        <Text dimColor>
-          [Space/1-{items.length}] Toggle  [Enter] Configure / Install  [Esc] Back
-        </Text>
-      </Box>
+      <KeyHints hints={`[Space/1-${items.length}] Toggle  [Enter] Configure / Install  [Esc] Back`} />
     </Box>
   );
 }
@@ -95,10 +92,12 @@ export function InstallHub({ items, onToggle, onEnter, onInstall, onBack }: Inst
 // ---------------------------------------------------------------------------
 
 export function buildHubItems(
-  enabled: { components: boolean; hooks: boolean; mcp: boolean; statusline: boolean; backup: boolean },
+  enabled: { components: boolean; hooks: boolean; mcp: boolean; codexHooks: boolean; codexMcp: boolean; extraMcp: boolean; statusline: boolean; backup: boolean },
   summaries: {
     componentCount: number; fileCount: number; hookLevel: HookLevel;
     mcpToolCount: number; mcpEnabled: boolean;
+    codexHookLevel: HookLevel; codexMcpToolCount: number; codexMcpEnabled: boolean;
+    extraMcpTargetCount: number;
     statuslineDetected: string | null;
     backupClaudeMd: boolean; backupAll: boolean;
   },
@@ -140,6 +139,30 @@ export function buildHubItems(
       enabled: enabled.mcp,
       summary: enabled.mcp && summaries.mcpEnabled
         ? t.install.hubTools.replace('{count}', String(summaries.mcpToolCount))
+        : t.install.hubSkipped,
+    },
+    {
+      id: 'codexHooks',
+      label: 'Codex Hooks',
+      enabled: enabled.codexHooks,
+      summary: enabled.codexHooks
+        ? `${summaries.codexHookLevel} — ${t.install.codexHooksLevelDescriptions[summaries.codexHookLevel]}`
+        : t.install.hubSkipped,
+    },
+    {
+      id: 'codexMcp',
+      label: 'Codex MCP',
+      enabled: enabled.codexMcp,
+      summary: enabled.codexMcp && summaries.codexMcpEnabled
+        ? t.install.hubTools.replace('{count}', String(summaries.codexMcpToolCount))
+        : t.install.hubSkipped,
+    },
+    {
+      id: 'extraMcp',
+      label: 'Extra MCP (Cursor/Qoder/Trae/Kiro/Roo/VS Code/Gemini)',
+      enabled: enabled.extraMcp,
+      summary: enabled.extraMcp && summaries.extraMcpTargetCount > 0
+        ? `${summaries.extraMcpTargetCount} target(s)`
         : t.install.hubSkipped,
     },
     {

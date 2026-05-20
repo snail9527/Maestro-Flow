@@ -1,7 +1,7 @@
 ---
 name: manage-knowhow
-description: Manage memory entries — workflow memory (.workflow/knowhow/) and system memory (~/.claude/projects/*/memory/)
-argument-hint: "[list|search|view|edit|delete|prune] [query|id|file] [--store workflow|system|all] [--tag tag] [--type compact|tip]"
+description: Manage knowhow entries (workflow and system)
+argument-hint: "<subcommand: list|search|view|edit|delete|prune> [query|id] [--store workflow|system|all] [--tag <tag>] [--type compact|tip]"
 allowed-tools:
   - Read
   - Write

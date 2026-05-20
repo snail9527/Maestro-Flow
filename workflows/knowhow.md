@@ -30,7 +30,7 @@ Six types of knowhow, each with dedicated structure:
 | `decision` | DCS- | Architecture Decision Record | Making non-trivial design choices |
 | `tip` | TIP- | Quick note, snippet, reminder | Fleeting insight, debugging trick |
 
-All types share `WikiNodeType = 'knowhow'`. The `category` field distinguishes subtypes in wiki queries.
+All types share `WikiNodeType = 'knowhow'`. The `type` field distinguishes subtypes in wiki queries.
 
 ---
 
@@ -60,7 +60,7 @@ Verify stores exist. Neither → E001.
 
 ### Step 3: List
 
-Workflow: `maestro wiki list --type knowhow --json`, filter by `--tag`, `--type`, `--category`.
+Workflow: `maestro wiki list --type knowhow --json`, filter by `--keywords`, `--type`, `--role`.
 System: Glob `*.md` files, extract titles.
 
 Display: ID/File, Type, Category, Date, Tags, Summary with navigation hints.
@@ -123,7 +123,6 @@ Reusable code or configuration pattern. Sections:
 ---
 title: {descriptive name}
 type: template
-category: template
 lang: {typescript|python|bash|yaml|...}
 tags: [{comma-separated}]
 created: {ISO timestamp}
@@ -166,7 +165,6 @@ Step-by-step operational guide. Sections:
 ---
 title: {goal summary}
 type: recipe
-category: recipe
 tags: [{comma-separated}]
 created: {ISO timestamp}
 ---
@@ -211,7 +209,6 @@ External documentation digest. Sections:
 ---
 title: {reference title}
 type: reference
-category: reference
 source: {original URL}
 tags: [{comma-separated}]
 created: {ISO timestamp}
@@ -254,7 +251,6 @@ Architecture Decision Record. Sections:
 ---
 title: {decision summary}
 type: decision
-category: decision
 status: {proposed|accepted|superseded}
 tags: [{comma-separated}]
 created: {ISO timestamp}
@@ -304,7 +300,6 @@ Quick note. Minimal structure:
 ---
 title: {tip summary}
 type: tip
-category: tip
 tags: [{comma-separated}]
 created: {ISO timestamp}
 ---
@@ -317,7 +312,21 @@ created: {ISO timestamp}
 {Auto-detected files/modules}
 ```
 
-### Step 3: Write File
+### Step 3: Generate Tags (Language-Aware)
+
+Auto-generate 3-5 tags matching the **content language**:
+
+- **Chinese content** → Chinese tags (2-4 字词语，如 `认证`, `路由`, `状态管理`)
+- **English content** → English tags (lowercase, hyphenated, e.g. `auth`, `routing`, `state-mgmt`)
+- **Mixed content** → Bilingual tags (中英各半，如 `认证,auth,令牌,token`)
+
+Tag quality rules:
+- Domain-specific terms users would naturally search for
+- Avoid generic words (代码/code, 文件/file, 函数/function)
+- Chinese tags: 2-4 characters, no punctuation
+- English tags: lowercase, hyphens for multi-word
+
+### Step 4: Write File
 
 Write to `.workflow/knowhow/{PREFIX}-{YYYYMMDD}-{HHMM}.md`.
 
@@ -327,7 +336,6 @@ Frontmatter keys by type:
 |-------|:-------:|:--------:|:------:|:---------:|:--------:|:---:|
 | title | Y | Y | Y | Y | Y | Y |
 | type | Y | Y | Y | Y | Y | Y |
-| category | Y | Y | Y | Y | Y | Y |
 | tags | Y | Y | Y | Y | Y | Y |
 | created | Y | Y | Y | Y | Y | Y |
 | lang | | Y | | | | |
@@ -352,7 +360,7 @@ maestro knowhow search "deploy auth"    # full-text
 maestro knowhow get knowhow-{slug}      # view one
 
 maestro wiki list --type knowhow --json # programmatic
-maestro wiki list --type knowhow --category decision  # decisions only
+maestro wiki list --type knowhow --role plan  # decisions only
 ```
 
 ### MCP
@@ -364,11 +372,78 @@ store_knowhow { operation: "add", type: "template", title: "...", body: "..." }
 
 ### Type Label Reference
 
-| Wiki type | Category | Prefix | Label |
-|-----------|----------|--------|-------|
+| Wiki type | Type | Prefix | Label |
+|-----------|------|--------|-------|
 | knowhow | session | KNW- | Session |
 | knowhow | tip | TIP- | Tip |
 | knowhow | template | TPL- | Template |
 | knowhow | recipe | RCP- | Recipe |
 | knowhow | reference | REF- | Reference |
 | knowhow | decision | DCS- | Decision |
+| spec | learning | — | Learning Insight (in `specs/learnings.md`) |
+
+---
+
+## Part D: Learning Insights Container (specs/learnings.md)
+
+A special container file at `.workflow/specs/learnings.md` holds multiple `<spec-entry>` sub-entries for atomic learning insights. This replaces the former `lessons.jsonl` approach.
+
+### Container Format
+
+```markdown
+---
+title: "Learning Insights"
+type: spec
+roles: [implement]
+tags: [insights, learning]
+created: {ISO timestamp}
+---
+# Learning Insights
+
+Atomic insights captured during active work.
+
+## Entries
+
+<spec-entry category="coding" keywords="pattern,auth,jwt" date="2026-05-10" id="INS-abc123" source="manual">
+
+### JWT refresh tokens must rotate on every use
+
+Refresh-on-use prevents replay attacks.
+
+- **Phase**: 1 (01-auth)
+- **Confidence**: high
+- **Tags**: auth, jwt, security
+
+</spec-entry>
+
+<spec-entry category="debug" keywords="gotcha,redis,cache" date="2026-05-11" id="INS-def456" source="retrospective">
+
+### Redis MULTI is not truly transactional
+
+MULTI/EXEC guarantees atomicity but not isolation...
+
+- **Phase**: 2 (02-cache)
+- **Lens**: technical
+- **Confidence**: medium
+
+</spec-entry>
+```
+
+### Producers
+
+Multiple workflows append `<spec-entry>` blocks to this container:
+
+| Workflow | Source value | When |
+|----------|-------------|------|
+| `manage-learn` | `manual` or `tip` | Manual capture during active work |
+| `quality-retrospective` | `retrospective` | Phase retrospective insight distillation |
+| `learn-retro` | `retro-git` or `retro-decision` | Retrospective from git activity or decisions |
+| `wiki-connect` | `wiki-connect` | Graph connectivity insights |
+| `wiki-digest` | `wiki-digest` | Knowledge synthesis meta-insights |
+
+### Retrieval
+
+```bash
+maestro wiki list --type knowhow --role implement    # list all insights
+maestro wiki search "<query>"                           # full-text search
+```

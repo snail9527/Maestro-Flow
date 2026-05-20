@@ -93,7 +93,123 @@ async function copyToClipboard(text: string) {
   }
 }
 
-function ConversationList() {
+// ---------------------------------------------------------------------------
+// SessionFilesPanel — files touched in the active session
+// ---------------------------------------------------------------------------
+
+interface SessionFile {
+  path: string;
+  name: string;
+  ops: Set<'R' | 'M' | 'C' | 'D'>;
+}
+
+const FILE_TOOLS: Record<string, 'R' | 'M' | 'C'> = {
+  Read: 'R', Glob: 'R', Grep: 'R',
+  Edit: 'M', Write: 'C', NotebookEdit: 'M',
+};
+
+function extractSessionFiles(entries: NormalizedEntry[]): SessionFile[] {
+  const map = new Map<string, Set<'R' | 'M' | 'C' | 'D'>>();
+
+  for (const entry of entries) {
+    if (entry.type === 'tool_use') {
+      const op = FILE_TOOLS[entry.name];
+      if (!op) continue;
+      const p = (entry.input?.file_path ?? entry.input?.path) as string | undefined;
+      if (!p || typeof p !== 'string') continue;
+      const existing = map.get(p);
+      if (existing) existing.add(op);
+      else map.set(p, new Set([op]));
+    } else if (entry.type === 'file_change') {
+      const op = entry.action === 'create' ? 'C' : entry.action === 'delete' ? 'D' : 'M';
+      const existing = map.get(entry.path);
+      if (existing) existing.add(op);
+      else map.set(entry.path, new Set([op]));
+    }
+  }
+
+  return [...map.entries()].map(([path, ops]) => ({
+    path,
+    name: path.split(/[\\/]/).pop() ?? path,
+    ops,
+  }));
+}
+
+const OP_STYLES: Record<string, { color: string; bg: string }> = {
+  R: { color: 'var(--color-accent-blue)', bg: 'rgba(91,141,184,0.12)' },
+  M: { color: 'var(--color-accent-yellow)', bg: 'rgba(184,149,64,0.12)' },
+  C: { color: 'var(--color-accent-green)', bg: 'rgba(90,158,120,0.12)' },
+  D: { color: 'var(--color-accent-red)', bg: 'rgba(196,101,85,0.12)' },
+};
+
+function SessionFilesPanel({ onSelectFile }: { onSelectFile: (path: string) => void }) {
+  const activeProcessId = useAgentStore((s) => s.activeProcessId);
+  const entries = useAgentStore((s) => activeProcessId ? s.entries[activeProcessId] : undefined);
+  const [collapsed, setCollapsed] = useState(false);
+
+  const files = useMemo(() => {
+    if (!entries) return [];
+    return extractSessionFiles(entries);
+  }, [entries]);
+
+  if (!activeProcessId || files.length === 0) return null;
+
+  const modifiedCount = files.filter((f) => f.ops.has('M') || f.ops.has('C')).length;
+
+  return (
+    <div className="mt-1 border-t" style={{ borderColor: 'var(--color-border-divider)' }}>
+      <button
+        type="button"
+        onClick={() => setCollapsed((v) => !v)}
+        className="flex items-center gap-[4px] w-full border-none bg-transparent cursor-pointer text-left"
+        style={{ padding: '5px 6px', fontFamily: 'inherit' }}
+      >
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="var(--color-text-tertiary)" style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)', transition: 'transform 100ms' }}>
+          <path d="M2 1l4 3-4 3z" />
+        </svg>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }}>
+          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" />
+        </svg>
+        <span className="text-[9px] font-semibold uppercase tracking-[0.04em] flex-1" style={{ color: 'var(--color-text-tertiary)' }}>
+          Session Files ({files.length})
+        </span>
+        {modifiedCount > 0 && (
+          <span className="text-[9px] font-medium px-[4px] rounded" style={{ backgroundColor: 'var(--color-tint-executing)', color: 'var(--color-accent-yellow)' }}>
+            {modifiedCount} modified
+          </span>
+        )}
+      </button>
+      {!collapsed && (
+        <div className="flex flex-col gap-px pb-1">
+          {files.map((file) => (
+            <button
+              key={file.path}
+              type="button"
+              onClick={() => onSelectFile(file.path)}
+              className="flex items-center gap-[5px] w-full rounded-[4px] border-none bg-transparent cursor-pointer text-left transition-colors duration-75"
+              style={{ padding: '3px 7px', fontFamily: 'inherit', color: 'var(--color-text-primary)' }}
+              title={file.path}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--color-bg-hover)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
+            >
+              <FileIcon />
+              <span className="flex-1 min-w-0 text-[11px] truncate">{file.name}</span>
+              <span className="flex gap-[2px] shrink-0">
+                {[...file.ops].map((op) => (
+                  <span key={op} className="text-[8px] font-bold px-[3px] rounded-[2px]" style={{ color: OP_STYLES[op].color, backgroundColor: OP_STYLES[op].bg }}>
+                    {op}
+                  </span>
+                ))}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConversationList({ searchQuery }: { searchQuery?: string }) {
   const processes = useAgentStore((s) => s.processes);
   const setActiveProcessId = useAgentStore((s) => s.setActiveProcessId);
   const activeProcessId = useAgentStore((s) => s.activeProcessId);
@@ -239,11 +355,21 @@ function ConversationList() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const processTitlesForFilter = useAgentStore((s) => s.processTitles);
+
   const { active, completed } = useMemo(() => {
+    const q = searchQuery?.trim().toLowerCase();
     const all = Object.values(processes);
     const activeList: AgentProcess[] = [];
     const completedList: AgentProcess[] = [];
     for (const p of all) {
+      // Filter by search query if present
+      if (q) {
+        const title = processTitlesForFilter[p.id] ?? p.config?.prompt?.slice(0, 80) ?? '';
+        const label = AGENT_LABELS[p.type] ?? p.type;
+        const haystack = `${title} ${label} ${p.type}`.toLowerCase();
+        if (!haystack.includes(q)) continue;
+      }
       if (p.status === 'running' || p.status === 'spawning') {
         activeList.push(p);
       } else {
@@ -254,14 +380,30 @@ function ConversationList() {
     activeList.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
     completedList.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
     return { active: activeList, completed: completedList };
-  }, [processes]);
+  }, [processes, searchQuery, processTitlesForFilter]);
 
   const hasSelection = selectedProcessIds.size > 0;
 
   if (active.length === 0 && completed.length === 0) {
     return (
-      <div className="px-[10px] py-[20px] text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-        No conversations yet
+      <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-text-placeholder)', opacity: 0.6 }}>
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        <div>
+          <div className="text-[12px] font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+            No sessions yet
+          </div>
+          <div className="text-[10px] leading-relaxed" style={{ color: 'var(--color-text-tertiary)' }}>
+            Start an agent session from the Kanban board, or use the CLI to delegate tasks.
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5 w-full mt-1">
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-[10px]" style={{ backgroundColor: 'var(--color-bg-hover)' }}>
+            <span style={{ color: 'var(--color-text-placeholder)' }}>Tip</span>
+            <span style={{ color: 'var(--color-text-tertiary)' }}>Ctrl+Click to multi-select sessions</span>
+          </div>
+        </div>
       </div>
     );
   }
@@ -383,6 +525,26 @@ function ConversationItem({
   const [renameValue, setRenameValue] = useState('');
   const renameRef = useRef<HTMLInputElement>(null);
   const processTitles = useAgentStore((s) => s.processTitles);
+  const entries = useAgentStore((s) => s.entries[process.id]);
+
+  // Compute summary stats from entries
+  const stats = useMemo(() => {
+    if (!entries) return null;
+    let fileCount = 0;
+    let tokens = 0;
+    const seenPaths = new Set<string>();
+    for (const e of entries) {
+      if (e.type === 'tool_use' && FILE_TOOLS[e.name]) {
+        const p = (e.input?.file_path ?? e.input?.path) as string | undefined;
+        if (p && !seenPaths.has(p)) { seenPaths.add(p); fileCount++; }
+      } else if (e.type === 'file_change' && !seenPaths.has(e.path)) {
+        seenPaths.add(e.path); fileCount++;
+      } else if (e.type === 'token_usage') {
+        tokens = e.inputTokens + e.outputTokens;
+      }
+    }
+    return { fileCount, tokens };
+  }, [entries]);
 
   const isRunning = process.status === 'running' || process.status === 'spawning';
   const dotColor = isRunning
@@ -486,8 +648,19 @@ function ConversationItem({
                 {loading ? 'Loading...' : title}
               </div>
             )}
-            <div className="text-[9px]" style={{ color: 'var(--color-text-tertiary)' }}>
-              {formatTimeAgo(process.startedAt)} &middot; {agentLabel.toLowerCase()}
+            <div className="flex items-center gap-[4px] text-[9px]" style={{ color: 'var(--color-text-tertiary)' }}>
+              <span>{formatTimeAgo(process.startedAt)} &middot; {agentLabel.toLowerCase()}</span>
+              {stats && stats.fileCount > 0 && (
+                <span className="flex items-center gap-[2px] ml-auto shrink-0" style={{ color: 'var(--color-text-placeholder)' }}>
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /></svg>
+                  {stats.fileCount}
+                </span>
+              )}
+              {stats && stats.tokens > 0 && (
+                <span className="shrink-0" style={{ color: 'var(--color-text-placeholder)' }}>
+                  {stats.tokens > 1000 ? `${(stats.tokens / 1000).toFixed(0)}k` : stats.tokens}t
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -654,7 +827,12 @@ export function ChatSidebar() {
 
       {/* View body */}
       <div className="flex-1 overflow-y-auto px-[6px] pb-[8px]">
-        {activeTab === 'chat' && <ConversationList />}
+        {activeTab === 'chat' && (
+          <>
+            <ConversationList searchQuery={searchQuery} />
+            <SessionFilesPanel onSelectFile={handleSelectFile} />
+          </>
+        )}
         {activeTab === 'files' && (
           <TreeBrowser
             tree={workspace.tree}

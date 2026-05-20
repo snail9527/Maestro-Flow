@@ -22,6 +22,8 @@ export interface AgentSettingsEntry {
 export interface GeneralSettings {
   theme: 'system' | 'dark' | 'light';
   language: 'en' | 'zh-CN';
+  /** Navigation paths hidden from dock rail and sidebar */
+  hiddenNavItems?: string[];
 }
 
 /** Linear integration settings */
@@ -83,7 +85,7 @@ const DEFAULT_AGENTS: Record<AgentType, AgentSettingsEntry> = {
 };
 
 const DEFAULT_CONFIG: SettingsConfig = {
-  general: { theme: 'system', language: 'en' },
+  general: { theme: 'system', language: 'en', hiddenNavItems: ['/maestro-coordinate', '/requirement', '/rooms'] },
   agents: DEFAULT_AGENTS,
   cliTools: '{}',
   linear: { apiKey: '' },
@@ -135,7 +137,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         safety: { ...DEFAULT_COMMANDER_CONFIG.safety, ...rawCommander?.safety } as CommanderSafetyConfig,
         workspace: { ...DEFAULT_COMMANDER_CONFIG.workspace, ...rawCommander?.workspace } as WorkspacePolicy,
       };
-      const config: SettingsConfig = { ...DEFAULT_CONFIG, ...data, agents: mergedAgents, searchTool, commander };
+      const general: GeneralSettings = { ...DEFAULT_CONFIG.general, ...(data.general as Partial<GeneralSettings>) };
+      const config: SettingsConfig = { ...DEFAULT_CONFIG, ...data, general, agents: mergedAgents, searchTool, commander };
       set({ config, draft: deepClone(config), loading: false });
     } catch (err) {
       const config = deepClone(DEFAULT_CONFIG);

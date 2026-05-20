@@ -7,7 +7,7 @@ function makePhaseCard(phase: number, overrides: Partial<PhaseCard> = {}): Phase
     phase,
     slug: `phase-${phase}`,
     title: `Phase ${phase}`,
-    status: 'pending',
+    status: 'not_started',
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     goal: 'Test goal',

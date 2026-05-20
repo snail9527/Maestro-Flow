@@ -90,3 +90,49 @@ export function appendSpecEntry(
 
   return { ok: true, file: filePath, category, title, duplicate: false };
 }
+
+/**
+ * Append a spec index entry that references a knowhow document.
+ * The entry body is a summary, with a ref attribute pointing to the knowhow file.
+ */
+export function appendSpecEntryWithRef(
+  projectPath: string,
+  category: SpecCategory,
+  title: string,
+  summary: string,
+  keywords: string[],
+  ref: string,
+  source?: string,
+  scope?: SpecScope,
+  uid?: string,
+): SpecAddResult {
+  const specsDir = resolveSpecDir(projectPath, scope ?? 'project', uid);
+
+  const filename = categoryToFilename(category);
+  if (!filename) {
+    return { ok: false, file: '', category, title, duplicate: false };
+  }
+
+  if (!existsSync(specsDir)) {
+    mkdirSync(specsDir, { recursive: true });
+  }
+
+  const filePath = join(specsDir, filename);
+
+  if (!existsSync(filePath)) {
+    const headerTitle = filename.replace('.md', '').split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+    writeFileSync(filePath, `# ${headerTitle}\n\n## Entries\n\n`, 'utf-8');
+  }
+
+  const existing = readFileSync(filePath, 'utf-8');
+
+  if (existing.toLowerCase().includes(title.toLowerCase())) {
+    return { ok: true, file: filePath, category, title, duplicate: true };
+  }
+
+  const date = new Date().toISOString().slice(0, 10);
+  const entry = formatNewEntry(category, keywords, date, title, summary, source, ref);
+  writeFileSync(filePath, existing + '\n\n' + entry, 'utf-8');
+
+  return { ok: true, file: filePath, category, title, duplicate: false };
+}

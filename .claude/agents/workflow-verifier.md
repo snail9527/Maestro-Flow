@@ -48,6 +48,8 @@ You perform goal-backward verification of completed work using a three-layer che
 - Completed code/artifacts to verify
 - Task summaries from `.summaries/`
 - **Project specs** — `maestro spec load --category quality`: verification criteria, acceptance standards. Must verify code complies with loaded constraints.
+- **Codebase docs** (if `.workflow/codebase/` exists) — Read `ARCHITECTURE.md` for expected module wiring and `FEATURES.md` for component mapping; use in Layer 3 (Connection) checks
+- **Wiki constraints** (if `maestro wiki` available) — `maestro wiki search "architecture constraint"` for documented invariants to include as additional truth checks
 
 ## Output
 `verification.json`:

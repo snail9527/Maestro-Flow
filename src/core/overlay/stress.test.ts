@@ -28,11 +28,17 @@ import { tmpdir } from 'node:os';
 
 // `paths.home` is frozen at module import time from MAESTRO_HOME env.
 // Mock it so each test gets a fresh temp-based home directory.
+// Also mock manifest.js to prevent eager paths.home evaluation via
+// the applier → tag-injector → manifest import chain.
 let mockHome: string;
 vi.mock('../../config/paths.js', () => ({
   paths: {
     get home() { return mockHome; },
   },
+}));
+vi.mock('../manifest.js', () => ({
+  addFile: () => {},
+  addDir: () => {},
 }));
 
 import {
@@ -301,11 +307,11 @@ describe('stress: overlay pipeline', () => {
 
     const body = readFileSync(join(commandsDir, 'target-1.md'), 'utf-8');
 
-    // Sort (priority asc, name asc) — that's the expected application order,
-    // which for append means earlier = further from </execution> (higher in file).
+    // Sort (priority desc, name asc) — applier sorts by priority descending,
+    // so high-priority overlays are processed first and appear first in file.
     const indexed = priorities
       .map((p, i) => ({ p, name: `p${String(i).padStart(2, '0')}`, tag: `TAG-${i}-prio-${p}` }))
-      .sort((a, b) => (a.p - b.p) || a.name.localeCompare(b.name));
+      .sort((a, b) => (b.p - a.p) || a.name.localeCompare(b.name));
 
     const positions = indexed.map((x) => body.indexOf(x.tag));
     for (const pos of positions) expect(pos).toBeGreaterThan(-1);

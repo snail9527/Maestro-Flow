@@ -3,6 +3,7 @@ import { Box, Text, useStdout } from 'ink';
 import { existsSync } from 'node:fs';
 import { COMPONENT_DEFS } from '../../commands/install-backend.js';
 import { buildTree } from './BlueprintPreview.logic.js';
+import { C, BORDER } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // BlueprintPreview -- live file tree showing what will be installed
@@ -17,9 +18,9 @@ interface BlueprintPreviewProps {
 }
 
 const STATUS_COLOR: Record<FileStatus, string> = {
-  new: 'cyan',
-  exists: 'yellow',
-  preserved: 'gray',
+  new: C.primary,
+  exists: C.warning,
+  preserved: C.neutral,
 };
 
 export function BlueprintPreview({ mode, projectPath, selectedIds }: BlueprintPreviewProps) {
@@ -56,7 +57,7 @@ export function BlueprintPreview({ mode, projectPath, selectedIds }: BlueprintPr
   if (selectedIds.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text bold color="cyan">Blueprint</Text>
+        <Text bold color={C.primary}>Blueprint</Text>
         <Box marginTop={1}>
           <Text dimColor>No components selected</Text>
         </Box>
@@ -79,7 +80,7 @@ export function BlueprintPreview({ mode, projectPath, selectedIds }: BlueprintPr
         ? `(${entry.fileCount} files)`
         : `(${entry.label})`;
       const status = (entry as any).status as FileStatus | undefined;
-      const color = status ? STATUS_COLOR[status] : 'cyan';
+      const color = status ? STATUS_COLOR[status] : C.primary;
       lines.push({
         text: `  ${branch} ${entry.subPath} ${fileStr}`,
         color,
@@ -93,11 +94,11 @@ export function BlueprintPreview({ mode, projectPath, selectedIds }: BlueprintPr
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text bold color="cyan">Blueprint</Text>
+      <Text bold color={C.primary}>Blueprint</Text>
       <Box
         flexDirection="column"
         borderStyle="round"
-        borderColor="gray"
+        borderColor={C.neutral}
         paddingX={1}
         marginTop={1}
       >

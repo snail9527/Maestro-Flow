@@ -17,12 +17,10 @@ export default function GuidesIndexPage() {
       {/* Header */}
       <div className="mb-[var(--spacing-8)]">
         <h1 className="text-[length:28px] font-[var(--font-weight-bold)] text-text-primary mb-[var(--spacing-2)] leading-[1.3]">
-          {isZh ? '指南' : 'Guides'}
+          {t('guides.title')}
         </h1>
         <p className="text-[length:var(--font-size-md)] text-text-secondary leading-[var(--line-height-relaxed)] max-w-[520px]">
-          {isZh
-            ? '深入了解 Maestro 的各个子系统 — 命令体系、Overlay 扩展、团队协作、并行开发等'
-            : 'Deep-dive guides into Maestro subsystems — commands, overlays, team collaboration, parallel development, and more'}
+          {t('guides.description')}
         </p>
       </div>
 

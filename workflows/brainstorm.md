@@ -287,6 +287,32 @@ Seven sub-phases producing guidance-specification.md:
 
 **Output**: `{output_dir}/guidance-specification.md`, session metadata (workflow-session.json)
 
+### Step 3.5: Visual Style Foundation (Auto Mode, conditional)
+
+When `ui-designer` is among the selected roles, establish the project's visual direction before role analysis begins. This ensures all downstream UX analysis works within a confirmed design system.
+
+**Condition**: Skip if `.workflow/impeccable/DESIGN.md` already exists (visual direction already locked).
+
+**Execution** (sequential):
+
+1. **Product context** — if `.workflow/impeccable/PRODUCT.md` missing:
+   ```
+   Skill({ skill: "maestro-impeccable", args: "teach" })
+   ```
+   This runs the teach interview to establish brand, users, personality, anti-references.
+
+2. **Visual exploration** — multi-style comparison and selection:
+   ```
+   Skill({ skill: "maestro-impeccable", args: "explore" })
+   ```
+   This generates multiple design system variants as HTML prototypes, launches visual comparison, and lets the user select/mix. Produces DESIGN.md on completion.
+
+3. Record in session metadata: `design_system_established: true`, `design_md_path: ".workflow/impeccable/DESIGN.md"`
+
+**`--yes` mode**: `explore` auto-selects variant 1 without visual comparison. `teach` still requires minimal input if PRODUCT.md is missing.
+
+**Skip mode**: If user explicitly passes `--skip-design` to brainstorm, skip this step entirely. ui-designer role will generate its own independent theme in Phase 2.
+
 ### Step 4: Parallel Role Analysis (Auto Mode)
 
 For EACH selected role, spawn a conceptual-planning-agent in parallel:
@@ -331,7 +357,7 @@ Each agent receives:
 
 ### Step 5: Synthesis Integration (Auto Mode)
 
-Six sub-phases producing feature specs from cross-role analysis:
+Seven sub-phases producing feature specs from cross-role analysis:
 
 **Sub-phase 1: Discovery**
 - Detect session, validate analysis files exist
@@ -348,6 +374,16 @@ Six sub-phases producing feature specs from cross-role analysis:
 - Input: analysis index files (feature mode) or all analysis files (fallback)
 - Output: `enhancement_recommendations` (EP-001, EP-002, ...) + `feature_conflict_map` (per-feature consensus/conflicts/cross_refs)
 - Conflict resolution quality: actionable, justified ("because...tradeoff:..."), scoped, confidence-tagged ([RESOLVED]|[SUGGESTED]|[UNRESOLVED])
+
+**Sub-phase 3B: Brainstorm Confidence Scoring**
+
+Compute after cross-role analysis, before user interaction. Dimensions (5): role_coverage, cross_role_consistency, feature_completeness, spec_quality, design_feasibility. Factors (weights): analysis_depth(.30), evidence_strength(.25), coverage_breadth(.20), user_validation(.15), consistency(.10).
+
+Scoring points: per-role completion → `role_coverage`; after cross-role → `cross_role_consistency`; after user interaction → `user_validation`.
+
+**Quality mechanisms**: Pressure Pass (before spec gen) — verify claims backed by ≥2 role analyses. Devil's Advocate — challenge when dimension > 0.7. Conflict Detection (replaces stall) — >3 `[UNRESOLVED]` conflicts → challenge.
+
+**Readiness Gate** (before Sub-phase 4): Block if role_coverage < 100% | cross_role_consistency < 40% | feature_completeness below intent count | no pressure pass. If blocked → AskUserQuestion: fill gaps or proceed with residual risks. Append confidence summary to synthesis-changelog.md.
 
 **Sub-phase 4: User Interaction**
 - Enhancement selection: AskUserQuestion (multiSelect=true, batched by 4)

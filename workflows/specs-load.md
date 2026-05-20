@@ -5,12 +5,12 @@ Load spec files filtered by category. Supports project, global, team, and person
 ## Arguments
 
 ```
-$ARGUMENTS: "[--scope <scope>] [--uid <uid>] [--category <type>] [keyword]"
+$ARGUMENTS: "[--scope <scope>] [--uid <uid>] [--category <category>] [keyword]"
 
 --scope     -- load scope: project (default) | global | team | personal
 --uid       -- user id for personal scope (auto-detected from git if omitted)
---category  -- filter by category (1:1 mapping to file):
-               coding | arch | quality | debug | test | review | learning | all
+--category  -- filter by category: coding | arch | test | review | debug | quality | learning | ui
+               Loads category's primary doc in full + cross-file entries with matching category attr
 keyword     -- optional, grep within loaded specs for matching sections
 ```
 
@@ -18,16 +18,18 @@ keyword     -- optional, grep within loaded specs for matching sections
 
 Each category loads exactly one file per layer. Same mapping as spec-add.
 
-| Category | File loaded |
-|----------|------------|
-| `coding` | `coding-conventions.md` |
-| `arch` | `architecture-constraints.md` |
-| `quality` | `quality-rules.md` |
-| `debug` | `debug-notes.md` |
-| `test` | `test-conventions.md` |
-| `review` | `review-standards.md` |
-| `learning` | `learnings.md` |
-| `all` (default) | All `.md` files in specs/ |
+## File → Primary Category Mapping
+
+| File | Category |
+|------|----------|
+| `coding-conventions.md` | coding |
+| `architecture-constraints.md` | arch |
+| `test-conventions.md` | test |
+| `review-standards.md` | review |
+| `debug-notes.md` | debug |
+| `quality-rules.md` | quality |
+| `learnings.md` | learning |
+| `ui-conventions.md` | ui |
 
 ## Layer Order by Scope
 
@@ -44,7 +46,7 @@ Each layer is prefixed with a section header when multi-layer.
 
 ### Step 1: Parse Arguments
 
-Extract `--scope`, `--uid`, `--category <type>` and remaining text (keyword for grep).
+Extract `--scope`, `--uid`, `--category <category>` and remaining text (keyword for grep).
 
 ### Step 2: Load Specs via CLI
 

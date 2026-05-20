@@ -12,12 +12,10 @@ interface PipelineFlowProps {
 
 const STATUS_LABELS: Record<PhaseStatus, string> = {
   not_started: 'Pending',
-  pending: 'Pending',
-  exploring: 'Explore',
   planning: 'Plan',
   executing: 'Execute',
   verifying: 'Verify',
-  testing: 'Test',
+  reviewing: 'Review',
   completed: 'Done',
   blocked: 'Blocked',
 };
@@ -32,8 +30,7 @@ function isPhaseActive(status: PhaseStatus): boolean {
 
 function nodeOpacity(status: PhaseStatus): number {
   if (isPhaseCompleted(status) || isPhaseActive(status)) return 1;
-  if (status === 'verifying' || status === 'testing' || status === 'planning') return 0.7;
-  if (status === 'exploring') return 0.5;
+  if (status === 'verifying' || status === 'reviewing' || status === 'planning') return 0.7;
   return 0.4;
 }
 

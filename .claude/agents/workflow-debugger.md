@@ -48,6 +48,8 @@ Each line in evidence.ndjson:
 - Codebase access for investigation and fixing
 - Prior debug sessions from `.debug/` (if any)
 - **Project specs** — `maestro spec load --category debug`: known issues, root causes, workarounds. Check before forming hypotheses to avoid re-investigating known problems.
+- **Codebase docs** (if `.workflow/codebase/` exists) — Read `ARCHITECTURE.md` for module boundaries to scope impact analysis and form better hypotheses
+- **Wiki prior knowledge** (if `maestro wiki` available) — `maestro wiki search "<symptom keywords>"` for prior investigations on similar issues; skip already-documented root causes
 
 ## Output
 - Debug session directory with:

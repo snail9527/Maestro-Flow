@@ -6,11 +6,11 @@ import { STATUS_COLORS } from '@/shared/constants.js';
 // ---------------------------------------------------------------------------
 
 const PIPELINE_STAGES: Array<{ status: PhaseStatus; label: string }> = [
-  { status: 'pending', label: 'Pending' },
-  { status: 'exploring', label: 'Exploring' },
+  { status: 'not_started', label: 'Pending' },
   { status: 'planning', label: 'Planning' },
   { status: 'executing', label: 'Executing' },
   { status: 'verifying', label: 'Verifying' },
+  { status: 'reviewing', label: 'Reviewing' },
   { status: 'completed', label: 'Complete' },
 ];
 
@@ -21,15 +21,6 @@ interface PipelineHeaderProps {
 }
 
 function countByStatus(phases: PhaseCard[], status: PhaseStatus): number {
-  if (status === 'completed') {
-    return phases.filter((p) => p.status === 'completed').length;
-  }
-  if (status === 'verifying') {
-    return phases.filter((p) => p.status === 'verifying' || p.status === 'testing').length;
-  }
-  if (status === 'pending') {
-    return phases.filter((p) => p.status === 'pending' || p.status === 'not_started').length;
-  }
   return phases.filter((p) => p.status === status).length;
 }
 

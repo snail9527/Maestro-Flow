@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { C, SYM, SP, wrapCursor, parseNumberKey, KeyHints, SectionHeader } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // StepSelector — checkbox multi-select for install steps
@@ -23,9 +24,9 @@ export function StepSelector({ steps, selectedIds, onSelectionChange, onDone }: 
 
   useInput((input, key) => {
     if (key.upArrow) {
-      setIndex((i) => (i <= 0 ? steps.length - 1 : i - 1));
+      setIndex((i) => wrapCursor(i, -1, steps.length));
     } else if (key.downArrow) {
-      setIndex((i) => (i >= steps.length - 1 ? 0 : i + 1));
+      setIndex((i) => wrapCursor(i, 1, steps.length));
     } else if (input === ' ') {
       const id = steps[index].id;
       const next = selectedIds.includes(id)
@@ -39,9 +40,9 @@ export function StepSelector({ steps, selectedIds, onSelectionChange, onDone }: 
     } else if (key.return) {
       onDone();
     } else {
-      const num = parseInt(input, 10);
-      if (!isNaN(num) && num >= 1 && num <= steps.length) {
-        const id = steps[num - 1].id;
+      const idx = parseNumberKey(input, steps.length);
+      if (idx !== null) {
+        const id = steps[idx].id;
         const next = selectedIds.includes(id)
           ? selectedIds.filter((s) => s !== id)
           : [...selectedIds, id];
@@ -52,16 +53,16 @@ export function StepSelector({ steps, selectedIds, onSelectionChange, onDone }: 
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">Select Installation Steps</Text>
-      <Box flexDirection="column" marginTop={1}>
+      <SectionHeader title="Select Installation Steps" />
+      <Box flexDirection="column" marginTop={SP.sectionGap}>
         {steps.map((step, i) => {
-          const selected = selectedIds.includes(step.id);
-          const highlighted = i === index;
+          const sel = selectedIds.includes(step.id);
+          const hl = i === index;
           return (
             <Box key={step.id}>
-              <Text color={highlighted ? 'cyan' : 'gray'}>[{i + 1}]</Text>
-              <Text color={selected ? 'green' : 'gray'}> {selected ? '[x]' : '[ ]'} </Text>
-              <Text color={highlighted ? 'cyan' : undefined} bold={highlighted}>
+              <Text color={hl ? C.primary : C.neutral}>[{i + 1}]</Text>
+              <Text color={sel ? (hl ? C.successBright : C.success) : C.neutral}> {sel ? SYM.checkOn : SYM.checkOff} </Text>
+              <Text color={hl ? C.primary : undefined} bold={hl}>
                 {step.label}
               </Text>
               <Text dimColor> — {step.description}</Text>
@@ -69,11 +70,7 @@ export function StepSelector({ steps, selectedIds, onSelectionChange, onDone }: 
           );
         })}
       </Box>
-      <Box marginTop={1}>
-        <Text dimColor>
-          [Space] Toggle  [1-{steps.length}] Quick toggle  [A]ll  [N]one  [Enter] Next
-        </Text>
-      </Box>
+      <KeyHints hints={`[Space] Toggle  [1-${steps.length}] Quick toggle  [A]ll  [N]one  [Enter] Next`} />
     </Box>
   );
 }

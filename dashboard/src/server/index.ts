@@ -35,7 +35,8 @@ import { PromptRegistry } from './prompt/prompt-registry.js';
 import { SelfLearningService } from './supervisor/self-learning-service.js';
 import { TaskSchedulerService } from './supervisor/task-scheduler-service.js';
 import { ExtensionManager } from './supervisor/extension-manager.js';
-import { SupervisorWsHandler } from './ws/handlers/supervisor-handler.js';
+// SupervisorWsHandler hidden — replaced by MaestroCoordinatePage
+// import { SupervisorWsHandler } from './ws/handlers/supervisor-handler.js';
 import { TeamWsHandler } from './ws/handlers/team-handler.js';
 import { RoomWsHandler } from './ws/handlers/room-handler.js';
 import { SessionScopedEventFilter } from './ws/session-scoped-event-filter.js';
@@ -163,7 +164,8 @@ async function main(): Promise<void> {
   const coordinateHandler = new CoordinateWsHandler(coordinateRunner);
   const requirementHandler = new RequirementWsHandler(requirementExpander);
 
-  const supervisorHandler = new SupervisorWsHandler(learningService, taskSchedulerService);
+  // supervisorHandler hidden — replaced by MaestroCoordinatePage
+  // const supervisorHandler = new SupervisorWsHandler(learningService, taskSchedulerService);
   const teamHandler = new TeamWsHandler(eventBus);
 
   const sessionFilter = new SessionScopedEventFilter();
@@ -175,7 +177,7 @@ async function main(): Promise<void> {
     commanderHandler,
     coordinateHandler,
     requirementHandler,
-    supervisorHandler,
+    // supervisorHandler,  // hidden — replaced by MaestroCoordinatePage
     teamHandler,
     roomHandler,
   ], sessionFilter);

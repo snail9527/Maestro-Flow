@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { C, SYM } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // CyberItem — single component row in the selection grid
@@ -42,7 +43,7 @@ export function CyberItem({
   highlighted,
   description,
 }: CyberItemProps) {
-  const checkbox = selected ? '[X]' : '[ ]';
+  const checkbox = selected ? SYM.checkOn : SYM.checkOff;
   const paddedLabel = padEnd(label, LABEL_WIDTH);
   const filesStr = `(${fileCount} files)`.padStart(FILE_COL_WIDTH);
 
@@ -50,7 +51,7 @@ export function CyberItem({
   if (!available) {
     return (
       <Box>
-        <Text dimColor color="gray">
+        <Text dimColor color={C.neutral}>
           [{index}] {checkbox} {paddedLabel} {filesStr} [OFFLINE]
         </Text>
       </Box>
@@ -60,9 +61,9 @@ export function CyberItem({
   if (selected && highlighted) {
     return (
       <Box>
-        <Text color="cyan">[{index}] </Text>
-        <Text color="cyan">{checkbox} </Text>
-        <Text color="greenBright" bold>{paddedLabel}</Text>
+        <Text color={C.neutral}>[{index}] </Text>
+        <Text color={C.success}>{checkbox} </Text>
+        <Text color={C.successBright} bold>{paddedLabel}</Text>
         <Text> {filesStr} </Text>
         <Text dimColor>{description}</Text>
       </Box>
@@ -72,9 +73,9 @@ export function CyberItem({
   if (selected) {
     return (
       <Box>
-        <Text color="gray">[{index}] </Text>
-        <Text color="green">{checkbox} </Text>
-        <Text color="green">{paddedLabel}</Text>
+        <Text color={C.neutral}>[{index}] </Text>
+        <Text color={C.success}>{checkbox} </Text>
+        <Text color={C.success}>{paddedLabel}</Text>
         <Text> {filesStr} </Text>
         <Text dimColor>{description}</Text>
       </Box>
@@ -84,9 +85,9 @@ export function CyberItem({
   if (highlighted) {
     return (
       <Box>
-        <Text color="cyan">[{index}] </Text>
-        <Text color="cyan">{checkbox} </Text>
-        <Text color="cyan">{paddedLabel}</Text>
+        <Text color={C.neutral}>[{index}] </Text>
+        <Text color={C.primary}>{checkbox} </Text>
+        <Text color={C.primary} bold>{paddedLabel}</Text>
         <Text> {filesStr} </Text>
         <Text dimColor>{description}</Text>
       </Box>
@@ -96,8 +97,8 @@ export function CyberItem({
   // Normal state
   return (
     <Box>
-      <Text color="gray">[{index}] </Text>
-      <Text>{checkbox} </Text>
+      <Text color={C.neutral}>[{index}] </Text>
+      <Text color={C.neutral}>{checkbox} </Text>
       <Text>{paddedLabel}</Text>
       <Text> {filesStr} </Text>
       <Text dimColor>{description}</Text>

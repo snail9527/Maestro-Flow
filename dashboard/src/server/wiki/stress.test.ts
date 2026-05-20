@@ -34,6 +34,7 @@ function makeEntry(
     createdBy: null,
     sourceRef: null,
     parent: null,
+
   };
 }
 
@@ -44,7 +45,6 @@ function makeIndex(entries: WikiEntry[]): WikiIndex {
     roadmap: [],
     spec: [],
     issue: [],
-    lesson: [],
     knowhow: [],
     note: [],
   } as WikiIndex['byType'];

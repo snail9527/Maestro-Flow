@@ -3,8 +3,8 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'node:p
 
 import { toForwardSlash } from '../../shared/utils.js';
 import { parseFrontmatter } from './frontmatter-util.js';
-import { parseSpecEntries } from './spec-entry-parser.js';
-import { loadVirtualEntries } from './virtual-wiki-adapters.js';
+import { parseSpecEntries, parseKnowhowEntries } from './spec-entry-parser.js';
+import { adaptIssueRow, loadVirtualEntries } from './virtual-wiki-adapters.js';
 import { homedir } from 'node:os';
 import { existsSync, readdirSync } from 'node:fs';
 import type {
@@ -80,7 +80,6 @@ export class WikiIndexer {
         roadmap: [],
         spec: [],
         issue: [],
-        lesson: [],
         knowhow: [],
         note: [],
       } as Record<WikiNodeType, WikiEntry[]>;
@@ -145,7 +144,6 @@ export class WikiIndexer {
       roadmap: [],
       spec: [],
       issue: [],
-      lesson: [],
       knowhow: [],
       note: [],
     };
@@ -214,6 +212,12 @@ export class WikiIndexer {
           keywords: container.tags,
         });
         for (const se of specEntries) {
+          const related: string[] = [];
+          if (se.ref) {
+            const refStem = se.ref.replace(/^knowhow\//, '').replace(/\.md$/, '');
+            const refSlug = refStem.replace(/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            related.push(`knowhow-${refSlug}`);
+          }
           out.push({
             id: `${idPrefix}${se.id}`,
             type: 'spec',
@@ -223,10 +227,10 @@ export class WikiIndexer {
             status: 'active',
             created: container.created,
             updated: container.updated,
-            related: [],
+            related,
             source: container.source,
             body: se.content,
-            ext: { entryType: se.type, timestamp: se.timestamp },
+            ext: { entryType: se.type, timestamp: se.timestamp, ...(se.ref ? { ref: se.ref } : {}) },
             scope,
             category: se.category || container.category,
             createdBy: container.createdBy,
@@ -237,20 +241,58 @@ export class WikiIndexer {
       }
     }
 
-    // knowhow/*.md  (KNW-→session, TIP-→tip, TPL-→template, RCP-→recipe, REF-→reference, DCS-→decision)
+    // knowhow/*.md  (KNW-→session, TIP-→tip, TPL-→template, RCP-→recipe, REF-→reference, DCS-→decision, DOC-→document)
     for (const name of await safeReaddir(join(this.workflowRoot, 'knowhow'))) {
       if (extname(name).toLowerCase() !== '.md') continue;
       const entry = await this.parseFileEntry(join(this.workflowRoot, 'knowhow', name), 'knowhow');
       if (entry) {
-        // Derive category from file prefix
-        const upper = name.toUpperCase();
-        if (upper.startsWith('KNW-')) entry.category = 'session';
-        else if (upper.startsWith('TPL-')) entry.category = 'template';
-        else if (upper.startsWith('RCP-')) entry.category = 'recipe';
-        else if (upper.startsWith('REF-')) entry.category = 'reference';
-        else if (upper.startsWith('DCS-')) entry.category = 'decision';
-        else if (upper.startsWith('TIP-')) entry.category = 'tip';
+        // Only derive category from file prefix if no frontmatter category
+        if (!entry.category) {
+          const upper = name.toUpperCase();
+          if (upper.startsWith('KNW-')) entry.category = 'session';
+          else if (upper.startsWith('TPL-')) entry.category = 'template';
+          else if (upper.startsWith('RCP-')) entry.category = 'recipe';
+          else if (upper.startsWith('REF-')) entry.category = 'reference';
+          else if (upper.startsWith('DCS-')) entry.category = 'decision';
+          else if (upper.startsWith('TIP-')) entry.category = 'tip';
+          else if (upper.startsWith('AST-')) entry.category = 'asset';
+          else if (upper.startsWith('BLP-')) entry.category = 'blueprint';
+          else if (upper.startsWith('DOC-')) entry.category = 'document';
+        }
         out.push(entry);
+
+        // Parse <knowhow-entry> blocks into sub-node WikiEntries
+        const knowhowSubEntries = parseKnowhowEntries(entry.body, name, {
+          category: entry.category ?? undefined,
+          keywords: entry.tags,
+        });
+        for (const se of knowhowSubEntries) {
+          const related: string[] = [];
+          if (se.ref) {
+            const refStem = se.ref.replace(/^knowhow\//, '').replace(/\.md$/, '');
+            const refSlug = refStem.replace(/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            related.push(`knowhow-${refSlug}`);
+          }
+          out.push({
+            id: `knowhow-${se.id}`,
+            type: 'knowhow' as const,
+            title: se.title,
+            summary: se.content.slice(0, 240).replace(/\s+/g, ' '),
+            tags: se.keywords,
+            status: 'active' as const,
+            created: entry.created,
+            updated: entry.updated,
+            related,
+            source: entry.source,
+            body: se.content,
+            ext: { entryType: se.type, timestamp: se.timestamp, ...(se.ref ? { ref: se.ref } : {}) },
+            scope: null,
+            category: se.category || entry.category,
+            createdBy: entry.createdBy,
+            sourceRef: entry.sourceRef,
+            parent: entry.id,
+          });
+        }
       }
     }
 
@@ -338,15 +380,7 @@ export class WikiIndexer {
       const abs = join(this.workflowRoot, 'issues', name);
       if (!this.isInsideRoot(abs)) continue;
       const rel = toForwardSlash(relative(this.workflowRoot, abs));
-      out.push(...(await loadVirtualEntries(abs, 'issue', rel)));
-    }
-
-    for (const name of await safeReaddir(join(this.workflowRoot, 'learning'))) {
-      if (extname(name).toLowerCase() !== '.jsonl') continue;
-      const abs = join(this.workflowRoot, 'learning', name);
-      if (!this.isInsideRoot(abs)) continue;
-      const rel = toForwardSlash(relative(this.workflowRoot, abs));
-      out.push(...(await loadVirtualEntries(abs, 'lesson', rel)));
+      out.push(...(await loadVirtualEntries(abs, adaptIssueRow, rel)));
     }
 
     return out;
@@ -393,10 +427,10 @@ export class WikiIndexer {
 
     const rel = toForwardSlash(relative(this.workflowRoot, absPath));
     // Knowhow files live under knowhow/ with prefix-<slug>.md naming.
-    // Strip the 4-char prefix (KNW-/TIP-/TPL-/RCP-/REF-/DCS-) from the id-generating
+    // Strip the 4-char prefix (KNW-/TIP-/TPL-/RCP-/REF-/DCS-/AST-/BLP-) from the id-generating
     // stem so the id matches what WikiWriter produced at create time (`knowhow-<slug>`).
     let idStem = stem;
-    if (/^(KNW|TIP|TPL|RCP|REF|DCS)-/i.test(stem)) idStem = stem.slice(4);
+    if (/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i.test(stem)) idStem = stem.slice(4);
     const id = `${type}-${slugify(idStem)}`;
 
     return {
@@ -579,6 +613,7 @@ export function filterEntries(entries: WikiEntry[], filters: WikiFilters): WikiE
     if (filters.status && d.status !== filters.status) return false;
     if (filters.category && d.category !== filters.category) return false;
     if (filters.createdBy && d.createdBy !== filters.createdBy) return false;
+    if (filters.tool && d.ext?.tool !== true && d.ext?.tool !== 'true') return false;
     if (filters.q) {
       const q = filters.q.toLowerCase();
       if (!d.title.toLowerCase().includes(q) && !d.summary.toLowerCase().includes(q)) {

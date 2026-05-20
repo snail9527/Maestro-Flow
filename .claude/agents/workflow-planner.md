@@ -39,6 +39,8 @@ When invoked with `quick` flag:
 - `.workflow/scratch/{slug}/context.md` -- Context and decisions (resolved via state.json artifact registry)
 - `.workflow/scratch/{slug}/research.md` -- Research (if available, resolved via artifact registry)
 - Spec references and doc-index
+- **Codebase docs** (if `.workflow/codebase/` exists) — `doc-index.json` for component mapping; `ARCHITECTURE.md` for module boundaries when decomposing tasks
+- **Wiki prior knowledge** (if `maestro wiki` available) — `maestro wiki search "<phase keywords>"` for related decisions/constraints that inform task design
 - **Project specs** (MANDATORY) -- Loaded via `maestro spec load --category arch`:
   - Architecture constraints (module structure, layer boundaries, dependency rules)
   - Coding conventions (naming, imports, patterns)

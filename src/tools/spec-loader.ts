@@ -1,21 +1,21 @@
 /**
- * Spec Loader (simplified)
+ * Spec Loader
  *
- * Filename-based category routing. No frontmatter dependency.
+ * Category-based loading with keyword cross-matching and knowhow tool discovery.
  * Reads .workflow/specs/*.md, filters by category via static mapping,
- * returns concatenated content.
+ * discovers knowhow tools with matching category, returns concatenated content.
  */
 
 import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseSpecEntries, formatSpecEntries } from './spec-entry-parser.js';
+import { parseSpecEntries, formatSpecEntries, type SpecEntryParsed } from './spec-entry-parser.js';
 import { paths } from '../config/paths.js';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export type SpecCategory = 'coding' | 'arch' | 'quality' | 'debug' | 'test' | 'review' | 'learning';
+export type SpecCategory = 'coding' | 'arch' | 'debug' | 'test' | 'review' | 'learning' | 'ui';
 
 export type SpecScope = 'project' | 'global' | 'team' | 'personal';
 
@@ -32,11 +32,12 @@ export interface SpecLoadResult {
 export const CATEGORY_MAP: Record<string, SpecCategory> = {
   'coding-conventions.md':      'coding',
   'architecture-constraints.md': 'arch',
-  'quality-rules.md':           'quality',
   'debug-notes.md':             'debug',
   'test-conventions.md':        'test',
   'review-standards.md':        'review',
+  'quality-rules.md':           'review',
   'learnings.md':               'learning',
+  'ui-conventions.md':          'ui',
 };
 
 const SPECS_DIR = '.workflow/specs';
@@ -99,6 +100,12 @@ export function resolveSpecDir(projectPath: string, scope: SpecScope, uid?: stri
 export interface LoadSpecsOptions {
   /** Override global specs directory (for testing). Defaults to ~/.maestro/specs/ */
   globalDir?: string;
+  /** Keyword whitelist: only include entries matching at least one keyword */
+  includeKeywords?: string[];
+  /** Keyword blacklist: exclude entries matching any of these keywords */
+  excludeKeywords?: string[];
+  /** Extra spec filenames to include for the category (dynamic CATEGORY_MAP extension) */
+  extraSpecFiles?: string[];
 }
 
 export function loadSpecs(projectPath: string, category?: SpecCategory, uid?: string, keyword?: string, scope?: SpecScope, options?: LoadSpecsOptions): SpecLoadResult {
@@ -115,7 +122,7 @@ export function loadSpecs(projectPath: string, category?: SpecCategory, uid?: st
   // First pass: collect results per layer (skip empty)
   const layerResults: Array<{ label: string; sections: string[]; matched: string[] }> = [];
   for (const { dir, label } of layers) {
-    const { sections, matched } = loadFromDir(dir, category, keyword);
+    const { sections, matched } = loadFromDir(dir, category, keyword, options);
     if (sections.length > 0) {
       layerResults.push({ label, sections, matched });
     }
@@ -136,6 +143,15 @@ export function loadSpecs(projectPath: string, category?: SpecCategory, uid?: st
     }
     allMatched.push(...matched);
     totalCount += matched.length;
+  }
+
+  // Tool discovery: scan knowhow/ for documents matching category + tool: true
+  if (category) {
+    const toolSection = discoverKnowhowTools(join(projectPath, '.workflow'), category);
+    if (toolSection) {
+      allSections.push(toolSection.content);
+      totalCount += toolSection.count;
+    }
   }
 
   return {
@@ -184,11 +200,16 @@ function buildLayers(projectPath: string, uid?: string, scope?: SpecScope, globa
 /**
  * Load spec files from a single directory. Returns empty arrays if the
  * directory does not exist or is unreadable.
+ *
+ * When `category` is provided:
+ * - Primary category doc is loaded in full
+ * - Other files: only entries with matching keywords are included (cross-category)
  */
 function loadFromDir(
   specsDir: string,
   category?: SpecCategory,
   keyword?: string,
+  options?: LoadSpecsOptions,
 ): { sections: string[]; matched: string[] } {
   if (!existsSync(specsDir)) return { sections: [], matched: [] };
 
@@ -203,7 +224,7 @@ function loadFromDir(
   const matched: string[] = [];
 
   for (const file of files) {
-    if (!shouldInclude(file, category)) continue;
+    if (!shouldInclude(file, category, options?.extraSpecFiles)) continue;
 
     const filePath = join(specsDir, file);
     let raw: string;
@@ -216,7 +237,12 @@ function loadFromDir(
     const body = stripFrontmatter(raw).trim();
     if (!body) continue;
 
-    const formatted = formatFileContent(body, keyword);
+    // Primary category doc → full load; other files → keyword-filtered only
+    const fileCategory = CATEGORY_MAP[file];
+    const isPrimaryDoc = category && (fileCategory === category || options?.extraSpecFiles?.includes(file));
+
+    const workflowRoot = join(specsDir, '..');
+    const formatted = formatFileContent(body, keyword, isPrimaryDoc ? undefined : category, workflowRoot, options);
     if (formatted) {
       sections.push(formatted);
       matched.push(file);
@@ -230,48 +256,203 @@ function loadFromDir(
 // Internal
 // ============================================================================
 
-function shouldInclude(filename: string, category?: SpecCategory): boolean {
-  // No category filter → load all
-  if (!category) return true;
+function shouldInclude(filename: string, category?: SpecCategory, extraSpecFiles?: string[]): boolean {
+  if (!category) return true; // No filter → load all
 
+  // Extra spec files for this category → always include as primary
+  if (extraSpecFiles?.includes(filename)) return true;
+
+  // Category filter: include primary doc + all other files (for keyword cross-matching)
   const cat = CATEGORY_MAP[filename];
-  if (cat) return cat === category;
+  if (!cat) return false; // Unknown file
 
-  // Unknown files: include only when no category filter
-  return false;
+  // Primary category doc → always include (full load)
+  if (cat === category) return true;
+
+  // Other category files → include for keyword-based cross-category matching
+  return true;
 }
 
 /**
  * Parse file body, strip <spec-entry> tags, format clean output with metadata.
  * When keyword is provided, only return matching entries.
+ * When crossCategory is provided, only return entries whose keywords overlap
+ * (cross-category matching for non-primary docs).
  * Falls back to raw body for files with no structured entries.
  */
-function formatFileContent(body: string, keyword?: string): string | null {
+function formatFileContent(body: string, keyword?: string, crossCategory?: SpecCategory, workflowRoot?: string, options?: LoadSpecsOptions): string | null {
   const { entries, legacy } = parseSpecEntries(body);
 
   // No structured entries → pass through raw body (or keyword-grep it)
   if (entries.length === 0 && legacy.length === 0) {
+    // Cross-category mode: non-primary docs with no structured entries are skipped
+    if (crossCategory) return null;
+
+    // Skip files that are just headings with no real content (e.g. empty seed files)
+    const stripped = body.replace(/^#+\s+.*$/gm, '').replace(/^---+$/gm, '').trim();
+    if (!stripped) return null;
+
     if (keyword) {
       return body.toLowerCase().includes(keyword.toLowerCase()) ? body : null;
     }
     return body;
   }
 
+  // In cross-category mode: only show entries that have keyword overlap
+  let filteredEntries = entries;
+  if (crossCategory && keyword) {
+    const kw = keyword.toLowerCase();
+    filteredEntries = entries.filter(e => e.keywords.includes(kw));
+    if (filteredEntries.length === 0) return null;
+  } else if (crossCategory) {
+    // Cross-category without keyword → skip (no way to match)
+    return null;
+  }
+
+  // Apply keyword whitelist/blacklist filters from config
+  if (options?.includeKeywords?.length) {
+    const include = new Set(options.includeKeywords.map(k => k.toLowerCase()));
+    filteredEntries = filteredEntries.filter(e =>
+      e.keywords.some(k => include.has(k.toLowerCase())),
+    );
+  }
+  if (options?.excludeKeywords?.length) {
+    const exclude = new Set(options.excludeKeywords.map(k => k.toLowerCase()));
+    filteredEntries = filteredEntries.filter(e =>
+      !e.keywords.some(k => exclude.has(k.toLowerCase())),
+    );
+  }
+
   const parts: string[] = [];
+
+  // Separate ref entries (lightweight display) from regular entries
+  const refEntries = filteredEntries.filter(e => e.ref);
+  const regularEntries = filteredEntries.filter(e => !e.ref);
 
   if (keyword) {
     const kw = keyword.toLowerCase();
-    const matchedEntries = entries.filter(e => e.keywords.includes(kw));
-    if (matchedEntries.length > 0) parts.push(formatSpecEntries(matchedEntries));
-    for (const leg of legacy) {
-      if (leg.content.toLowerCase().includes(kw)) parts.push(leg.content);
+    const matchedRegular = regularEntries.filter(e => e.keywords.includes(kw));
+    const matchedRef = refEntries.filter(e => e.keywords.includes(kw));
+    if (matchedRegular.length > 0) parts.push(formatSpecEntries(matchedRegular));
+    if (matchedRef.length > 0) parts.push(matchedRef.map(e => formatRefEntry(e, workflowRoot)).join('\n\n---\n\n'));
+    if (!crossCategory) {
+      for (const leg of legacy) {
+        if (leg.content.toLowerCase().includes(kw)) parts.push(leg.content);
+      }
     }
   } else {
-    if (entries.length > 0) parts.push(formatSpecEntries(entries));
-    for (const leg of legacy) parts.push(leg.content);
+    if (regularEntries.length > 0) parts.push(formatSpecEntries(regularEntries));
+    if (refEntries.length > 0) parts.push(refEntries.map(e => formatRefEntry(e, workflowRoot)).join('\n\n---\n\n'));
+    if (!crossCategory) {
+      for (const leg of legacy) parts.push(leg.content);
+    }
   }
 
   return parts.length > 0 ? parts.join('\n\n---\n\n') : null;
+}
+
+/**
+ * Format a ref entry as a lightweight summary with a load command hint.
+ *
+ * Summary resolution order:
+ *   1. YAML `summary` field from the referenced knowhow document
+ *   2. Spec-entry content body (first 200 chars after heading)
+ */
+function formatRefEntry(e: SpecEntryParsed, workflowRoot?: string): string {
+  const refStem = (e.ref ?? '').replace(/^knowhow\//, '').replace(/\.md$/, '');
+  const refSlug = refStem.replace(/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const refId = `knowhow-${refSlug}`;
+
+  // Try to read YAML summary from the referenced knowhow document
+  let summary = resolveRefSummary(e.ref, workflowRoot);
+
+  // Fallback: extract summary from spec-entry content (strip heading)
+  if (!summary) {
+    summary = e.content;
+    const headingIdx = summary.indexOf('\n');
+    if (headingIdx !== -1 && summary.trimStart().startsWith('###')) {
+      summary = summary.slice(headingIdx).trim();
+    }
+    summary = summary.slice(0, 200).replace(/\s+/g, ' ').trim();
+  }
+
+  return `### ${e.title}\n\n${summary}\n\n\u2192 Detail: maestro wiki load ${refId}`;
+}
+
+/**
+ * Read a knowhow file's YAML frontmatter `summary` field.
+ * Returns null if the file doesn't exist or has no summary.
+ */
+function resolveRefSummary(ref: string | undefined, workflowRoot: string | undefined): string | null {
+  if (!ref || !workflowRoot) return null;
+  const absPath = join(workflowRoot, ref);
+  try {
+    const raw = readFileSync(absPath, 'utf-8');
+    const fmMatch = raw.match(/^---\s*\n([\s\S]*?)\n---/);
+    if (!fmMatch) return null;
+    const summaryMatch = fmMatch[1].match(/^summary:\s*"?(.+?)"?\s*$/m);
+    return summaryMatch ? summaryMatch[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scan knowhow/ for documents matching category + tool: true in YAML frontmatter.
+ * Returns a formatted section with tool summaries and load commands.
+ */
+function discoverKnowhowTools(workflowRoot: string, category: SpecCategory): { content: string; count: number } | null {
+  const knowhowDir = join(workflowRoot, 'knowhow');
+  if (!existsSync(knowhowDir)) return null;
+
+  let files: string[];
+  try {
+    files = readdirSync(knowhowDir).filter(f => f.endsWith('.md'));
+  } catch {
+    return null;
+  }
+
+  const tools: Array<{ title: string; summary: string; id: string }> = [];
+
+  for (const file of files) {
+    try {
+      const raw = readFileSync(join(knowhowDir, file), 'utf-8');
+      const fmMatch = raw.match(/^---\s*\n([\s\S]*?)\n---/);
+      if (!fmMatch) continue;
+
+      const fm = fmMatch[1];
+      // Check tool: true
+      if (!/^tool:\s*true\s*$/m.test(fm)) continue;
+      // Check category match
+      const catMatch = fm.match(/^category:\s*(.+)$/m);
+      if (!catMatch || catMatch[1].trim() !== category) continue;
+
+      const titleMatch = fm.match(/^title:\s*(.+)$/m);
+      const summaryMatch = fm.match(/^summary:\s*"?(.+?)"?\s*$/m);
+      const title = titleMatch ? titleMatch[1].trim() : file;
+
+      // Summary: YAML summary field, or first paragraph after frontmatter
+      let summary = summaryMatch ? summaryMatch[1].trim() : '';
+      if (!summary) {
+        const body = raw.slice(fmMatch[0].length + 1).trim();
+        summary = body.split('\n\n')[0].slice(0, 200).replace(/\s+/g, ' ');
+      }
+
+      const stem = file.replace(/\.md$/, '');
+      const slug = stem.replace(/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+      tools.push({ title, summary, id: `knowhow-${slug}` });
+    } catch {
+      continue;
+    }
+  }
+
+  if (tools.length === 0) return null;
+
+  const content = `## Available Tools (${category})\n\n` +
+    tools.map(t => `### ${t.title} (tool)\n\n${t.summary}\n\n→ Load: maestro wiki load ${t.id}`).join('\n\n---\n\n');
+
+  return { content, count: tools.length };
 }
 
 function stripFrontmatter(raw: string): string {
@@ -294,7 +475,6 @@ const AUTO_INIT_SEEDS: Array<[string, string]> = [
   ['coding-conventions.md', '# Coding Conventions\n\n## Entries\n\n'],
   ['architecture-constraints.md', '# Architecture Constraints\n\n## Entries\n\n'],
   ['learnings.md', '# Learnings\n\n## Entries\n\n'],
-  ['quality-rules.md', '# Quality Rules\n\n## Entries\n\n'],
   ['debug-notes.md', '# Debug Notes\n\n## Entries\n\n'],
   ['test-conventions.md', '# Test Conventions\n\n## Entries\n\n'],
   ['review-standards.md', '# Review Standards\n\n## Entries\n\n'],
@@ -340,4 +520,50 @@ function autoInitSeeds(specsDir: string): void {
   } catch {
     // Best-effort — don't block loading
   }
+}
+
+// ============================================================================
+// Extra document loading
+// ============================================================================
+
+export interface ExtraDocsResult {
+  content: string;
+  count: number;
+}
+
+/**
+ * Load additional documents from arbitrary paths.
+ *
+ * Path resolution:
+ *   - Starts with `knowhow/` → resolved from `.workflow/knowhow/`
+ *   - Otherwise → resolved relative to projectPath
+ *
+ * Returns concatenated markdown content and loaded count.
+ */
+export function loadExtraDocs(projectPath: string, docPaths?: string[]): ExtraDocsResult {
+  if (!docPaths || docPaths.length === 0) return { content: '', count: 0 };
+
+  const sections: string[] = [];
+
+  for (const docPath of docPaths) {
+    const absPath = docPath.startsWith('knowhow/')
+      ? join(projectPath, '.workflow', docPath)
+      : join(projectPath, docPath);
+
+    try {
+      if (!existsSync(absPath)) continue;
+      const raw = readFileSync(absPath, 'utf-8');
+      const body = stripFrontmatter(raw).trim();
+      if (body) {
+        sections.push(body);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    content: sections.length > 0 ? sections.join('\n\n---\n\n') : '',
+    count: sections.length,
+  };
 }

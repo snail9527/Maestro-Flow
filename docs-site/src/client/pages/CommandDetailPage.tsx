@@ -189,6 +189,7 @@ export default function CommandDetailPage({ commandName, category, command }: Co
 // ---------------------------------------------------------------------------
 
 function WorkflowSection({ meta, isZh, commandName }: { meta: CommandMetadata; isZh: boolean; commandName: string }) {
+  const { t } = useI18n();
   const workflowText = isZh ? (meta.workflow_zh || meta.workflow) : meta.workflow;
   const hasPrev = (meta.prev_commands?.length ?? 0) > 0;
   const hasNext = (meta.next_commands?.length ?? 0) > 0;
@@ -210,7 +211,7 @@ function WorkflowSection({ meta, isZh, commandName }: { meta: CommandMetadata; i
           {hasPrev && (
             <div className="flex-1">
               <p className="text-[length:10px] font-[var(--font-weight-semibold)] uppercase tracking-[var(--letter-spacing-wide)] text-text-tertiary mb-[var(--spacing-2)]">
-                {isZh ? '前置命令' : 'Previous'}
+                {t('content.workflow_previous')}
               </p>
               <div className="flex flex-wrap gap-[var(--spacing-2)]">
                 {meta.prev_commands!.map((cmd) => (
@@ -222,7 +223,7 @@ function WorkflowSection({ meta, isZh, commandName }: { meta: CommandMetadata; i
           {hasNext && (
             <div className="flex-1">
               <p className="text-[length:10px] font-[var(--font-weight-semibold)] uppercase tracking-[var(--letter-spacing-wide)] text-text-tertiary mb-[var(--spacing-2)]">
-                {isZh ? '后继命令' : 'Next'}
+                {t('content.workflow_next')}
               </p>
               <div className="flex flex-wrap gap-[var(--spacing-2)]">
                 {meta.next_commands!.map((cmd) => (

@@ -1,6 +1,6 @@
 ---
 name: maestro-execute
-description: Execute plan with wave-based parallel execution and atomic commits
+description: Use when a confirmed plan is ready for implementation
 argument-hint: "[phase] [--auto-commit] [--method agent|cli|auto] [--executor <tool>] [--dir <path>] [-y]"
 allowed-tools:
   - Read
@@ -30,7 +30,18 @@ Invoked after /maestro-plan produces a confirmed plan. When called without args 
 <context>
 $ARGUMENTS — phase number, or no args for milestone-wide execution, with optional flags.
 
-Scope routing, flags, resolution logic, output directory format, artifact registration schema, and incremental learning extraction are defined in workflow `execute.md`.
+Scope routing, flags, resolution logic, output directory format, artifact registration schema, and incremental knowhow extraction are defined in workflow `execute.md`.
+
+### Pre-load context (before task execution)
+
+1. **Codebase docs**: If `.workflow/codebase/doc-index.json` exists, read `ARCHITECTURE.md` for module boundaries. Pass as shared context to executor agents.
+2. **Wiki knowledge**: Run `maestro wiki search "<phase keywords>" --json 2>/dev/null`. If results found, extract top 5 entries as prior knowledge context for agents.
+3. **Coding specs + tools**: Run `maestro spec load --category coding` to load coding conventions AND discoverable knowhow tools (tool: true entries). Pass as specs context to all executor agents.
+4. **UI specs (conditional)**: If any task involves frontend/UI work (task scope/description contains keywords like component, page, style, layout, CSS, HTML, frontend; or focus_paths in `src/components/`, `src/pages/`, `src/styles/`, `src/ui/`), also run `maestro spec load --category ui` and include in agent context.
+5. All are optional — proceed without if unavailable (log warning).
+
+### Role Knowledge
+`maestro wiki list --category coding` → select relevant → `maestro wiki load`
 </context>
 
 <execution>
@@ -46,18 +57,15 @@ Follow '~/.maestro/workflows/execute.md' completely.
 
 ### Post-task Knowledge Inquiry
 
-After each task completes, evaluate inquiry triggers:
+After each task completion, check triggers:
 
-1. **Execution deviation**: If task summary mentions approach change, dependency swap, or plan deviation:
-   → Ask: "TASK-{NNN} deviated from the plan. Should this decision be recorded as an architecture constraint? (`/spec-add arch`)"
+| Condition | Ask | Route |
+|-----------|-----|-------|
+| Summary mentions approach change / plan deviation | "Record as arch constraint?" | spec-add arch |
+| retry_count >= 2 | "Document fix pattern?" | spec-add debug |
+| Summary contains design rationale ("chose X because") | "Record as knowhow?" | spec-add learning |
 
-2. **Retry success**: If task required ≥2 retries before completion:
-   → Ask: "TASK-{NNN} succeeded after {N} retries. Should this fix pattern be documented? (`/spec-add debug`)"
-
-3. **Implicit knowledge**: If task summary contains design rationale ("chose X because", "rejected Y due to"):
-   → Ask: "Design decision detected. Should it be recorded as a learning? (`/spec-add learning`)"
-
-If user confirms, invoke `Skill({ skill: "spec-add", args: "<category> <content>" })` with extracted content.
+On confirm → `Skill("spec-add", "<category> <content>")`.
 
 ### Issue Status Sync
 
@@ -90,6 +98,15 @@ Next steps:
   /manage-status               -- View project dashboard
 ```
 
+**Completion status:**
+```
+--- COMPLETION STATUS ---
+STATUS: DONE|DONE_WITH_CONCERNS|NEEDS_RETRY
+CONCERNS: {failed_count} tasks failed (if any)
+NEXT: /maestro-verify
+--- END STATUS ---
+```
+
 If failed tasks exist, suggest /quality-debug for investigation.
 </execution>
 
@@ -109,6 +126,6 @@ If failed tasks exist, suggest /quality-debug for investigation.
 - [ ] `.summaries/TASK-{NNN}-summary.md` written for each completed task
 - [ ] `.task/TASK-{NNN}.json` statuses updated (completed|blocked)
 - [ ] EXC artifact registered in state.json for each plan executed
-- [ ] Incremental learnings extracted to specs/learnings.md
+- [ ] Incremental knowhow extracted to specs/learnings.md
 - [ ] state.json updated with execution progress
 </success_criteria>

@@ -18,6 +18,9 @@ export const KNOWN_SECTIONS = [
   'success_criteria',
 ] as const;
 
+/** Reserved target name for overlays that inject into CLAUDE.md via tag-injector. */
+export const CLAUDE_MD_TARGET = '_claude-md';
+
 export type KnownSection = (typeof KNOWN_SECTIONS)[number];
 
 export interface OverlayPatch {

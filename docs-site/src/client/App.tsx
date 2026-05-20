@@ -10,6 +10,8 @@ const CommandDetailPage = lazy(() => import('./pages/CommandDetailPage.js'));
 const SkillDetailPage = lazy(() => import('./pages/SkillDetailPage.js'));
 const SearchPage = lazy(() => import('./pages/SearchPage.js'));
 const GuidePage = lazy(() => import('./pages/GuidePage.js'));
+const ChangelogPage = lazy(() => import('./pages/ChangelogPage.js'));
+const QuickStartPage = lazy(() => import('./pages/QuickStartPage.js'));
 
 // Import Router components
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
@@ -111,6 +113,12 @@ export function App() {
 
               {/* Search page */}
               <Route path="/search" element={<SearchPage />} />
+
+              {/* Changelog page */}
+              <Route path="/changelog" element={<ChangelogPage />} />
+
+              {/* Quick Start - top-level route */}
+              <Route path="/quick-start" element={<QuickStartPage />} />
 
               {/* Guides */}
               <Route path="/guides" element={<Navigate to="/guides/command-usage" replace />} />

@@ -1,6 +1,6 @@
 ---
 name: maestro-learn
-description: Learning coordinator — route intent to learn commands, execute single or multi-step chains sequentially. Supports 7 chains from single-step (follow, investigate) to multi-step (deep-understand, pattern-catalog).
+description: Route learning intent to learn-* commands
 argument-hint: "\"intent text\" [-y] [--dry-run] [--chain <name>]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
@@ -33,7 +33,7 @@ $ARGUMENTS — learning intent text, or flags.
 | `deep-understand` | follow → decompose → second-opinion | Thorough module analysis |
 | `pattern-catalog` | decompose --save-spec --save-wiki → second-opinion --mode review | Full pattern extraction + review |
 
-**Session state:** `.workflow/learning/.maestro-learn/{session_id}/status.json`
+**Session state:** `.workflow/knowhow/.maestro-learn/{session_id}/status.json`
 </context>
 
 <execution>

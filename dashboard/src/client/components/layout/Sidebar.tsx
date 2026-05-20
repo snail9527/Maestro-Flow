@@ -104,13 +104,13 @@ export function Sidebar() {
               <span className="font-medium text-text-primary">{issueCounts.total}</span>
               <span className="text-text-tertiary ml-1">total</span>
               {issueCounts.open > 0 && (
-                <span className="ml-2.5" style={{ color: '#5B8DB8' }}>{issueCounts.open} open</span>
+                <span className="ml-2.5" style={{ color: 'var(--color-accent-blue)' }}>{issueCounts.open} open</span>
               )}
               {issueCounts.in_progress > 0 && (
-                <span className="ml-2.5" style={{ color: '#B89540' }}>{issueCounts.in_progress} active</span>
+                <span className="ml-2.5" style={{ color: 'var(--color-accent-yellow)' }}>{issueCounts.in_progress} active</span>
               )}
               {issueCounts.resolved > 0 && (
-                <span className="ml-2.5" style={{ color: '#5A9E78' }}>{issueCounts.resolved} done</span>
+                <span className="ml-2.5" style={{ color: 'var(--color-accent-green)' }}>{issueCounts.resolved} done</span>
               )}
             </div>
           </button>

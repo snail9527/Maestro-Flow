@@ -38,6 +38,7 @@ import type {
   ExecutionCompletedPayload,
   ExecutionFailedPayload,
 } from '../../shared/ws-protocol.js';
+import type { MaestroSessionUpdatedPayload } from '../../shared/maestro-session-types.js';
 import type { CollabMember, CollabActivityEntry } from '../../shared/collab-types.js';
 import type {
   TeamMailboxMessage,
@@ -118,6 +119,8 @@ const ALL_EVENT_TYPES: SSEEventType[] = [
   'room:task_updated',
   'room:phase_changed',
   'room:snapshot',
+  // Maestro Coordinate events
+  'maestro:session_updated',
 ];
 
 // ---------------------------------------------------------------------------
@@ -194,6 +197,8 @@ export interface DashboardEventMap {
   'room:task_updated': { sessionId: string; task: RoomTask };
   'room:phase_changed': { sessionId: string; status: RoomSessionStatus };
   'room:snapshot': RoomSessionSnapshot;
+  // Maestro Coordinate events
+  'maestro:session_updated': MaestroSessionUpdatedPayload;
 }
 
 // ---------------------------------------------------------------------------

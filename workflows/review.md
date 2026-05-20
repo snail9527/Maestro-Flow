@@ -4,6 +4,37 @@ Tiered multi-dimensional code review with parallel agents, severity classificati
 
 ---
 
+## Spec Compliance Pre-Check (Phase 0)
+
+**Before any dimensional code quality review**, verify the implementation matches its spec:
+
+1. Load `convergence.criteria[]` from each `.task/TASK-{NNN}.json` in the phase
+2. For each criterion, check if the code implements it (grep for functions, endpoints, components named in the criterion)
+3. Classify each: **MET** (evidence found) | **UNMET** (not implemented) | **PARTIAL** (incomplete)
+
+| Result | Action |
+|--------|--------|
+| All MET | Proceed to Step 1 (dimensional review) |
+| Any UNMET | Report as spec_compliance_failures, add to findings with severity=critical, dimension="spec-compliance" |
+| Any PARTIAL | Report with severity=high |
+
+This prevents code that is well-written but doesn't meet requirements from passing review.
+
+---
+
+## Receiving Review Feedback
+
+When external review feedback is received (from human reviewers, PR comments, or other agents):
+
+1. **Verify before implementing** — Check each suggestion against codebase reality. Reviewer may lack full context.
+2. **Technical acknowledgment only** — No performative agreement ("You're absolutely right!", "Great point!"). Just state the fix or provide technical reasoning.
+3. **Push back when wrong** — If a suggestion would break existing functionality, violate architecture constraints, or is technically incorrect for this codebase, explain why with evidence.
+4. **YAGNI check** — If reviewer suggests adding a feature/abstraction, verify it's actually needed. Unused features should be questioned.
+5. **Implement one at a time** — Fix one item, test, then move to next. Never batch-implement all feedback at once.
+6. **Priority order** — Blocking issues (breaks, security) → Simple fixes (typos, imports) → Complex fixes (refactoring, logic).
+
+---
+
 ## Prerequisites
 
 - Phase execution completed (task summaries exist)
@@ -428,7 +459,8 @@ Next steps:
 |---------|------------|
 | PASS | Skill({ skill: "quality-test", args: "{phase}" }) for UAT, or Skill({ skill: "maestro-milestone-audit" }) if UAT already passed |
 | WARN | Review findings, then Skill({ skill: "quality-test", args: "{phase}" }) — acknowledge warnings before proceeding |
-| BLOCK | Fix critical issues first: Skill({ skill: "maestro-plan", args: "{phase} --gaps" }) -> Skill({ skill: "maestro-execute", args: "{phase}" }) -> re-run Skill({ skill: "quality-review", args: "{phase}" }) |
+| BLOCK (≤3 findings, all medium/low) | **Lightweight fix loop**: fix inline → re-run review on affected files only → repeat until PASS/WARN (max 2 iterations) |
+| BLOCK (>3 findings or any critical) | Full fix cycle: Skill({ skill: "maestro-plan", args: "{phase} --gaps" }) -> Skill({ skill: "maestro-execute", args: "{phase}" }) -> re-run Skill({ skill: "quality-review", args: "{phase}" }) |
 
 ---
 

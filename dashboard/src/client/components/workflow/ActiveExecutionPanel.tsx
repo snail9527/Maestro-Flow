@@ -10,12 +10,10 @@ import PlayIcon from 'lucide-react/dist/esm/icons/play.js';
 
 const STATUS_NEXT_COMMAND: Record<string, string> = {
   not_started: '/maestro-analyze {N}',
-  pending: '/maestro-analyze {N}',
-  exploring: '/maestro-plan {N}',
   planning: '/maestro-execute {N}',
   executing: '/maestro-execute {N}',
   verifying: '/quality-review {N}',
-  testing: '/quality-test {N}',
+  reviewing: '/maestro-verify {N}',
   completed: '/maestro-milestone-audit',
   blocked: '/quality-debug',
 };

@@ -3,19 +3,17 @@ import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 import { lazy, Suspense } from 'react';
 
-// Lazy-load mermaid — it's ~770KB so only load when a diagram is encountered
 const MermaidBlock = lazy(() => import('./MermaidBlock.js').then(m => ({ default: m.MermaidBlock })));
 
 // ---------------------------------------------------------------------------
-// MarkdownRenderer -- warm minimal markdown rendering
-// Dark code blocks, tinted callouts, clean typography
+// MarkdownRenderer — Gemini CLI style content rendering
 // ---------------------------------------------------------------------------
 
 function slugify(text: string): string {
   return text
     .toLowerCase()
     .replace(/\s+/g, '-')
-    .replace(/[^\w\u4e00-\u9fff\u3400-\u4dbf-]/g, '')
+    .replace(/[^\w一-鿿㐀-䶿-]/g, '')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
 }
@@ -32,7 +30,7 @@ function getTextContent(node: React.ReactNode): string {
 
 function AnchorLink({ id }: { id: string }) {
   return (
-    <a href={`#${id}`} className="absolute -left-5 top-0 opacity-0 group-hover:opacity-100 transition-opacity text-accent-blue no-underline text-[length:var(--font-size-lg)]">
+    <a href={`#${id}`} className="absolute -left-6 top-0 opacity-0 group-hover:opacity-100 transition-opacity text-accent-blue no-underline text-[length:var(--font-size-lg)]">
       #
     </a>
   );
@@ -43,7 +41,7 @@ const components: Components = {
     const isInline = !className && !String(children).includes('\n');
     if (isInline) {
       return (
-        <code className="bg-bg-secondary px-[7px] py-[2px] rounded-[var(--radius-sm)] text-[0.85em] font-mono text-accent-purple border border-border-divider" {...props}>
+        <code className="bg-tint-blue px-[6px] py-[2px] rounded-[var(--radius-sm)] text-[0.85em] font-mono text-accent-blue" {...props}>
           {children}
         </code>
       );
@@ -64,33 +62,40 @@ const components: Components = {
             {lang}
           </span>
         )}
-        <code className={`block font-mono text-[length:var(--font-size-sm)] leading-[1.6] text-text-code ${className ?? ''}`} {...props}>
+        <code className={`block font-mono text-[13px] leading-[1.7] text-text-code ${className ?? ''}`} {...props}>
           {children}
         </code>
       </div>
     );
   },
   pre({ children, ...props }) {
+    // Check if child is a mermaid block (rendered as Suspense > MermaidBlock)
+    const child = props.node?.children?.[0];
+    const classList = child != null && 'properties' in child ? (child.properties?.className as string[] | undefined) : undefined;
+    const isMermaid = child != null && 'tagName' in child && child.tagName === 'code' && classList?.[0]?.includes('mermaid');
+    if (isMermaid) {
+      return <>{children}</>;
+    }
     return <pre className="bg-bg-code rounded-[var(--radius-lg)] p-[var(--spacing-4)] overflow-x-auto my-[var(--spacing-4)]" {...props}>{children}</pre>;
   },
   h1({ children }) {
     const id = slugify(getTextContent(children));
-    return <h1 id={id} className="group relative text-[length:28px] font-[var(--font-weight-bold)] text-text-primary mt-[var(--spacing-12)] mb-[var(--spacing-4)] pb-[var(--spacing-2)] border-b border-border-divider leading-[1.3]">{children}{id && <AnchorLink id={id} />}</h1>;
+    return <h1 id={id} className="group relative text-[42px] font-[var(--font-weight-medium)] text-text-primary mt-[var(--spacing-12)] mb-[var(--spacing-4)] leading-[1.2] tracking-[var(--letter-spacing-tight)]">{children}{id && <AnchorLink id={id} />}</h1>;
   },
   h2({ children }) {
     const id = slugify(getTextContent(children));
-    return <h2 id={id} className="group relative text-[length:20px] font-[var(--font-weight-bold)] text-text-primary mt-[var(--spacing-12)] mb-[var(--spacing-4)] pb-[var(--spacing-2)] border-b border-border-divider">{children}{id && <AnchorLink id={id} />}</h2>;
+    return <h2 id={id} className="group relative text-[18px] font-[var(--font-weight-medium)] text-text-primary mt-[var(--spacing-10)] mb-[var(--spacing-3)]">{children}{id && <AnchorLink id={id} />}</h2>;
   },
   h3({ children }) {
     const id = slugify(getTextContent(children));
-    return <h3 id={id} className="group relative text-[length:16px] font-[var(--font-weight-semibold)] text-text-primary mt-[var(--spacing-8)] mb-[var(--spacing-3)]">{children}{id && <AnchorLink id={id} />}</h3>;
+    return <h3 id={id} className="group relative text-[16px] font-[var(--font-weight-semibold)] text-text-primary mt-[var(--spacing-8)] mb-[var(--spacing-2)]">{children}{id && <AnchorLink id={id} />}</h3>;
   },
   h4({ children }) {
     const id = slugify(getTextContent(children));
-    return <h4 id={id} className="group relative text-[length:var(--font-size-base)] font-[var(--font-weight-semibold)] text-text-primary mt-[var(--spacing-6)] mb-[var(--spacing-2)]">{children}{id && <AnchorLink id={id} />}</h4>;
+    return <h4 id={id} className="group relative text-[var(--font-size-base)] font-[var(--font-weight-semibold)] text-text-primary mt-[var(--spacing-6)] mb-[var(--spacing-2)]">{children}{id && <AnchorLink id={id} />}</h4>;
   },
   p({ children }) {
-    return <p className="text-text-secondary leading-[var(--line-height-relaxed)] my-[var(--spacing-4)]">{children}</p>;
+    return <p className="text-text-secondary leading-[1.75] my-[var(--spacing-4)]">{children}</p>;
   },
   a({ href, children }) {
     return <a href={href} className="text-accent-blue font-[var(--font-weight-medium)] no-underline hover:underline" target="_blank" rel="noopener noreferrer">{children}</a>;
@@ -123,7 +128,7 @@ export interface MarkdownRendererProps {
 
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   return (
-    <div className="max-w-none leading-[var(--line-height-relaxed)] text-[length:var(--font-size-base)]" role="document">
+    <div className="max-w-none leading-[1.75] text-[length:var(--font-size-base)]" role="document">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {content}
       </ReactMarkdown>
@@ -131,7 +136,6 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   );
 }
 
-/** Strip inline markdown formatting for clean display text */
 function stripMarkdown(text: string): string {
   return text
     .replace(/`([^`]+)`/g, '$1')
@@ -142,7 +146,6 @@ function stripMarkdown(text: string): string {
 
 export function extractToc(content: string): Array<{ id: string; level: number; text: string }> {
   const headings: Array<{ id: string; level: number; text: string }> = [];
-  // Strip fenced code blocks to avoid matching # comments inside them
   const stripped = content.replace(/^```[\s\S]*?^```/gm, '');
   const regex = /^(#{1,4})\s+(.+)$/gm;
   let m: RegExpExecArray | null;

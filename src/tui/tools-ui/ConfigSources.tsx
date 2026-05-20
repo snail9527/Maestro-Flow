@@ -4,6 +4,7 @@ import {
   loadConfigSources,
   type CliToolsConfig,
 } from '../../config/cli-tools-config.js';
+import { C, SYM } from '../shared/index.js';
 
 export interface ConfigSourcesProps {
   workDir: string;
@@ -25,7 +26,7 @@ export function ConfigSources({ workDir, onBack }: ConfigSourcesProps) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text bold color="cyan">Config Sources</Text>
+      <Text bold color={C.primary}>Config Sources</Text>
       <Text> </Text>
 
       {/* Global */}
@@ -34,7 +35,7 @@ export function ConfigSources({ workDir, onBack }: ConfigSourcesProps) {
       {data.global ? (
         <ConfigSection config={data.global} indent={2} prefix="g" />
       ) : (
-        <Text dimColor color="yellow">  (not found)</Text>
+        <Text dimColor color={C.warning}>  (not found)</Text>
       )}
 
       <Text> </Text>
@@ -45,7 +46,7 @@ export function ConfigSources({ workDir, onBack }: ConfigSourcesProps) {
       {data.workspace ? (
         <ConfigSection config={data.workspace} indent={2} prefix="w" />
       ) : (
-        <Text dimColor color="yellow">  (not found)</Text>
+        <Text dimColor color={C.warning}>  (not found)</Text>
       )}
 
       <Text> </Text>
@@ -63,14 +64,14 @@ function ConfigSection({ config, indent, prefix }: { config: Partial<CliToolsCon
     <Box flexDirection="column">
       {tools.length > 0 && (
         <>
-          <Text>{pad}<Text color="cyan">tools:</Text></Text>
+          <Text>{pad}<Text color={C.primary}>tools:</Text></Text>
           {tools.map(([name, entry]) => (
             <Box key={`${prefix}-t-${name}`} gap={1}>
               <Text>{pad}  </Text>
-              <Text color={entry.enabled ? 'green' : 'red'}>{entry.enabled ? '✓' : '✗'}</Text>
+              <Text color={entry.enabled ? C.success : C.error}>{entry.enabled ? SYM.enabled : SYM.disabled}</Text>
               <Text bold>{name}</Text>
               {entry.primaryModel ? <Text dimColor>model={entry.primaryModel}</Text> : null}
-              {entry.tags?.length ? <Text color="yellow">[{entry.tags.join(',')}]</Text> : null}
+              {entry.tags?.length ? <Text color={C.warning}>[{entry.tags.join(',')}]</Text> : null}
               {entry.settingsFile ? <Text dimColor>settings={entry.settingsFile}</Text> : null}
             </Box>
           ))}
@@ -78,7 +79,7 @@ function ConfigSection({ config, indent, prefix }: { config: Partial<CliToolsCon
       )}
       {roles.length > 0 && (
         <>
-          <Text>{pad}<Text color="cyan">roles:</Text></Text>
+          <Text>{pad}<Text color={C.primary}>roles:</Text></Text>
           {roles.map(([name, mapping]) => {
             const detail = mapping.tool
               ? `→ ${mapping.tool}`

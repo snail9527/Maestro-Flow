@@ -127,7 +127,7 @@ describe('Board routes + StateManager + EventBus integration', () => {
 
   it('multiple phases are sorted by phase number', async () => {
     await writeStateJson({});
-    await writePhase('03-verify', { phase: 3, title: 'Verify', status: 'pending' } as PhaseCard);
+    await writePhase('03-verify', { phase: 3, title: 'Verify', status: 'not_started' } as PhaseCard);
     await writePhase('01-setup', { phase: 1, title: 'Setup', status: 'completed' } as PhaseCard);
     await writePhase('02-build', { phase: 2, title: 'Build', status: 'executing' } as PhaseCard);
 
@@ -240,7 +240,7 @@ describe('StateManager.applyFileChange + EventBus integration', () => {
 
   it('applyFileChange on phase index.json emits phase:updated', async () => {
     await writeStateJson({});
-    await writePhase('01-init', { phase: 1, title: 'Init', status: 'pending' } as PhaseCard);
+    await writePhase('01-init', { phase: 1, title: 'Init', status: 'not_started' } as PhaseCard);
     await stateManager.buildInitialState();
 
     const events: SSEEvent[] = [];
@@ -283,7 +283,7 @@ describe('StateManager.applyFileChange + EventBus integration', () => {
     await stateManager.buildInitialState();
 
     // Add a new phase
-    await writePhase('02-build', { phase: 2, title: 'Build', status: 'pending' } as PhaseCard);
+    await writePhase('02-build', { phase: 2, title: 'Build', status: 'not_started' } as PhaseCard);
     await stateManager.applyFileChange(join(workflowRoot, 'phases', '02-build', 'index.json'));
 
     const res = await app.request('/api/board');

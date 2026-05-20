@@ -1,521 +1,337 @@
-# Spec 系统指南
+---
+title: "知识管理系统指南"
+---
 
-Maestro 的 Spec 系统管理多层级知识（编码规范、架构约束、调试记录、测试惯例等），供 agent 和 hook 在执行前自动加载。支持 4 种作用域（project / global / team / personal），与 Wiki 知识图谱深度集成。
-
-## 目录
-
-- [概览](#概览)
-  - [Scope 体系](#scope-体系)
-  - [Category 体系](#category-体系)
-  - [Entry 格式](#entry-格式)
-- [命令](#命令)
-  - [spec-setup — 初始化](#spec-setup--初始化)
-  - [spec-add — 添加条目](#spec-add--添加条目)
-  - [spec-load — 加载条目](#spec-load--加载条目)
-  - [maestro spec add — CLI 添加](#maestro-spec-add--cli-添加)
-- [渐进填充](#渐进填充)
-- [Auto-Init](#auto-init)
-- [Keyword 系统](#keyword-系统)
-  - [关键词提取](#关键词提取)
-  - [按 keyword 加载](#按-keyword-加载)
-  - [自动注入机制](#自动注入机制)
-- [验证 Hook](#验证-hook)
-- [Session Dedup](#session-dedup)
-- [文件结构](#文件结构)
-- [向后兼容](#向后兼容)
-- [Wiki 集成](#wiki-集成)
-  - [原子节点索引](#原子节点索引)
-  - [统一写入路径](#统一写入路径)
-  - [写保护模型](#写保护模型)
-- [CLI 参考](#cli-参考)
+Maestro 知识管理分为 **Spec**（编码约束/工具）和 **Wiki**（广义知识图谱）。Spec 提供基于 category 的项目规范，Wiki 提供操作经验、设计资产和学习笔记。两层通过 `<entry>` 标签格式、WikiIndexer 索引和 category 检索统一。
 
 ---
 
-## 概览
+## Spec 系统
 
-### Scope 体系
+### 作用域
 
-Spec 支持 4 种作用域，通过 `--scope` 参数指定：
+| 作用域 | 目录 | 自动初始化 |
+|-------|------|-----------|
+| `project`（默认） | `.workflow/specs/` | 是 |
+| `global` | `~/.maestro/specs/` | 是 |
+| `team` | `.workflow/collab/specs/` | 否 |
+| `personal` | `.workflow/collab/specs/{uid}/` | 否 |
 
-| Scope | 目录 | 用途 | Auto-Init |
-|-------|------|------|-----------|
-| `project`（默认） | `.workflow/specs/` | 项目级规范，所有人共享 | 是（需 `.workflow/` 存在） |
-| `global` | `~/.maestro/specs/` | 跨项目通用规范 | 是（无条件） |
-| `team` | `.workflow/collab/specs/` | 团队共享规范 | 否 |
-| `personal` | `.workflow/collab/specs/{uid}/` | 个人偏好覆盖 | 否 |
+**加载优先级**（由低到高）：global → project → team → personal。后层追加，不覆盖。
 
-`personal` scope 需要 `--uid` 参数或已执行 `maestro collab join`（自动从 git 身份解析）。
+### 文件与 Category 映射
 
-**加载优先级**（低 → 高）：global → project → team → personal。后层内容追加，不覆盖。
+每个 spec 文件是一个 category 的主文档。`spec load --category` 加载主文档全文 + 跨文件 keyword 匹配条目。
 
-### Category 体系
+| 文件 | Category | 隐式角色 | 用途 |
+|------|----------|---------|------|
+| `coding-conventions.md` | coding | implement | 命名、导入、格式、模式 |
+| `architecture-constraints.md` | arch | plan | 模块结构、层边界 |
+| `review-standards.md` | review | review | 质量规则、检查清单 |
+| `debug-notes.md` | debug | analyze | 调试技巧、根因记录 |
+| `test-conventions.md` | test | test | 测试框架、覆盖率要求 |
+| `learnings.md` | learning | implement | Bug、陷阱、经验教训 |
+| `ui-conventions.md` | ui | implement | UI/UX 约定、设计令牌 |
 
-Spec 系统使用统一的 **category** 体系。`spec-add` 和 `spec-load` 使用同一套 category 名，1:1 对应文件（每个 scope 目录下使用相同文件名）：
+### 条目格式
 
-| Category | 文件 | 用途 |
-|----------|------|------|
-| `coding` | `coding-conventions.md` | 命名、导入、格式化、编码模式 |
-| `arch` | `architecture-constraints.md` | 模块结构、层级边界、架构决策 |
-| `quality` | `quality-rules.md` | 质量规则、lint 配置、强制标准 |
-| `debug` | `debug-notes.md` | 调试技巧、根因记录、已知问题 |
-| `test` | `test-conventions.md` | 测试框架、模式、覆盖率要求 |
-| `review` | `review-standards.md` | 审查清单、质量门槛 |
-| `learning` | `learnings.md` | Bug、陷阱、经验教训 |
+所有条目使用 `<spec-entry>` 闭合标签，**category** 为必需属性：
 
-**扩展类型**（可用于条目分类，但无独立文件对应）：
-
-| Category | 用途 |
-|----------|------|
-| `bug` | Bug 记录 |
-| `pattern` | 代码模式 |
-| `decision` | 架构/技术决策 |
-| `rule` | 强制规则 |
-| `validation` | 验证规则 |
-
-扩展类型的条目存储在对应文件中（如 `bug` 类条目通常写入 `learnings.md`），通过 `<spec-entry category="bug">` 标记具体分类。
-
-**没有 `type` 概念** — 所有操作只用 `category`。
-
-### Entry 格式
-
-每个条目使用 `<spec-entry>` 闭合标签格式：
+<details>
+<summary>示例</summary>
 
 ```markdown
 <spec-entry category="coding" keywords="auth,token,rotation" date="2026-04-21">
-
 ### Token rotation needs email carried through refresh flow
-
 Revoked column must be set rather than deleting tokens.
-Refresh token generation must carry email from stored user data.
-
 </spec-entry>
 ```
 
-**属性：**
+</details>
 
-| 属性 | 必填 | 格式 | 说明 |
+| 属性 | 必需 | 说明 |
+|------|------|------|
+| `category` | 是 | 单值：coding, arch, review, debug, test, learning, ui |
+| `keywords` | 是 | 逗号分隔，小写，跨 category 发现 |
+| `date` | 是 | `YYYY-MM-DD` |
+| `source` | 否 | 来源（manual / agent / phase） |
+| `ref` | 否 | 指向 knowhow 详情文档的路径 |
+
+### Tool 发现
+
+Tool 是标记了 `tool: true` YAML 头的 knowhow 文档。`spec load --category` 自动扫描 `knowhow/` 中匹配 category + tool 的条目，追加摘要。
+
+<details>
+<summary>Knowhow tool 示例 + spec ref 条目</summary>
+
+```markdown
+---
+title: Payment Gateway Idempotency Verification
+type: recipe
+category: coding
+keywords: [payment, gateway, idempotency, testing]
+tool: true
+---
+
+## Steps
+1. Generate idempotency key (UUID v4)
+2. Submit charge request with key
+3. Retry same request with same key -- assert identical response
+4. Submit different amount with same key -- assert 409 conflict
+```
+
+可选的 spec ref 条目：
+```markdown
+<spec-entry category="coding" keywords="payment,gateway,idempotency" date="2026-05-10"
+  ref="knowhow/RCP-payment-idempotency.md">
+### Payment Gateway Idempotency Verification
+Use when testing payment integration endpoints for retry safety.
+</spec-entry>
+```
+
+</details>
+
+- **注册**：`/maestro-tools-register` — 将可复用流程编码为 knowhow tool 文档
+- **执行**：`/maestro-tools-execute` — 按名称或 category 加载 tool，逐步执行
+
+### Spec 命令
+
+```bash
+maestro spec init [--scope <scope>] [--uid <uid>]
+maestro spec add <category> "<title>" "<content>" --keywords kw1,kw2 [--ref <path>] [--json]
+maestro spec load --category <category>              # 主文档 + 跨文件 + tools
+maestro spec load --category <category> --keyword <kw>
+maestro spec load --keyword <kw>                     # 跨所有文件
+```
+
+### Progressive Fill
+
+```
+maestro-init    → spec-setup     maestro-analyze → arch, coding
+maestro-plan    → coding, test   maestro-execute → learning, debug
+maestro-verify  → review
+```
+
+### 关键词系统
+
+- `spec add` 自动提取 3-5 个领域关键词
+- `spec load --keyword <kw>` 跨所有 category 文件匹配 `<spec-entry>` 的 keywords
+- 旧版标题条目回退到文本搜索
+
+---
+
+## Wiki 知识图谱
+
+### Knowhow 系统
+
+`.workflow/knowhow/` 中的广义知识存储，按文件名前缀区分：
+
+| 前缀 | 类型 | 用途 |
+|------|------|------|
+| `KNW-` | session | 会话压缩记录 |
+| `TIP-` | tip | 快速上下文提示 |
+| `TPL-` | template | 代码/配置模板 |
+| `RCP-` | recipe | 步骤指南 |
+| `REF-` | reference | 外部文档摘要 |
+| `DCS-` | decision | 架构/设计决策 |
+| `AST-` | asset | 代码资产（API 契约、数据模型） |
+| `BLP-` | blueprint | 架构蓝图 |
+| `DOC-` | document | 长文档（兜底） |
+
+#### YAML Frontmatter
+
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| `title` / `type` | 是 | 文档标题和 knowhow 类型 |
+| `category` | 否 | 单值 category，用于 agent 注入 |
+| `keywords` | 否 | 可搜索的关键词列表 |
+| `tool` | 否 | `true` 标记为可执行 tool |
+| `summary` | 否 | 一行描述，缺省取首段 |
+| 类型特有 | 否 | `lang`、`source`、`status`、`assetType`、`codePaths` |
+
+#### 容器模式
+
+Knowhow 文件支持通过 `<knowhow-entry>` 标签的多条目模式。子条目继承容器的 `category`；条目级可覆盖。
+
+<details>
+<summary>容器示例</summary>
+
+```markdown
+---
+title: Session Compact 20260510
+type: session
+category: debug
+---
+<knowhow-entry keywords="auth,jwt" date="2026-05-10" category="coding">
+### JWT Refresh Token Rotation
+Always rotate refresh tokens on use to prevent replay attacks.
+</knowhow-entry>
+```
+
+</details>
+
+#### Ref 模式（Spec → Knowhow 桥接）
+
+Spec = 索引 + 规则（自动加载）。Knowhow = 详情文档（按需加载）。`ref` 从索引桥接到详情。
+
+<details>
+<summary>Inline vs Ref 模式对比</summary>
+
+```markdown
+<!-- Inline（短内容） -->
+<spec-entry category="coding" keywords="auth,jwt" date="2026-05-10">
+### JWT Token Rotation
+Always rotate refresh tokens on use.
+</spec-entry>
+
+<!-- Ref（复杂内容 → knowhow 详情） -->
+<spec-entry category="coding" keywords="oauth,pkce" date="2026-05-10"
+  ref="knowhow/RCP-oauth-flow.md">
+### OAuth 2.0 Integration
+Complete OAuth PKCE flow design.
+</spec-entry>
+```
+
+Inline 显示（完整内容）：`### JWT Token Rotation > coding . auth, jwt . 2026-05-10`
+Ref 显示（摘要 + 加载命令）：`-> 详情: maestro wiki load knowhow-oauth-flow`
+
+</details>
+
+### 基于 Category 的检索
+
+Wiki 条目支持与 spec 一致的 `category` 标注。每个 category 映射到 delegate 角色，用于自动注入。
+
+```bash
+maestro wiki list --category coding    # 按 category 浏览
+maestro wiki list --keyword auth       # 按关键词过滤
+maestro wiki list --tool               # 列出所有 tool
+maestro wiki load <id1> [id2...]       # 加载选定文档
+```
+
+### 三层加载
+
+| 层级 | 命令 | 深度 | 用途 |
 |------|------|------|------|
-| `category` | 是 | 7 个有效值之一 | 必须匹配所在文件的 category |
-| `keywords` | 是 | 逗号分隔，小写 | 可搜索关键词，≥1 个 |
-| `date` | 是 | `YYYY-MM-DD` | 创建日期 |
-| `source` | 否 | 字符串 | 来源（manual / agent / dashboard） |
+| 索引浏览 | `wiki list --category <cat>` | id + title | 浏览 |
+| 精确加载 | `wiki load <id1> [id2...]` | 完整内容 | 按 ID 加载 |
+| Hook 自动注入 | `loadWikiByCategory()` | title + summary | 上下文注入 |
 
-标签内部是普通 Markdown — `### 标题` + 正文。Markdown 渲染器会忽略 `<spec-entry>` 标签，文件保持可读。
-
----
-
-## 命令
-
-### spec-setup — 初始化
+### Wiki 命令
 
 ```bash
-/spec-setup
-```
+maestro wiki list [--type <type>] [--category <cat>] [--keyword <kw>] [--tool] [-q <query>]
+maestro wiki load <id1> [id2...] [--json]
+maestro wiki get <id> | search <query>
+maestro wiki create --type knowhow --slug <slug> --title <title>
+maestro wiki append <containerId> --body <text> [--category <cat>] [--keywords <kw>]
+maestro wiki remove-entry <subEntryId>
 
-扫描项目代码库，检测技术栈和编码模式，生成 spec 文件：
+maestro knowhow add --type <type> --title <title> --body <text>
+maestro knowhow add --type asset --asset-type api-contract --code-paths "src/api/"
+maestro knowhow list [--type <type>] | search <query>
 
-- **核心文件**（始终创建）：`coding-conventions.md`、`architecture-constraints.md`、`learnings.md`
-- **可选文件**（检测到时创建）：`quality-rules.md`（有 linter 配置时）、`test-conventions.md`（有测试框架时）
-- **按需文件**（首次 `spec-add` 时创建）：`debug-notes.md`、`review-standards.md`
-
-技术栈信息维护在 `.workflow/project.md` 的 `## Tech Stack` 节中。
-
-> **触发时机**：`/maestro-init` 在检测到已有代码库时自动触发 `/spec-setup`。新项目（无源文件）跳过——specs 由后续 pipeline 阶段渐进填充。也可随时手动执行 `/spec-setup` 重新扫描。
-
-### spec-add — 添加条目
-
-```bash
-# 项目级（默认）
-/spec-add coding "Always use named exports for utility functions"
-/spec-add learning "Off-by-one in pagination when page=0 passed"
-
-# 指定 scope
-/spec-add --scope global coding "Always use strict TypeScript"
-/spec-add --scope team arch "Microservices communicate via gRPC"
-/spec-add --scope personal debug "My local dev uses port 3001"
-```
-
-执行流程：
-
-1. 解析 `[--scope <scope>] [--uid <uid>] <category> <content>`
-2. 根据 scope 解析目标目录
-3. 从内容中自动提取 3-5 个关键词
-4. 以 `<spec-entry>` 闭合标签格式写入目标文件
-5. 输出确认信息和验证命令
-
-**示例输出：**
-
-```
-== spec-add complete ==
-Category: coding
-Scope: project
-Added to: .workflow/specs/coding-conventions.md
-Keywords: named-exports, utility, module
-Verify: maestro spec load --scope project --keyword named-exports
-```
-
-### maestro spec add — CLI 添加
-
-除 `/spec-add` 技能外，还有等价的 CLI 命令供 workflow agent 程序化调用：
-
-```bash
-# 单条添加
-maestro spec add <category> "<title>" "<content>" --keywords kw1,kw2 --source <src>
-
-# 示例
-maestro spec add arch "Use JWT stateless auth" "Decided during analysis..." --keywords jwt,auth --source analyze:ANL-xxx
-maestro spec add coding "Barrel exports for modules" "All public modules use index.ts barrel" --keywords barrel,export --source plan:P1
-
-# 批量（stdin JSON）
-echo '[{"category":"arch","title":"...","content":"...","keywords":["jwt"]}]' | maestro spec add --stdin
-
-# JSON 输出
-maestro spec add arch "..." "..." --json
-```
-
-**与 `/spec-add` 的区别**：CLI 命令不需要 agent 上下文，可在 Bash 中直接调用。Workflow 阶段（analyze、plan、execute）使用此 CLI 进行渐进填充。
-
-### spec-load — 加载条目
-
-```bash
-# 按 category 加载（整个文件）
-/spec-load --category coding
-
-# 按 keyword 加载（entry 级别精确匹配）
-/spec-load --keyword auth
-
-# 指定 scope（包含 global 层 + baseline）
-/spec-load --scope global --keyword auth
-
-# 组合使用
-/spec-load --category coding --keyword naming
-
-# 加载全部
-/spec-load
-```
-
-`--keyword` 按 `<spec-entry>` 标签的 `keywords` 属性精确匹配。对于旧格式（heading 格式）条目，fallback 到文本搜索。
-
-**Scope 与层级加载：**
-
-| Scope | 加载的层 |
-|-------|---------|
-| `project`（默认） | baseline |
-| `global` | global + baseline |
-| `team` | baseline + team |
-| `personal` | baseline + team + personal（需 uid） |
-
-多层加载时，每层内容带有区分标题（如 `# Global Specs`、`# Baseline Specs`）。
-
----
-
-## 渐进填充
-
-Spec 内容不再依赖一次性扫描，而是由 pipeline 各阶段渐进补充：
-
-```
-maestro-init       → maestro spec init（空骨架）+ spec-setup（已有项目自动扫描）
-       ↓
-maestro-analyze    → Locked 决策 → arch，代码模式 → coding
-       ↓
-maestro-plan       → 设计约定 → coding/arch，测试策略 → test
-       ↓
-maestro-execute    → learnings → learning，设计理由 → coding，根因 → debug
-       ↓
-maestro-verify     → quality 发现 → quality
-```
-
-各阶段通过 `maestro spec add` CLI 写入。Agent 根据自身上下文判断哪些知识值得沉淀——不是所有发现都写 spec，只写跨 task 可复用的约束和约定。
-
-**典型产出量**：
-- analyze: 1-5 条（每个 Locked 决策 1 条）
-- plan: 0-3 条（大多数 plan 不产出 spec）
-- execute: 1-3 条 learning，0-1 条 coding/debug
-
----
-
-## Keyword 系统
-
-### 关键词提取
-
-`spec-add` 时 agent 自动从内容中提取关键词：
-
-- 领域特定术语（非通用词如 code、file、function）
-- 小写，无空格（多词用连字符）
-- 3-5 个关键词
-
-**好的关键词：** `auth`, `token-rotation`, `tenant-isolation`, `pagination`, `zod-validation`
-
-**差的关键词：** `code`, `function`, `file`, `bug`, `fix`
-
-### 按 keyword 加载
-
-CLI 支持按关键词查询：
-
-```bash
-# CLI 直接使用
-maestro spec load --keyword auth
-
-# 组合 category + keyword
-maestro spec load --category coding --keyword naming
-
-# JSON 输出
-maestro spec load --keyword auth --json
-```
-
-`--keyword` 跨所有 spec 文件搜索（或在指定 category 内搜索），返回匹配条目的内容（标签已去除）。
-
-### 自动注入机制
-
-Keyword 注入在三个点触发：
-
-| 触发点 | Hook 事件 | 行为 |
-|--------|-----------|------|
-| **用户输入** | `UserPromptSubmit` | 扫描 prompt 中的关键词，匹配 spec entries，注入为 context |
-| **Agent 启动** | `PreToolUse:Agent` | 从 agent prompt 提取关键词，匹配并注入 |
-| **Coordinator** | `transformPrompt` | coordinator 级别的 keyword 匹配注入 |
-
-三个触发点共享同一个 session dedup bridge，防止重复注入。
-
----
-
-## Auto-Init
-
-`loadSpecs()` 调用时自动检测并创建缺失的 spec 目录（含 seed 文件），无需手动 `maestro spec init`：
-
-| Layer | Auto-Init 条件 |
-|-------|---------------|
-| `project` | `.workflow/` 已存在但 `.workflow/specs/` 不存在 |
-| `global` | `~/.maestro/specs/` 不存在时直接创建 |
-| `team` | **不自动创建** — 需明确 `maestro collab join` |
-| `personal` | **不自动创建** — 不应为任意 uid 建目录 |
-
-Auto-Init 创建 7 个空的 seed 文件（与 `maestro spec init` 相同），每个目录只检查一次（进程内去重）。
-
----
-
-## 验证 Hook
-
-`spec-validator` hook 在写入 `.workflow/specs/` 文件时自动验证格式：
-
-**验证规则：**
-
-1. 每个 `<spec-entry>` 必须有 `</spec-entry>` 闭合
-2. `category` 属性存在且为 12 个有效值之一（7 核心 + 5 扩展）
-3. `keywords` 属性存在且 ≥1 个关键词
-4. `date` 匹配 `YYYY-MM-DD` 格式
-5. `category` 值必须匹配所在文件的 category
-6. 无嵌套 `<spec-entry>`
-
-**默认 warn 模式** — 不阻断写入，只输出警告。可在 config 中切换为 `block` 模式。
-
-```
-[SpecValidator] Format warnings:
-L5: Missing required attribute: keywords (need at least 1)
-L5: Invalid date format "04-21-2026". Expected YYYY-MM-DD
+maestro wiki health | graph | orphans | hubs
 ```
 
 ---
 
-## Session Dedup
+## 统一索引与注入
 
-防止同一个 session 中重复注入相同的 spec entries：
+### 原子节点索引
 
-- **Bridge 文件：** `{tmpdir}/maestro-spec-kw-{sessionId}.json`
-- **记录内容：** 已注入的 keywords 列表 + 已注入的 entry IDs
-- **判定规则：** entry 的 ID 已在 bridge 中 → 跳过该 entry
-- **生命周期：** session 结束后 bridge 文件自然过期
+WikiIndexer 将 `<spec-entry>` 和 `<knowhow-entry>` 解析为独立的 WikiEntry 子节点。子节点继承容器 `category`；条目级可覆盖。Keywords 冒泡上传。
 
-```json
-{
-  "session_id": "abc123",
-  "injected_keywords": ["auth", "token", "tenant"],
-  "injected_entries": ["learnings.md:15", "coding-conventions.md:42"],
-  "updated_at": 1745193600
-}
 ```
++-------------------+        +----------------------------+
+| specs/coding-     |   →    | spec:project:coding        | (容器)
+|   <spec-entry>    |   →    | spec:project:coding-001    | (子节点)
++-------------------+        +----------------------------+
+```
+
+### 写入路径
+
+所有写操作共享统一 WikiWriter：检测容器类型 → 追加条目块 → 冒泡关键词 → 刷新索引。
+
+### 写入保护
+
+| 操作 | specs | knowhow | virtual |
+|------|:-----:|:-------:|:-------:|
+| 读取 / 标题更新 / 追加 / 移除 / 删除 | ✓ | ✓ | ✓* |
+| 内容覆写 | **禁止** | **禁止** | — |
+
+### 自动注入
+
+**Spec 注入**：`spec-injector` 在 `PreToolUse:Agent` 时按 agent 类型自动注入 spec：
+
+| Agent 类型 | 注入 Category |
+|-----------|--------------|
+| code-developer, tdd-developer | coding, learning |
+| workflow-planner, action-planning-agent | arch |
+| workflow-reviewer | review |
+| debug-explore-agent, workflow-debugger | debug |
+
+**Wiki 注入**：同时从索引加载 category 相关 wiki（title + summary），受 context budget 控制（full/reduced/minimal/skip）。
+
+**关键词注入**：`keyword-spec-injector` 在 `UserPromptSubmit` 时提取关键词，匹配条目（每次最多 5 条，session 级去重）。
 
 ---
 
 ## 文件结构
 
 ```
-~/.maestro/
-└── specs/                              # scope: global
-    ├── coding-conventions.md
-    ├── architecture-constraints.md
-    └── ...
+~/.maestro/specs/                    # scope: global
+    coding-conventions.md
 
 .workflow/
-├── specs/                              # scope: project (baseline)
-│   ├── coding-conventions.md
-│   ├── architecture-constraints.md
-│   ├── quality-rules.md
-│   ├── debug-notes.md
-│   ├── test-conventions.md
-│   ├── review-standards.md
-│   └── learnings.md
-└── collab/
-    └── specs/                          # scope: team
-        ├── coding-conventions.md
-        └── {uid}/                      # scope: personal
-            └── coding-conventions.md
++-- specs/                           # scope: project
+|   +-- coding-conventions.md        # category: coding
+|   +-- architecture-constraints.md  # category: arch
+|   +-- review-standards.md          # category: review
+|   +-- debug-notes.md               # category: debug
+|   +-- test-conventions.md          # category: test
+|   +-- learnings.md                 # category: learning
++-- knowhow/                         # 广义知识
+|   +-- KNW-/TIP-/TPL-/RCP-/REF-/DCS-/AST-/BLP-/DOC-*.md
++-- collab/specs/                    # scope: team
+|       +-- {uid}/                   # scope: personal
++-- issues/issues.jsonl              # Issue 追踪（virtual）
++-- learning/patterns.jsonl          # SelfLearningService 数据
++-- wiki-index.json                  # 持久化索引（自动生成）
 ```
-
-每个文件有 YAML frontmatter：
-
-```yaml
----
-title: "Coding Conventions"
-category: coding
----
-```
-
-文件正文包含 `<spec-entry>` 闭合标签条目和/或旧格式 heading 条目。
-
----
-
-## 向后兼容
-
-系统采用**双格式解析**，同时支持新旧两种条目格式：
-
-**新格式（`<spec-entry>` 闭合标签）：**
-```markdown
-<spec-entry category="learning" keywords="slug,regex,validation" date="2026-04-08">
-
-### Slug 验证正则分散在 3 个文件且不一致
-
-middleware/tenant.ts、db/connection-pool.ts、validation.ts 各有不同的 slug 正则。
-需提取共享 SLUG_REGEX 到独立模块。
-
-</spec-entry>
-```
-
-**旧格式（heading-based）：**
-```markdown
-### [2026-04-08 20:00] pitfall: Slug 验证正则分散在 3 个文件且不一致
-
-middleware/tenant.ts、db/connection-pool.ts、validation.ts 各有不同的 slug 正则。
-```
-
-解析器先提取所有 `<spec-entry>` 块，再对剩余文本用 heading parser 处理。两种格式在同一文件中共存。
-
-**keyword 过滤行为：**
-- 新格式：精确匹配 `keywords` 属性
-- 旧格式：文本搜索 fallback
-
----
-
-## Wiki 集成
-
-Spec 系统与 Wiki 知识图谱深度集成，每个 `<spec-entry>` 条目作为独立的 WikiEntry 子节点参与图谱分析。
-
-### 原子节点索引
-
-WikiIndexer 扫描 `specs/*.md` 时，会解析每个 `<spec-entry>` 块为独立的 WikiEntry：
-
-```
-specs/learnings.md (容器)              WikiEntry 节点
-┌─────────────────────────┐      ┌────────────────────────────┐
-│ ---                     │      │ id: spec-learnings         │
-│ title: "Learnings"      │  ──> │ type: spec (容器)          │
-│ ---                     │      │ children: [001, 002, ...]  │
-│                         │      └────────────────────────────┘
-│ <spec-entry             │      ┌────────────────────────────┐
-│   category="learning"   │  ──> │ id: spec-learnings-001     │
-│   keywords="auth,token" │      │ type: spec (子节点)        │
-│   date="2026-04-25">    │      │ parent: spec-learnings     │
-│ ### Token rotation      │      │ tags: [auth, token]        │
-│ Content...              │      │ category: learning         │
-│ </spec-entry>           │      └────────────────────────────┘
-│                         │
-│ <spec-entry             │      ┌────────────────────────────┐
-│   category="bug"        │  ──> │ id: spec-learnings-002     │
-│   keywords="cache"      │      │ type: spec (子节点)        │
-│   date="2026-04-25">    │      │ parent: spec-learnings     │
-│ ### Cache miss           │      │ category: bug              │
-│ Content...              │      └────────────────────────────┘
-│ </spec-entry>           │
-└─────────────────────────┘
-```
-
-子节点通过 `parent` 字段建立层级关系，自动计入图谱的 forward link。子节点的 `keywords` 会被上浮（surface）到容器文件的 frontmatter `keywords` 数组中，使 Wiki `--tag` 过滤可达。
-
-### 统一写入路径
-
-Spec 的 POST/DELETE 操作通过 WikiWriter 统一管理，确保写入后 Wiki 索引立即更新：
-
-```
-/spec-add coding "..."         ──┐
-                                 ├──> WikiWriter.appendEntry()
-maestro wiki append spec-... ──┘       │
-                                       ├── 构建 <spec-entry> 块
-                                       ├── 追加到容器文件
-                                       ├── 上浮 keywords 到 frontmatter
-                                       └── 刷新 WikiIndex + wiki-index.json
-
-/api/specs DELETE :id          ──┐
-                                 ├──> WikiWriter.removeEntry()
-maestro wiki remove-entry ... ──┘       │
-                                        ├── 定位 <spec-entry> 块
-                                        ├── 从文件中精确移除
-                                        └── 刷新 WikiIndex
-```
-
-### 写保护模型
-
-| 操作 | specs/*.md | memory/*.md | virtual (issue/lesson) |
-|------|:---------:|:-----------:|:----------------------:|
-| 读取 | Y | Y | Y |
-| title/frontmatter 更新 | Y | Y | -- |
-| body 整体覆写 | **禁止 (403)** | Y | -- |
-| 条目追加 (appendEntry) | Y | -- | -- |
-| 条目移除 (removeEntry) | Y | -- | -- |
-| 文件删除 | Y | Y | -- |
-
-> Spec body 受保护是因为每个 `<spec-entry>` 块是独立知识单元，body 覆写会破坏全部子条目。使用 `appendEntry` / `removeEntry` 进行精确的条目级操作。
 
 ---
 
 ## CLI 参考
 
 ```bash
-# 初始化（--scope 控制目标目录）
-maestro spec init                           # 初始化 project baseline
-maestro spec init --scope global            # 初始化 ~/.maestro/specs/
-maestro spec init --scope team              # 初始化 .workflow/collab/specs/
-maestro spec init --scope personal          # 初始化 .workflow/collab/specs/{uid}/
+# -- Spec -----------------------------------------------------------------
+maestro spec init [--scope <scope>] [--uid <uid>]
+maestro spec load [--category <cat>] [--keyword <kw>] [--scope <scope>] [--json] [--uid <uid>] [--stdin]
+maestro spec add <category> "<title>" "<content>" [--keywords kw1,kw2] [--source <src>] [--ref <path>] [--knowhow-type <type>] [--uid <uid>] [--stdin] [--json]
+maestro spec list [--scope <scope>] [--uid <uid>]
+maestro spec status [--scope <scope>] [--uid <uid>]
 
-# 加载（--scope 控制层级范围）
-maestro spec load                           # 加载 project baseline
-maestro spec load --scope global            # 加载 global + baseline
-maestro spec load --scope personal --uid alice  # 加载 baseline + team + personal
-maestro spec load --category coding         # 按 category 加载
-maestro spec load --keyword auth            # 按 keyword 加载
-maestro spec load --category arch --keyword module  # 组合
-maestro spec load --json                    # JSON 输出
-maestro spec load --stdin                   # Hook 模式（读 stdin）
+# -- Tool 发现 ------------------------------------------------------------
+/maestro-tools-register "<description>"
+/maestro-tools-execute "<name>" | --category <cat>
 
-# 查看
-maestro spec list                           # 列出 project spec 文件
-maestro spec list --scope global            # 列出 global spec 文件
-maestro spec status                         # 显示 project 状态
-maestro spec status --scope global          # 显示 global 状态
+# -- Wiki -----------------------------------------------------------------
+maestro wiki list [--type <type>] [--category <cat>] [--keyword <kw>] [--tool] [-q <query>] [--group] [--json]
+maestro wiki load <id1> [id2...] [--json]
+maestro wiki get <id> [--json]
+maestro wiki search <query> [--json]
+maestro wiki create --type <spec|knowhow> --slug <slug> --title <title> [--body <text>]
+maestro wiki append <containerId> --body <text> [--category <cat>] [--keywords <kw>]
+maestro wiki remove-entry <subEntryId> | update <id> [--title <title>] [--frontmatter <json>] | delete <id>
 
-# 添加条目（CLI）
-maestro spec add <category> "<title>" "<content>"  # 添加条目
-maestro spec add arch "..." "..." --keywords jwt,auth --source analyze:ANL-xxx
-maestro spec add coding "..." "..." --json          # JSON 输出
-echo '[{...}]' | maestro spec add --stdin            # 批量 stdin
+# -- Knowhow --------------------------------------------------------------
+maestro knowhow add --type <type> --title <title> --body <text> [--keywords <csv>]
+maestro knowhow add --type asset --asset-type <type> --code-paths <paths>
+maestro knowhow list [--type <type>] [--json] | search <query> [--json] | get <id> [--json]
 
-# Hook 管理
-maestro hooks install --level standard      # 安装包含 spec-validator + keyword-spec-injector
-maestro hooks status                        # 查看 hook 状态
+# -- 图 -------------------------------------------------------------------
+maestro wiki health | graph | orphans | hubs [--limit N] | backlinks <id> | forward <id>
 
-# Wiki 集成命令（条目级操作）
-maestro wiki append spec-learnings --category bug --body "Cache invalidation race condition"
-maestro wiki append spec-learnings --category learning --body "Token rotation..." --keywords "auth,token"
-maestro wiki remove-entry spec-learnings-003          # 按 ID 精确移除
-maestro wiki search "auth token"                      # BM25 搜索（含 spec 子节点）
-maestro wiki list --type spec --category debug         # 按类型+分类过滤
+# -- Hooks ----------------------------------------------------------------
+maestro hooks install --level standard | status
 ```

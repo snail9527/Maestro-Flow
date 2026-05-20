@@ -1,6 +1,6 @@
 ---
 name: maestro-overlay
-description: Create or edit a non-invasive command overlay from natural-language intent. Writes a JSON patch file to ~/.maestro/overlays/, applies it via maestro overlay add, and confirms installation with idempotent re-apply support.
+description: Create or edit command overlays from natural language
 argument-hint: "<intent> | --list | --remove <name>"
 allowed-tools: Read, Write, Bash, Glob, Grep
 ---

@@ -1,8 +1,8 @@
 ---
 name: maestro-milestone-complete
-description: Archive completed milestone scratch artifacts to milestones/ dir, move artifact entries to milestone_history, extract learnings, advance state.
+description: Archive completed milestone and prepare for next
 argument-hint: "[milestone] [--force] [-y]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -33,24 +33,55 @@ $maestro-milestone-complete --force "M1"  # skip audit check
 
 ### Step 1: Parse & Validate
 
-Read `.workflow/state.json` for `current_milestone`, `artifacts[]`, `milestones[]`. Determine target from args or current_milestone (E001 if none). Validate audit report at `.workflow/milestones/{milestone}/audit-report.md` with PASS verdict (E002 unless `--force`). Verify all milestone artifacts completed (E003 unless `--force`).
+Read `.workflow/state.json` for `current_milestone`, `artifacts[]`, `milestones[]`. Determine target from args or current_milestone (E001 if none).
+
+Validate audit report at `.workflow/milestones/{milestone}/audit-report.md`:
+- Parse for `## Verdict` section (or `**Verdict:**` inline)
+- PASS condition: verdict line contains the word `PASS` (case-insensitive)
+- Any other verdict (FAIL, PARTIAL, missing section) → E002 unless `--force`
+
+Verify all milestone artifacts completed (E003 unless `--force`).
 
 ### Step 2: Archive Scratch Dirs
 
-Copy each milestone artifact's directory to `.workflow/milestones/{milestone}/artifacts/`. Snapshot `roadmap.md` as `roadmap-snapshot.md` in the milestone archive.
+Copy each milestone artifact's directory to `.workflow/milestones/{milestone}/artifacts/`.
+
+**Source path resolution**: For each entry in `state.json.artifacts[]`, resolve the source directory from `artifact.path`:
+- If `artifact.path` is relative (e.g. `scratch/M1-auth`), resolve from `.workflow/` (→ `.workflow/scratch/M1-auth`)
+- If `artifact.path` is absolute, use as-is
+- Copy the entire resolved directory to `.workflow/milestones/{milestone}/artifacts/{artifact.name}/`
+
+Snapshot `roadmap.md` as `roadmap-snapshot.md` in the milestone archive.
 
 ### Step 3: Extract Learnings
 
-Read `.summaries/` and `reflection-log.md` from execute artifacts. Extract patterns, pitfalls, strategy adjustments. Dedup against existing entries via `maestro spec load --category learning`. Append to `.workflow/specs/learnings.md` using `<spec-entry>` closed-tag format (category=`learning`, auto-extract keywords, date=today, source=`milestone-complete`).
+**Source files** (read in order):
+1. `.workflow/milestones/{milestone}/artifacts/**/.summaries/*.md` — task completion summaries
+2. `.workflow/milestones/{milestone}/artifacts/**/reflection-log.md` — retrospective entries
+
+**Extraction**: Parse each source for patterns, pitfalls, strategy adjustments. Look for recurring themes across summaries and explicit lessons in reflection logs.
+
+**Dedup**: Run `maestro spec load --category coding` to load existing entries. Skip any extracted learning whose keywords fully overlap with an existing entry.
+
+**Write**: Append to `.workflow/specs/learnings.md` using `<spec-entry>` closed-tag format:
+```
+<spec-entry category="learning" keywords="kw1, kw2" date="YYYY-MM-DD" source="milestone-complete:{milestone}">
+Learning content here.
+</spec-entry>
+```
 
 ### Step 3b: Knowledge Promotion Inquiry
 
-1. **High-frequency patterns**: Scan learning entries for keyword overlap (>=2 entries) -- offer promotion to coding convention via `/spec-add coding`
-2. **Convention drift**: Compare summaries against `coding-conventions.md` and `architecture-constraints.md` -- ask if conventions need updating
-3. **Wiki island check**: Auto-trigger `wiki-connect --fix` to link new knowledge
+1. **High-frequency patterns**: Scan all `<spec-entry category="learning">` entries for keyword overlap. Trigger threshold: **>=2 entries sharing the same keyword**. For each triggered keyword, ask: "Keyword '{keyword}' appears in {N} learning entries. Promote to formal coding convention?"
+2. **Convention drift**: Compare executed task summaries against `coding-conventions.md` and `architecture-constraints.md`. Trigger threshold: **any deviation found** (technique used but not documented, or documented convention not followed). Ask: "Convention '{convention}' was bypassed during this milestone. Update conventions?"
+3. **Wiki island check**: Auto-trigger `wiki-connect --fix` to link new knowledge. Trigger threshold: **always runs** (no user confirmation needed).
 
 If `-y`: auto-accept all promotions without asking.
-If not `-y`: ask user for confirmation. If user confirms, append `<spec-entry>` to target category file preserving original date and source.
+If not `-y`: ask user for confirmation via `request_user_input`:
+```json
+{ "questions": [{ "id": "promote_learning", "header": "Knowledge Promotion", "question": "Keyword '{keyword}' appears in {N} learning entries. Promote to coding convention?", "options": [{ "label": "Yes, promote (Recommended)", "description": "Add as formal coding convention via spec-add" }, { "label": "No, keep as learning", "description": "Leave in learnings.md without promotion" }] }] }
+```
+If user confirms, append `<spec-entry>` to target category file preserving original date and source.
 
 ### Step 4: Archive Artifact Entries
 

@@ -2,7 +2,7 @@ import { renderTui } from '../render.js';
 
 export type ConfigInitialView = 'dashboard' | 'skills' | 'editor' | 'sources';
 export type DelegateInitialView = 'dashboard' | 'tools' | 'roles' | 'register' | 'reference' | 'sources';
-export type ConfigHubTab = 'Skills' | 'Delegate' | 'Hooks' | 'Overlay' | 'Specs' | 'Install';
+export type ConfigHubTab = 'Skills' | 'Delegate' | 'Hooks' | 'Overlay' | 'Specs' | 'Analytics' | 'Install';
 
 /** Unified config hub — tab-based switcher between all config panels. */
 export async function runConfigHub(options?: {
@@ -47,6 +47,11 @@ export async function runOverlayTui(): Promise<void> {
 /** Specs panel — direct entry. */
 export async function runSpecsTui(): Promise<void> {
   return runConfigHub({ initialTab: 'Specs' });
+}
+
+/** Analytics panel — direct entry. */
+export async function runSpecAnalyticsTui(): Promise<void> {
+  return runConfigHub({ initialTab: 'Analytics' });
 }
 
 /** Install panel — direct entry. */

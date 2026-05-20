@@ -3,8 +3,8 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { paths } from '../config/paths.js';
-import { loadConfig, saveConfig, loadHooksConfig } from '../config/index.js';
-import { evaluateWorkflowGuard } from '../hooks/guards/workflow-guard.js';
+import { loadConfig, saveConfig, loadHooksConfig, loadSpecInjectionConfig } from '../config/index.js';
+import { evaluateWorkflowGuard, evaluatePathGuard, loadPathGuardConfig } from '../hooks/guards/workflow-guard.js';
 import { evaluatePreflightGuard, loadPreflightConfig } from '../hooks/guards/preflight-guard.js';
 import { evaluatePromptGuard } from '../hooks/guards/prompt-guard.js';
 import { evaluateSpecValidator } from '../hooks/guards/spec-validator.js';
@@ -87,6 +87,38 @@ export const HOOK_DEFS: Record<string, HookDef> = {
   'spec-validator': { event: 'PreToolUse', matcher: 'Write|Edit', level: 'standard', requiresWorkspace: true },
   'keyword-spec-injector': { event: 'UserPromptSubmit', level: 'standard', requiresWorkspace: true },
   'workflow-guard': { event: 'PreToolUse', matcher: 'Bash|Write|Edit', level: 'full', requiresWorkspace: true },
+};
+
+// ---------------------------------------------------------------------------
+// Codex hook definitions — maps Maestro hooks to Codex lifecycle events
+// ---------------------------------------------------------------------------
+
+interface CodexHookDef {
+  event: 'SessionStart' | 'PreToolUse' | 'PostToolUse' | 'UserPromptSubmit' | 'Stop';
+  matcher?: string;          // regex pattern (Codex uses regex matchers)
+  level: HookLevel;
+  requiresWorkspace?: boolean;
+  statusMessage?: string;
+  timeout?: number;
+}
+
+export const CODEX_HOOK_DEFS: Record<string, CodexHookDef> = {
+  'session-context':       { event: 'SessionStart', matcher: 'startup|resume', level: 'minimal', requiresWorkspace: true, statusMessage: 'Loading workflow context' },
+  'spec-injector':         { event: 'SessionStart', matcher: 'startup', level: 'standard', requiresWorkspace: true, statusMessage: 'Loading project specs' },
+  'skill-context':         { event: 'UserPromptSubmit', level: 'standard', requiresWorkspace: true },
+  'keyword-spec-injector': { event: 'UserPromptSubmit', level: 'standard', requiresWorkspace: true },
+  'delegate-monitor':      { event: 'PostToolUse', matcher: 'Bash', level: 'standard' },
+  'coordinator-tracker':   { event: 'Stop', level: 'standard', requiresWorkspace: true },
+  'team-monitor':          { event: 'Stop', level: 'standard' },
+  'telemetry':             { event: 'Stop', level: 'standard' },
+  'workflow-guard':        { event: 'PreToolUse', matcher: 'Bash', level: 'full', requiresWorkspace: true, statusMessage: 'Checking command safety' },
+};
+
+export const CODEX_HOOK_LEVEL_DESCRIPTIONS: Record<HookLevel, string> = {
+  none: 'No hooks',
+  minimal: 'Session context (SessionStart)',
+  standard: '+ spec/keyword-injector + skill-context + delegate-monitor + coordinator/team/telemetry(Stop)',
+  full: '+ workflow-guard (PreToolUse, Bash only)',
 };
 
 /** Numeric ordering for level comparison */
@@ -253,11 +285,302 @@ export function installHooksByLevel(
 }
 
 // ---------------------------------------------------------------------------
-// Stdin reader for hook runners
+// Codex hooks helpers
 // ---------------------------------------------------------------------------
 
+interface CodexHookGroup {
+  matcher?: string;
+  hooks: Array<{ type: string; command: string; statusMessage?: string; timeout?: number }>;
+}
+
+interface CodexHooksFile {
+  hooks?: {
+    SessionStart?: CodexHookGroup[];
+    PreToolUse?: CodexHookGroup[];
+    PostToolUse?: CodexHookGroup[];
+    UserPromptSubmit?: CodexHookGroup[];
+    Stop?: CodexHookGroup[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+export function getCodexHooksPath(opts: { project?: boolean } = {}): string {
+  return opts.project
+    ? join(process.cwd(), '.codex', 'hooks.json')
+    : join(homedir(), '.codex', 'hooks.json');
+}
+
+export function loadCodexHooks(hooksPath: string): CodexHooksFile {
+  if (!existsSync(hooksPath)) return {};
+  try { return JSON.parse(readFileSync(hooksPath, 'utf8')); }
+  catch { return {}; }
+}
+
+export function removeCodexMaestroHooks(hooksFile: CodexHooksFile): void {
+  if (!hooksFile.hooks) return;
+  const events = ['SessionStart', 'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop'] as const;
+  for (const eventKey of events) {
+    const groups = hooksFile.hooks[eventKey] as CodexHookGroup[] | undefined;
+    if (!groups) continue;
+    for (const group of groups) {
+      group.hooks = group.hooks.filter((h) => !h.command.includes(HOOK_MARKER));
+    }
+    hooksFile.hooks[eventKey] = groups.filter((g) => g.hooks.length > 0) as never;
+    if ((hooksFile.hooks[eventKey] as CodexHookGroup[]).length === 0) {
+      delete hooksFile.hooks[eventKey];
+    }
+  }
+  if (Object.keys(hooksFile.hooks).length === 0) {
+    delete hooksFile.hooks;
+  }
+}
+
+/**
+ * Check whether `codex_hooks = true` is set in config.toml.
+ * Returns true if the flag is found; prints a hint otherwise.
+ */
+export function checkCodexHooksFeatureFlag(opts: { project?: boolean } = {}): boolean {
+  const configPath = opts.project
+    ? join(process.cwd(), '.codex', 'config.toml')
+    : join(homedir(), '.codex', 'config.toml');
+  if (!existsSync(configPath)) return false;
+  const content = readFileSync(configPath, 'utf8');
+  return /codex_hooks\s*=\s*true/i.test(content);
+}
+
+/**
+ * Install hooks at the given level into Codex hooks.json.
+ */
+export function installCodexHooksByLevel(
+  level: HookLevel,
+  opts: { project?: boolean; hooksPath?: string } = {},
+): InstallHooksResult {
+  if (level === 'none') {
+    return { settingsPath: '', installedHooks: [], level };
+  }
+
+  const hooksPath = opts.hooksPath ?? getCodexHooksPath({ project: opts.project });
+  const hooksFile = loadCodexHooks(hooksPath);
+
+  // Remove existing maestro hooks to avoid duplicates
+  removeCodexMaestroHooks(hooksFile);
+
+  // Register hooks matching the requested level
+  if (!hooksFile.hooks) hooksFile.hooks = {};
+
+  const installedHooks: string[] = [];
+  for (const [name, def] of Object.entries(CODEX_HOOK_DEFS)) {
+    if (!hookIncludedInLevel(def.level, level)) continue;
+
+    const eventKey = def.event;
+    if (!hooksFile.hooks[eventKey]) hooksFile.hooks[eventKey] = [] as never;
+    const groups = hooksFile.hooks[eventKey] as CodexHookGroup[];
+
+    const hookEntry: { type: string; command: string; statusMessage?: string; timeout?: number } = {
+      type: 'command',
+      command: `maestro hooks run ${name}`,
+    };
+    if (def.statusMessage) hookEntry.statusMessage = def.statusMessage;
+    if (def.timeout) hookEntry.timeout = def.timeout;
+
+    const group: CodexHookGroup = { hooks: [hookEntry] };
+    if (def.matcher) group.matcher = def.matcher;
+    groups.push(group);
+    installedHooks.push(name);
+  }
+
+  // Ensure parent directory exists
+  paths.ensure(join(hooksPath, '..'));
+  writeFileSync(hooksPath, JSON.stringify(hooksFile, null, 2));
+
+  return { settingsPath: hooksPath, installedHooks, level };
+}
+
+// ---------------------------------------------------------------------------
+// Antigravity (agy) hooks
+//
+// File schema (per https://antigravity.google/docs/hooks):
+//   Top-level is Record<hookName, HookConfig> — a map of NAMED hooks.
+//   Each named hook can have `enabled: false` to disable without removing.
+//
+// Events:
+//   PreToolUse  / PostToolUse  — use {matcher, hooks: [...]} grouping; matcher
+//                                is a regex on agy tool names.
+//   PreInvocation / PostInvocation / Stop — flat [handler, ...] array
+//                                (no matcher wrapping; matcher field ignored).
+//
+// Locations:
+//   global    → ~/.gemini/config/hooks.json
+//   workspace → <project>/.agents/hooks.json
+//
+// Maestro identification: every maestro-installed hook is registered under a
+// top-level name with the `maestro-` prefix, so removal is a key-prefix sweep.
+// ---------------------------------------------------------------------------
+
+/** Antigravity hook event names. */
+type AgyEvent = 'PreToolUse' | 'PostToolUse' | 'PreInvocation' | 'PostInvocation' | 'Stop';
+
+interface AgyHookDef {
+  event: AgyEvent;
+  matcher?: string;              // only meaningful for PreToolUse/PostToolUse
+  level: HookLevel;
+  requiresWorkspace?: boolean;
+  timeout?: number;
+}
+
+/**
+ * Maestro → Antigravity event mapping.
+ *
+ * Agy has no SessionStart / UserPromptSubmit. The closest analog is
+ * PreInvocation (fires before every model call). The runners that previously
+ * targeted UserPromptSubmit / SessionStart are remapped to PreInvocation and
+ * rely on workspace-state checks to be cheap on repeated firings.
+ *
+ * Tool matchers use agy tool names (not Claude's): run_command, write_to_file,
+ * replace_file_content, multi_replace_file_content, invoke_subagent, etc.
+ */
+export const AGY_HOOK_DEFS: Record<string, AgyHookDef> = {
+  // Minimal — safe monitoring
+  'spec-injector':         { event: 'PreToolUse', matcher: 'invoke_subagent', level: 'minimal', requiresWorkspace: true },
+
+  // Standard — context injection + delegate / team / coordinator monitoring
+  'session-context':       { event: 'PreInvocation', level: 'standard', requiresWorkspace: true },
+  'skill-context':         { event: 'PreInvocation', level: 'standard', requiresWorkspace: true },
+  'keyword-spec-injector': { event: 'PreInvocation', level: 'standard', requiresWorkspace: true },
+  'delegate-monitor':      { event: 'PostToolUse', matcher: 'run_command|invoke_subagent', level: 'standard' },
+  'team-monitor':          { event: 'Stop', level: 'standard' },
+  'telemetry':             { event: 'Stop', level: 'standard' },
+  'coordinator-tracker':   { event: 'Stop', level: 'standard', requiresWorkspace: true },
+
+  // Full — guards
+  'preflight-guard':       { event: 'PreToolUse', matcher: 'run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent', level: 'standard', requiresWorkspace: true },
+  'spec-validator':        { event: 'PreToolUse', matcher: 'write_to_file|replace_file_content|multi_replace_file_content', level: 'standard', requiresWorkspace: true },
+  'workflow-guard':        { event: 'PreToolUse', matcher: 'run_command|write_to_file|replace_file_content|multi_replace_file_content', level: 'full', requiresWorkspace: true },
+};
+
+export const AGY_HOOK_LEVEL_DESCRIPTIONS: Record<HookLevel, string> = {
+  none: 'No hooks',
+  minimal: 'spec-injector (PreToolUse on invoke_subagent)',
+  standard: '+ session/skill/keyword context (PreInvocation) + delegate-monitor (PostToolUse) + team/telemetry/coordinator (Stop) + preflight/spec guards',
+  full: '+ workflow-guard (PreToolUse on shell/file writes)',
+};
+
+// File-schema types matching Antigravity's published shape.
+interface AgyHookHandler {
+  type?: string;          // defaults to "command"
+  command: string;
+  timeout?: number;
+}
+
+interface AgyToolEventEntry {
+  matcher?: string;       // regex on tool name
+  hooks: AgyHookHandler[];
+}
+
+interface AgyHookConfig {
+  enabled?: boolean;
+  PreToolUse?: AgyToolEventEntry[];
+  PostToolUse?: AgyToolEventEntry[];
+  PreInvocation?: AgyHookHandler[];
+  PostInvocation?: AgyHookHandler[];
+  Stop?: AgyHookHandler[];
+}
+
+/** Whole hooks.json file: a flat map of hookName → HookConfig. */
+type AgyHooksFile = Record<string, AgyHookConfig>;
+
+const AGY_HOOK_NAME_PREFIX = 'maestro-';
+
+/**
+ * Resolve the path where Antigravity hooks are configured.
+ *   global    → ~/.gemini/config/hooks.json
+ *   workspace → <project>/.agents/hooks.json
+ *
+ * `projectPath` should be the absolute path of the target project; falls back
+ * to process.cwd() when omitted (matches the existing Codex pattern).
+ */
+export function getAgyHooksPath(opts: { project?: boolean; projectPath?: string } = {}): string {
+  return opts.project
+    ? join(opts.projectPath ?? process.cwd(), '.agents', 'hooks.json')
+    : join(homedir(), '.gemini', 'config', 'hooks.json');
+}
+
+export function loadAgyHooks(hooksPath: string): AgyHooksFile {
+  if (!existsSync(hooksPath)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(hooksPath, 'utf8'));
+    return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed as AgyHooksFile : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Strip all maestro-prefixed top-level entries (preserves user-defined hooks). */
+export function removeAgyMaestroHooks(hooksFile: AgyHooksFile): void {
+  for (const key of Object.keys(hooksFile)) {
+    if (key.startsWith(AGY_HOOK_NAME_PREFIX)) delete hooksFile[key];
+  }
+}
+
+/** Determines which event-key shape applies. */
+function isFlatEvent(event: AgyEvent): boolean {
+  return event === 'PreInvocation' || event === 'PostInvocation' || event === 'Stop';
+}
+
+/**
+ * Install hooks at the given level into Antigravity's hooks.json.
+ */
+export function installAgyHooksByLevel(
+  level: HookLevel,
+  opts: { project?: boolean; projectPath?: string; hooksPath?: string } = {},
+): InstallHooksResult {
+  if (level === 'none') {
+    return { settingsPath: '', installedHooks: [], level };
+  }
+
+  const hooksPath = opts.hooksPath ?? getAgyHooksPath({ project: opts.project, projectPath: opts.projectPath });
+  const hooksFile = loadAgyHooks(hooksPath);
+  removeAgyMaestroHooks(hooksFile);
+
+  const installedHooks: string[] = [];
+  for (const [name, def] of Object.entries(AGY_HOOK_DEFS)) {
+    if (!hookIncludedInLevel(def.level, level)) continue;
+
+    const hookName = `${AGY_HOOK_NAME_PREFIX}${name}`;
+    const handler: AgyHookHandler = { type: 'command', command: `maestro hooks run ${name}` };
+    if (def.timeout) handler.timeout = def.timeout;
+
+    const config: AgyHookConfig = {};
+    if (isFlatEvent(def.event)) {
+      (config[def.event] as AgyHookHandler[]) = [handler];
+    } else {
+      const entry: AgyToolEventEntry = { hooks: [handler] };
+      if (def.matcher) entry.matcher = def.matcher;
+      (config[def.event] as AgyToolEventEntry[]) = [entry];
+    }
+    hooksFile[hookName] = config;
+    installedHooks.push(name);
+  }
+
+  // Only write if there are entries — avoid creating an empty {} file.
+  paths.ensure(join(hooksPath, '..'));
+  if (Object.keys(hooksFile).length > 0) {
+    writeFileSync(hooksPath, JSON.stringify(hooksFile, null, 2));
+  }
+
+  return { settingsPath: hooksPath, installedHooks, level };
+}
+
+// ---------------------------------------------------------------------------
+// Stdin reader for hook runners (cached — safe to call multiple times)
+// ---------------------------------------------------------------------------
+
+let _stdinCache: string | null = null;
+
 function readStdin(): Promise<string> {
-  return new Promise((resolve) => {
+  if (_stdinCache !== null) return Promise.resolve(_stdinCache);
+  return new Promise<string>((resolve) => {
     let input = '';
     const timeout = setTimeout(() => resolve(input), 500);
     process.stdin.setEncoding('utf8');
@@ -266,7 +589,37 @@ function readStdin(): Promise<string> {
       clearTimeout(timeout);
       resolve(input);
     });
-  });
+  }).then(raw => { _stdinCache = raw; return raw; });
+}
+
+/**
+ * Extract key fields from hook stdin for analytics logging.
+ * Keeps only short, diagnostic-relevant fields — never full prompts.
+ */
+function extractHookInputData(raw: string): Record<string, unknown> {
+  try {
+    if (!raw) return {};
+    const data = JSON.parse(raw);
+    const result: Record<string, unknown> = {};
+    if (data.tool_name) result.tool_name = data.tool_name;
+    if (data.session_id) result.session_id = data.session_id;
+    if (data.hook_event_name) result.hook_event_name = data.hook_event_name;
+    // tool_input key fields (abbreviated)
+    const ti = data.tool_input;
+    if (ti && typeof ti === 'object') {
+      if (ti.file_path) result.file_path = ti.file_path;
+      if (ti.subagent_type) result.subagent_type = ti.subagent_type;
+      if (typeof ti.command === 'string') result.command = ti.command.slice(0, 120);
+    } else if (typeof ti === 'string') {
+      result.command = ti.slice(0, 120);
+    }
+    // UserPromptSubmit: first 120 chars
+    const prompt = data.user_prompt ?? data.prompt;
+    if (typeof prompt === 'string') result.prompt_snippet = prompt.slice(0, 120);
+    return result;
+  } catch {
+    return {};
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +709,7 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
     if (result.inject && result.content) {
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: {
-          hookEventName: 'UserPromptSubmit',
+          hookEventName: data.hook_event_name || 'UserPromptSubmit',
           additionalContext: result.content,
         },
       }));
@@ -384,6 +737,25 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
       }));
       process.exit(2);
     }
+
+    // PathGuard: check Write/Edit file paths against directory boundaries
+    if (toolName === 'Write' || toolName === 'Edit') {
+      const filePath: string = data.tool_input?.file_path ?? data.tool_input?.path ?? '';
+      if (filePath) {
+        const workspace = resolveWorkspace(data);
+        if (workspace) {
+          const guardConfig = loadPathGuardConfig(workspace);
+          const pathResult = evaluatePathGuard(toolName, filePath, workspace, guardConfig);
+          if (pathResult.blocked) {
+            process.stdout.write(JSON.stringify({
+              decision: 'block',
+              reason: pathResult.reason,
+            }));
+            process.exit(2);
+          }
+        }
+      }
+    }
   },
 
   'prompt-guard': async () => {
@@ -399,7 +771,7 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
     if (result.flagged) {
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: {
-          hookEventName: 'UserPromptSubmit',
+          hookEventName: data.hook_event_name || 'UserPromptSubmit',
           additionalContext: result.warning,
         },
       }));
@@ -421,6 +793,27 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
 
     const raw = await readStdin();
     const data = JSON.parse(raw);
+    const hookEventName: string = data.hook_event_name ?? '';
+    const isSessionStart = hookEventName === 'SessionStart';
+
+    // Codex SessionStart: inject specs as additionalContext (no agentType available)
+    if (isSessionStart) {
+      const cwd = resolveWorkspace(data) ?? data.cwd ?? process.cwd();
+      const sessionId: string = data.session_id ?? '';
+      const specConfig = loadSpecInjectionConfig(cwd);
+      const result = evaluateSpecInjection('general', cwd, sessionId, specConfig);
+      if (result.inject && result.content) {
+        process.stdout.write(JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'SessionStart',
+            additionalContext: result.content,
+          },
+        }));
+      }
+      return;
+    }
+
+    // Claude Code PreToolUse:Agent — rewrite agent prompt
     const toolInput = data.tool_input ?? {};
     const agentType: string = toolInput.subagent_type ?? '';
     if (!agentType) return;
@@ -428,7 +821,8 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
     const cwd = resolveWorkspace(data) ?? data.cwd ?? process.cwd();
     const sessionId: string = data.session_id ?? '';
 
-    const result = evaluateSpecInjection(agentType, cwd, sessionId);
+    const specConfig = loadSpecInjectionConfig(cwd);
+    const result = evaluateSpecInjection(agentType, cwd, sessionId, specConfig);
     if (result.inject && result.content) {
       const originalPrompt: string = toolInput.prompt ?? '';
       const augmentedPrompt = `${result.content}\n\n---\n\n${originalPrompt}`;
@@ -551,30 +945,56 @@ export function registerHooksCommand(program: Command): void {
       // Workspace gate — hooks with requiresWorkspace exit silently
       // when no Maestro workspace (.workflow/ + valid state.json) is found.
       // This avoids stdin parsing + evaluator overhead for non-workflow projects.
-      const def = HOOK_DEFS[name];
+      const def = HOOK_DEFS[name] ?? CODEX_HOOK_DEFS[name];
+      const cwd = process.cwd();
       if (def?.requiresWorkspace) {
-        const cwd = process.cwd();
         if (!resolveWorkspace({ cwd })) {
           process.exit(0);
         }
       }
 
+      // Pre-read stdin so runners get cached data and we can log input params
+      const stdinRaw = await readStdin();
+      const inputData = extractHookInputData(stdinRaw);
+
+      // Track subprocess hook invocation
+      const startMs = Date.now();
+      let outcome = 'success';
       try {
         await runner();
       } catch {
+        outcome = 'error';
         // Silent fail — never block tool execution
       }
+      const durationMs = Date.now() - startMs;
+
+      // Log hook call with input params (best-effort, never block exit)
+      try {
+        const workspace = resolveWorkspace({ cwd });
+        if (workspace) {
+          const { logHookInvocation } = await import('../hooks/spec-analytics.js');
+          logHookInvocation(workspace, {
+            hookName: name,
+            pluginName: 'subprocess',
+            outcome,
+            durationMs,
+            data: { event: def?.event, ...inputData },
+          });
+        }
+      } catch { /* swallow */ }
+
       process.exit(0);
     });
 
   // --- maestro hooks install ---
   hooks
     .command('install')
-    .description('Install maestro hooks into Claude Code settings')
-    .option('--global', 'Install to global ~/.claude/settings.json (default)')
-    .option('--project', 'Install to project .claude/settings.json')
+    .description('Install maestro hooks into Claude Code or Codex settings')
+    .option('--global', 'Install to global settings (default)')
+    .option('--project', 'Install to project settings')
     .option('--level <level>', 'Hook level: minimal, standard, full (default: full)', 'full')
-    .action((opts: { global?: boolean; project?: boolean; level?: string }) => {
+    .option('--target <target>', 'Target: claude (default) or codex', 'claude')
+    .action((opts: { global?: boolean; project?: boolean; level?: string; target?: string }) => {
       const level = (opts.level ?? 'full') as HookLevel;
       if (!HOOK_LEVELS.includes(level) || level === 'none') {
         console.error(`Invalid level: ${opts.level}. Use: minimal, standard, full`);
@@ -582,43 +1002,72 @@ export function registerHooksCommand(program: Command): void {
         return;
       }
 
-      const result = installHooksByLevel(level, { project: opts.project });
-      console.log(`Maestro hooks installed (level: ${level}):`);
-      console.log(`  Statusline: installed`);
-      for (const name of result.installedHooks) {
-        const def = HOOK_DEFS[name];
-        const matcher = def.matcher ? ` [${def.matcher}]` : '';
-        console.log(`  ${name}: ${def.event}${matcher}`);
+      if (opts.target === 'codex') {
+        // Windows warning
+        if (process.platform === 'win32') {
+          console.log('Warning: Codex hooks are not yet supported on Windows.');
+        }
+        // Feature flag hint
+        if (!checkCodexHooksFeatureFlag({ project: opts.project })) {
+          console.log('Hint: Add codex_hooks = true to [features] in ~/.codex/config.toml to enable hooks.');
+        }
+        const result = installCodexHooksByLevel(level, { project: opts.project });
+        console.log(`Maestro hooks installed for Codex (level: ${level}):`);
+        for (const name of result.installedHooks) {
+          const def = CODEX_HOOK_DEFS[name];
+          const matcher = def.matcher ? ` [${def.matcher}]` : '';
+          console.log(`  ${name}: ${def.event}${matcher}`);
+        }
+        console.log(`  Config: ${result.settingsPath}`);
+      } else {
+        const result = installHooksByLevel(level, { project: opts.project });
+        console.log(`Maestro hooks installed (level: ${level}):`);
+        console.log(`  Statusline: installed`);
+        for (const name of result.installedHooks) {
+          const def = HOOK_DEFS[name];
+          const matcher = def.matcher ? ` [${def.matcher}]` : '';
+          console.log(`  ${name}: ${def.event}${matcher}`);
+        }
+        console.log(`  Settings: ${result.settingsPath}`);
       }
-      console.log(`  Settings: ${result.settingsPath}`);
     });
 
   // --- maestro hooks uninstall ---
   hooks
     .command('uninstall')
-    .description('Remove maestro hooks from Claude Code settings')
-    .option('--global', 'Uninstall from global ~/.claude/settings.json (default)')
-    .option('--project', 'Uninstall from project .claude/settings.json')
-    .action((opts) => {
-      const settingsPath = opts.project
-        ? join(process.cwd(), '.claude', 'settings.json')
-        : getClaudeSettingsPath();
+    .description('Remove maestro hooks from Claude Code or Codex settings')
+    .option('--global', 'Uninstall from global settings (default)')
+    .option('--project', 'Uninstall from project settings')
+    .option('--target <target>', 'Target: claude (default) or codex', 'claude')
+    .action((opts: { global?: boolean; project?: boolean; target?: string }) => {
+      if (opts.target === 'codex') {
+        const hooksPath = getCodexHooksPath({ project: opts.project });
+        if (!existsSync(hooksPath)) {
+          console.log('No Codex hooks.json found — nothing to uninstall.');
+          return;
+        }
+        const hooksFile = loadCodexHooks(hooksPath);
+        removeCodexMaestroHooks(hooksFile);
+        writeFileSync(hooksPath, JSON.stringify(hooksFile, null, 2));
+        console.log(`Maestro hooks removed from ${hooksPath}`);
+      } else {
+        const settingsPath = opts.project
+          ? join(process.cwd(), '.claude', 'settings.json')
+          : getClaudeSettingsPath();
 
-      if (!existsSync(settingsPath)) {
-        console.log('No settings file found — nothing to uninstall.');
-        return;
+        if (!existsSync(settingsPath)) {
+          console.log('No settings file found — nothing to uninstall.');
+          return;
+        }
+
+        const settings = loadClaudeSettings(settingsPath);
+        if (settings.statusLine?.command?.includes(HOOK_MARKER)) {
+          delete settings.statusLine;
+        }
+        removeMaestroHooks(settings);
+        writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+        console.log(`Maestro hooks removed from ${settingsPath}`);
       }
-
-      const settings = loadClaudeSettings(settingsPath);
-
-      if (settings.statusLine?.command?.includes(HOOK_MARKER)) {
-        delete settings.statusLine;
-      }
-
-      removeMaestroHooks(settings);
-
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-      console.log(`Maestro hooks removed from ${settingsPath}`);
     });
 
   // --- maestro hooks status ---
@@ -626,10 +1075,12 @@ export function registerHooksCommand(program: Command): void {
     .command('status')
     .description('Show current hook installation status')
     .action(() => {
+      // Claude Code hooks
       const globalPath = getClaudeSettingsPath();
       const projectPath = join(process.cwd(), '.claude', 'settings.json');
 
-      for (const [label, p] of [['Global', globalPath], ['Project', projectPath]] as const) {
+      console.log('Claude Code:');
+      for (const [label, p] of [['  Global', globalPath], ['  Project', projectPath]] as const) {
         if (!existsSync(p)) {
           console.log(`${label}: no settings file`);
           continue;
@@ -638,10 +1089,30 @@ export function registerHooksCommand(program: Command): void {
         const hasStatusline = s.statusLine?.command?.includes(HOOK_MARKER) || false;
 
         console.log(`${label} (${p}):`);
-        console.log(`  Statusline:        ${hasStatusline ? 'installed' : 'not installed'}`);
+        console.log(`    Statusline:        ${hasStatusline ? 'installed' : 'not installed'}`);
         for (const name of Object.keys(HOOK_DEFS)) {
           const installed = findHookInSettings(s, name);
-          console.log(`  ${name}: ${installed ? 'installed' : 'not installed'}`);
+          console.log(`    ${name}: ${installed ? 'installed' : 'not installed'}`);
+        }
+      }
+
+      // Codex hooks
+      const codexGlobalPath = getCodexHooksPath();
+      const codexProjectPath = getCodexHooksPath({ project: true });
+
+      console.log('\nCodex:');
+      for (const [label, p] of [['  Global', codexGlobalPath], ['  Project', codexProjectPath]] as const) {
+        if (!existsSync(p)) {
+          console.log(`${label}: no hooks.json`);
+          continue;
+        }
+        const hf = loadCodexHooks(p);
+        console.log(`${label} (${p}):`);
+        for (const name of Object.keys(CODEX_HOOK_DEFS)) {
+          const def = CODEX_HOOK_DEFS[name];
+          const groups = (hf.hooks?.[def.event] as CodexHookGroup[] | undefined) ?? [];
+          const installed = groups.some((g) => g.hooks.some((h) => h.command.includes(`hooks run ${name}`)));
+          console.log(`    ${name}: ${installed ? 'installed' : 'not installed'}`);
         }
       }
     });
@@ -674,6 +1145,146 @@ export function registerHooksCommand(program: Command): void {
       console.log(`Hook "${name}" toggled ${state}.`);
     });
 
+  // --- maestro hooks analytics ---
+  hooks
+    .command('analytics')
+    .alias('stats')
+    .description('View hook invocation analytics and statistics')
+    .option('--json', 'Output as JSON')
+    .option('--recent <n>', 'Show last N hook events')
+    .option('--hook <name>', 'Filter by hook name')
+    .option('--clear', 'Archive current log and start fresh')
+    .action(async (opts: { json?: boolean; recent?: string; hook?: string; clear?: boolean }) => {
+      const { readAnalytics, readRecentAnalytics, getLogFileSize, clearAnalyticsLog } = await import('../hooks/spec-analytics.js');
+      const cwd = process.cwd();
+      const workspace = resolveWorkspace({ cwd }) ?? cwd;
+
+      if (opts.clear) {
+        const archived = clearAnalyticsLog(workspace);
+        console.log(archived ? `\u2713 \u65E5\u5FD7\u5DF2\u5F52\u6863\u5230: ${archived}` : '\u65E0\u65E5\u5FD7\u6587\u4EF6\u53EF\u5F52\u6863\u3002');
+        return;
+      }
+
+      // Read and filter hook entries
+      const filterHookEntries = (entries: import('../hooks/spec-analytics.js').AnalyticsLogEntry[]) => {
+        let hooks = entries.filter(e => e.type === 'hook') as Array<{ type: 'hook' } & import('../hooks/spec-analytics.js').HookInvocationLogEntry>;
+        if (opts.hook) {
+          hooks = hooks.filter(e => e.hookName === opts.hook);
+        }
+        return hooks;
+      };
+
+      if (opts.recent) {
+        const n = parseInt(opts.recent, 10) || 30;
+        const all = readRecentAnalytics(workspace, n * 5); // over-read then filter
+        const hooks = filterHookEntries(all).slice(-n);
+
+        if (hooks.length === 0) {
+          console.log('\u6682\u65E0 Hook \u4E8B\u4EF6\u8BB0\u5F55\u3002');
+          return;
+        }
+        if (opts.json) {
+          console.log(JSON.stringify(hooks, null, 2));
+          return;
+        }
+
+        console.log(`\nHook \u8FD1\u671F\u4E8B\u4EF6\uFF08\u6700\u8FD1 ${hooks.length} \u6761\uFF09\uFF1A\n`);
+        for (const e of hooks) {
+          const ts = e.timestamp.slice(11, 19);
+          const dur = e.durationMs != null ? `${e.durationMs}ms` : '';
+          const outcomeColor = e.outcome === 'error' ? '\x1b[31m' : '\x1b[32m';
+          const plugin = e.pluginName === 'subprocess' ? '\u5B50\u8FDB\u7A0B' : '\u534F\u8C03\u5668';
+          const nodeStr = e.nodeId ? ` \u8282\u70B9:${e.nodeId}` : '';
+          const dataStr = e.data ? ` ${JSON.stringify(e.data)}` : '';
+          console.log(`  ${ts}  ${outcomeColor}${(e.outcome ?? 'ok').padEnd(7)}\x1b[0m [${plugin}] ${e.hookName.padEnd(24)} ${dur.padStart(6)}${nodeStr}${dataStr}`);
+        }
+        return;
+      }
+
+      // Default: summary
+      const all = readAnalytics(workspace);
+      const hooks = filterHookEntries(all);
+
+      if (hooks.length === 0) {
+        console.log('\u6682\u65E0 Hook \u4E8B\u4EF6\u8BB0\u5F55\u3002Hook \u8C03\u7528\u4F1A\u81EA\u52A8\u8BB0\u5F55\u3002');
+        return;
+      }
+
+      // Compute hook-specific stats
+      const byName: Record<string, { total: number; errors: number; totalMs: number; durCount: number }> = {};
+      const byPlugin: Record<string, number> = {};
+      let totalDurMs = 0;
+      let durCount = 0;
+
+      for (const e of hooks) {
+        const n = e.hookName;
+        if (!byName[n]) byName[n] = { total: 0, errors: 0, totalMs: 0, durCount: 0 };
+        byName[n].total++;
+        if (e.outcome === 'error') byName[n].errors++;
+        if (e.durationMs != null) {
+          byName[n].totalMs += e.durationMs;
+          byName[n].durCount++;
+          totalDurMs += e.durationMs;
+          durCount++;
+        }
+        const p = e.pluginName ?? '(unknown)';
+        byPlugin[p] = (byPlugin[p] ?? 0) + 1;
+      }
+
+      if (opts.json) {
+        const stats = {
+          totalInvocations: hooks.length,
+          avgDurationMs: durCount > 0 ? totalDurMs / durCount : 0,
+          byHook: Object.fromEntries(Object.entries(byName).map(([k, v]) => [k, {
+            total: v.total,
+            errors: v.errors,
+            errorRate: v.total > 0 ? (v.errors / v.total * 100) : 0,
+            avgDurationMs: v.durCount > 0 ? v.totalMs / v.durCount : 0,
+          }])),
+          byPlugin,
+          timeRange: {
+            earliest: hooks[0]?.timestamp ?? '',
+            latest: hooks[hooks.length - 1]?.timestamp ?? '',
+          },
+        };
+        console.log(JSON.stringify(stats, null, 2));
+        return;
+      }
+
+      // Formatted output
+      const fileSize = getLogFileSize(workspace);
+      const earliest = hooks[0]?.timestamp?.slice(0, 10) ?? '\u2014';
+      const latest = hooks[hooks.length - 1]?.timestamp?.slice(0, 10) ?? '\u2014';
+
+      console.log('\nHook \u5206\u6790\u62A5\u544A');
+      console.log('============\n');
+      console.log(`  \u603B\u8C03\u7528\u6B21\u6570:      ${hooks.length}`);
+      if (durCount > 0) console.log(`  \u5E73\u5747\u8017\u65F6:        ${(totalDurMs / durCount).toFixed(1)}ms`);
+
+      // By type (subprocess vs coordinator)
+      console.log('\n  \u6309\u7C7B\u578B:');
+      for (const [p, count] of Object.entries(byPlugin).sort((a, b) => b[1] - a[1])) {
+        const label = p === 'subprocess' ? '\u5B50\u8FDB\u7A0B (Claude Code / Codex)' : p === 'specAnalytics' ? '\u534F\u8C03\u5668 (\u8FDB\u7A0B\u5185)' : p;
+        console.log(`    ${label.padEnd(36)} ${count}`);
+      }
+
+      // By hook name
+      const sorted = Object.entries(byName).sort((a, b) => b[1].total - a[1].total);
+      console.log('\n  \u6309 Hook:');
+      console.log(`    ${'Hook'.padEnd(28)} ${'\u603B\u6570'.padStart(6)} ${'\u9519\u8BEF'.padStart(6)} ${'\u9519\u8BEF\u7387'.padStart(7)} ${'\u5E73\u5747ms'.padStart(8)}`);
+      console.log(`    ${'─'.repeat(28)} ${'─'.repeat(6)} ${'─'.repeat(6)} ${'─'.repeat(7)} ${'─'.repeat(8)}`);
+      for (const [name, s] of sorted) {
+        const errRate = s.total > 0 ? (s.errors / s.total * 100).toFixed(1) : '0.0';
+        const avgMs = s.durCount > 0 ? (s.totalMs / s.durCount).toFixed(1) : '\u2014';
+        const errColor = s.errors > 0 ? '\x1b[31m' : '';
+        const reset = s.errors > 0 ? '\x1b[0m' : '';
+        console.log(`    ${name.padEnd(28)} ${String(s.total).padStart(6)} ${errColor}${String(s.errors).padStart(6)}${reset} ${(errRate + '%').padStart(7)} ${String(avgMs).padStart(8)}`);
+      }
+
+      console.log(`\n  \u65E5\u5FD7: ${(fileSize / 1024).toFixed(1)} KB | ${earliest} ~ ${latest}`);
+      if (opts.hook) console.log(`  \u8FC7\u6EE4: --hook ${opts.hook}`);
+    });
+
   // --- maestro hooks list ---
   hooks
     .command('list')
@@ -699,6 +1310,13 @@ export function registerHooksCommand(program: Command): void {
         const matcher = def.matcher ? ` [${def.matcher}]` : '';
         const wf = def.requiresWorkspace ? ' (workspace)' : '';
         console.log(`  ${name}: ${def.event}${matcher} — ${enabled ? 'enabled' : 'disabled'} (level: ${def.level})${wf}`);
+      }
+
+      console.log('\nCodex hooks (subprocess):');
+      for (const [name, def] of Object.entries(CODEX_HOOK_DEFS)) {
+        const matcher = def.matcher ? ` [${def.matcher}]` : '';
+        const wf = def.requiresWorkspace ? ' (workspace)' : '';
+        console.log(`  ${name}: ${def.event}${matcher} (level: ${def.level})${wf}`);
       }
 
       console.log('\nCoordinator hooks (in-process):');

@@ -17,6 +17,8 @@ import type { RequirementProgressPayload, RequirementExpandedPayload, Requiremen
 import type { TeamMailboxMessage, TeamPhaseState, TeamAgentStatus, RoomSessionSnapshot, RoomAgent, RoomAgentStatus, RoomMailboxMessage, RoomTask } from '@/shared/team-types.js';
 import { useMeetingRoomStore } from '@/client/store/meeting-room-store.js';
 import { useRoomListStore } from '@/client/store/room-list-store.js';
+import { useMaestroCoordinateStore } from '@/client/store/maestro-coordinate-store.js';
+import type { MaestroSessionUpdatedPayload } from '@/shared/maestro-session-types.js';
 
 // ---------------------------------------------------------------------------
 // useWebSocket — connect to /ws, dispatch to stores, auto-reconnect
@@ -514,6 +516,13 @@ export function useWebSocket(): void {
             const closedRoomData = msg.data as { sessionId: string };
             roomHandleRoomClosed();
             roomListHandleClosed(closedRoomData.sessionId);
+            break;
+          }
+
+          // --- Maestro Coordinate events ---
+          case WS_EVENT_TYPES.MAESTRO_SESSION_UPDATED: {
+            const payload = msg.data as MaestroSessionUpdatedPayload;
+            useMaestroCoordinateStore.getState().onSessionUpdated(payload);
             break;
           }
 

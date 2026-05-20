@@ -44,7 +44,7 @@ category: arch
 `);
   writeFileSync(join(SPECS_DIR, 'quality-rules.md'), `---
 title: Quality Rules
-category: quality
+category: review
 ---
 
 # Quality Rules

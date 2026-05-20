@@ -161,7 +161,7 @@ export function TaskPlanSection({ tasks }: Props) {
                       {task.risks.map((r, i) => (
                         <li
                           key={i}
-                          style={{ fontSize: 'var(--font-size-xs)', color: '#C46555' }}
+                          style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-accent-red)' }}
                         >
                           ⚠ {r}
                         </li>

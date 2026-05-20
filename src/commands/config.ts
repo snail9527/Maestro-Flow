@@ -128,6 +128,7 @@ async function printDelegateShow(json: boolean) {
     const out = {
       tools: Object.fromEntries(tools.map(([name, e]) => [name, {
         enabled: e.enabled, model: e.primaryModel, tags: e.tags,
+        ...(e.reasoningEffort ? { reasoningEffort: e.reasoningEffort } : {}),
         ...(e.settingsFile ? { settings: e.settingsFile } : {}),
         ...(e.baseTool ? { baseTool: e.baseTool } : {}),
       }])),
@@ -148,10 +149,11 @@ async function printDelegateShow(json: boolean) {
   } else {
     for (const [name, entry] of tools) {
       const icon = entry.enabled ? '✓' : '✗';
+      const effort = entry.reasoningEffort ? `effort=${entry.reasoningEffort}` : '';
       const tags = entry.tags?.length ? `[${entry.tags.join(', ')}]` : '';
       const settings = entry.settingsFile ? ` settings=${entry.settingsFile}` : '';
       const base = entry.baseTool ? ` (→${entry.baseTool})` : '';
-      console.log(`  ${icon} ${name.padEnd(14)} ${(entry.primaryModel || '—').padEnd(26)} ${tags}${settings}${base}`);
+      console.log(`  ${icon} ${name.padEnd(14)} ${(entry.primaryModel || '—').padEnd(26)} ${effort.padEnd(14)}${tags}${settings}${base}`);
     }
   }
 
@@ -298,6 +300,49 @@ export function registerConfigCommand(program: Command): void {
     .action(async () => {
       const { runDelegateConfigTui } = await import('../tui/config-ui/index.js');
       await runDelegateConfigTui('reference');
+    });
+
+  delegate.command('effort')
+    .description('Set reasoning effort for a tool (low, medium, high, max, or "unset")')
+    .argument('<tool>', 'Tool name (e.g. claude, codex)')
+    .argument('<level>', 'Effort level: low, medium, high, max, or "unset" to clear')
+    .action(async (tool: string, level: string) => {
+      const { loadCliToolsConfig, saveCliToolsConfig, REASONING_EFFORTS } = await import('../config/cli-tools-config.js');
+      const config = await loadCliToolsConfig(process.cwd());
+      const entry = config.tools[tool];
+      if (!entry) {
+        console.error(`Unknown tool: ${tool}. Available: ${Object.keys(config.tools).join(', ')}`);
+        process.exit(1);
+      }
+      if (level === 'unset') {
+        const updated = { ...entry };
+        delete updated.reasoningEffort;
+        await saveCliToolsConfig({ tools: { [tool]: updated } }, 'global', process.cwd());
+        console.log(`✓ ${tool}: reasoning effort cleared (tool default)`);
+        return;
+      }
+      if (!(REASONING_EFFORTS as readonly string[]).includes(level)) {
+        console.error(`Invalid effort: ${level}. Use: ${REASONING_EFFORTS.join(', ')}, or "unset".`);
+        process.exit(1);
+      }
+      await saveCliToolsConfig({ tools: { [tool]: { ...entry, reasoningEffort: level as typeof REASONING_EFFORTS[number] } } }, 'global', process.cwd());
+      console.log(`✓ ${tool}: reasoning effort = ${level}`);
+    });
+
+  delegate.command('reset')
+    .description('Reset cli-tools.json to defaults with auto-detected tools')
+    .action(async () => {
+      const { resetCliToolsConfig } = await import('../config/cli-tools-config.js');
+      const config = await resetCliToolsConfig();
+      const enabled = Object.entries(config.tools)
+        .filter(([, e]) => e.enabled)
+        .map(([n]) => n);
+      const disabled = Object.entries(config.tools)
+        .filter(([, e]) => !e.enabled)
+        .map(([n]) => n);
+      console.log('✓ cli-tools.json reset to defaults.');
+      if (enabled.length) console.log(`  Enabled:  ${enabled.join(', ')}`);
+      if (disabled.length) console.log(`  Disabled: ${disabled.join(', ')} (not found in PATH)`);
     });
 
   delegate.command('config')

@@ -18,8 +18,8 @@ export function QualityPanel() {
   const phasesTotal = phases.length;
   const totalCommits = phases.reduce((s, p) => s + p.execution.commits.length, 0);
 
-  // Gather verification data from phases in verifying/testing
-  const verifyingPhases = phases.filter((p) => p.status === 'verifying' || p.status === 'testing');
+  // Gather verification data from phases in verifying/reviewing
+  const verifyingPhases = phases.filter((p) => p.status === 'verifying' || p.status === 'reviewing');
   const allGaps = phases.flatMap((p) => p.verification.gaps.map((g) => ({
     phase: p.phase,
     text: typeof g === 'string' ? g : (g.description ?? g.id ?? JSON.stringify(g)) as string,

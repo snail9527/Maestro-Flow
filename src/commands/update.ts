@@ -13,6 +13,7 @@ import { existsSync } from 'node:fs';
 import { getPackageVersion } from '../utils/get-version.js';
 import { getAllManifests } from '../core/manifest.js';
 import { loadMigrations, planMigrations, runPendingMigrations } from '../utils/migration-registry.js';
+import { applyNotices, planNotices, printNoticePlan } from '../utils/update-notices.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -21,6 +22,7 @@ import { loadMigrations, planMigrations, runPendingMigrations } from '../utils/m
 const PACKAGE_NAME = 'maestro-flow';
 const REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
 const FETCH_TIMEOUT_MS = 8000;
+const VIEW_SERVER_PORT = 3001;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -66,6 +68,84 @@ function execAsync(cmd: string): Promise<{ stdout: string; stderr: string }> {
       else resolve({ stdout, stderr });
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Pre-update: stop view server
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if the view server is running.
+ */
+async function checkViewServer(): Promise<{ status: string; workspace?: string } | null> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${VIEW_SERVER_PORT}/api/health`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (res.ok) return await res.json() as { status: string; workspace?: string };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stop the view server if running to prevent file locks during npm install.
+ * Uses 2-stage approach: graceful API shutdown → force kill by port.
+ */
+async function stopViewServer(): Promise<boolean> {
+  const health = await checkViewServer();
+  if (!health) return false;
+
+  console.error('  Stopping view server to avoid file locks...');
+
+  // Stage 1: graceful API shutdown
+  try {
+    await fetch(`http://127.0.0.1:${VIEW_SERVER_PORT}/api/shutdown`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(5000),
+    });
+    await new Promise(r => setTimeout(r, 1000));
+  } catch {
+    // Connection refused = server already stopped
+  }
+
+  if (!(await checkViewServer())) {
+    console.error('  View server stopped.');
+    return true;
+  }
+
+  // Stage 2: force kill by port
+  try {
+    if (process.platform === 'win32') {
+      const { stdout } = await execAsync(`netstat -ano | findstr :${VIEW_SERVER_PORT}`);
+      for (const line of stdout.split('\n')) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 5 && parts[3] === 'LISTENING') {
+          const localAddr = parts[1] ?? '';
+          if (localAddr.endsWith(`:${VIEW_SERVER_PORT}`)) {
+            const pid = parts[4];
+            if (pid && /^[1-9]\d*$/.test(pid)) {
+              await execAsync(`taskkill /PID ${pid} /T /F`);
+              break;
+            }
+          }
+        }
+      }
+    } else {
+      const { stdout } = await execAsync(`lsof -i :${VIEW_SERVER_PORT} -t -sTCP:LISTEN`);
+      const pid = stdout.trim().split('\n')[0]?.trim();
+      if (pid && /^[1-9]\d*$/.test(pid)) {
+        await execAsync(`kill -TERM ${pid}`);
+      }
+    }
+    await new Promise(r => setTimeout(r, 500));
+    console.error('  View server stopped.');
+  } catch {
+    console.error('  Warning: could not stop view server. If update fails, run `maestro stop` first.');
+  }
+
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +197,28 @@ async function reinstallWorkflows(version: string): Promise<void> {
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Post-update: apply version-keyed notices (new features, optional installs)
+// ---------------------------------------------------------------------------
+
+/**
+ * Shell out to the NEW binary to apply notices for the upgrade range
+ * (oldVersion, newVersion]. The new binary's registry has the notice entries
+ * for this release; the running parent process can't see them.
+ */
+async function runNoticesViaNewBinary(oldVersion: string, opts: { nonInteractive?: boolean; dryRun?: boolean } = {}): Promise<void> {
+  const flags: string[] = ['--notices', '--from', oldVersion];
+  if (opts.nonInteractive) flags.push('--non-interactive');
+  if (opts.dryRun) flags.push('--dry-run');
+  // Stream stdio so the user sees prompts and answers them live.
+  const { spawn } = await import('node:child_process');
+  await new Promise<void>((resolve) => {
+    const child = spawn('maestro', ['update', ...flags], { stdio: 'inherit', shell: true });
+    child.on('exit', () => resolve());
+    child.on('error', () => resolve());
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -198,10 +300,46 @@ export function registerUpdateCommand(program: Command): void {
     .description('Check for updates and install the latest version')
     .option('--check', 'Only check for updates, do not install')
     .option('--migrate <path>', 'Run pending migrations for a project path')
-    .action(async (opts: { check?: boolean; migrate?: string }) => {
+    .option('--notices', 'Apply pending version-keyed notices (new tools/skills/features)')
+    .option('--from <version>', 'Lower bound for --notices (default: 0.0.0)')
+    .option('--to <version>', 'Upper bound for --notices (default: current binary version)')
+    .option('--dry-run', 'With --notices: list actions without executing them')
+    .option('--non-interactive', 'With --notices: skip prompts, use defaults')
+    .action(async (opts: {
+      check?: boolean;
+      migrate?: string;
+      notices?: boolean;
+      from?: string;
+      to?: string;
+      dryRun?: boolean;
+      nonInteractive?: boolean;
+    }) => {
       // Internal: --migrate runs migrations for a specific path via new binary
       if (opts.migrate) {
         await applyMigrations(opts.migrate);
+        return;
+      }
+
+      // Standalone: apply notices for a version range — no npm install
+      if (opts.notices) {
+        const from = opts.from ?? '0.0.0';
+        const to = opts.to ?? getPackageVersion();
+        const plan = planNotices(from, to);
+        if (plan.length === 0) {
+          console.error('  No pending update notices.');
+          return;
+        }
+        if (opts.dryRun) {
+          printNoticePlan(plan);
+          return;
+        }
+        console.error('');
+        console.error(`  Applying notices for v${from} → v${to}`);
+        await applyNotices(plan, from, to, {
+          dryRun: opts.dryRun,
+          nonInteractive: opts.nonInteractive,
+        });
+        console.error('');
         return;
       }
 
@@ -258,6 +396,10 @@ export function registerUpdateCommand(program: Command): void {
 
       console.error('');
       console.error(`  Installing ${PACKAGE_NAME}@${latest.version}...`);
+
+      // --- Pre-update: stop view server to prevent file locks ---
+      const viewServerWasRunning = await stopViewServer();
+
       console.error('');
 
       try {
@@ -273,6 +415,9 @@ export function registerUpdateCommand(program: Command): void {
         }
         console.error('');
         console.error(`  You can try manually: npm install -g ${PACKAGE_NAME}@${latest.version}`);
+        if (viewServerWasRunning) {
+          console.error('  Run `maestro view` to restart the dashboard.');
+        }
         console.error('');
         return;
       }
@@ -280,8 +425,17 @@ export function registerUpdateCommand(program: Command): void {
       // --- Post-update: reinstall workflow components ---
       await reinstallWorkflows(latest.version);
 
+      // --- Post-update: apply version-keyed notices via new binary ---
+      // (runs the new binary so its notice registry is the source of truth)
+      await runNoticesViaNewBinary(current);
+
       // --- Post-update: run pending migrations via new binary ---
       await runMigrationsForAllProjects();
+
+      if (viewServerWasRunning) {
+        console.error('');
+        console.error('  Run `maestro view` to restart the dashboard.');
+      }
 
       console.error('');
     });

@@ -36,11 +36,17 @@ Codebase-informed implementation planning with complexity assessment.
 3. Check <session>/explorations/cache-index.json for cached explorations
 4. Explore codebase (cache-aware):
    ```
-   Bash({ command: `maestro delegate "PURPOSE: Explore codebase to inform planning
+   exec_command({
+     cmd: `maestro delegate "PURPOSE: Explore codebase to inform planning
    TASK: * Search for relevant patterns * Identify files to modify * Document integration points
    MODE: analysis
    CONTEXT: @**/*
-   EXPECTED: JSON with: relevant_files[], patterns[], integration_points[], recommendations[]" --tool gemini --mode analysis`)
+   EXPECTED: JSON with: relevant_files[], patterns[], integration_points[], recommendations[]" --role explore --mode analysis`,
+     yield_time_ms: 30000,
+     max_output_tokens: 6000
+   })
+   // ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
+   // NEVER skip — delegate result is required for plan generation
    ```
 5. Store results in <session>/explorations/
 
@@ -48,12 +54,18 @@ Codebase-informed implementation planning with complexity assessment.
 
 Generate plan.json + .task/TASK-*.json:
 ```
-Bash({ command: `maestro delegate "PURPOSE: Generate implementation plan from exploration results
+exec_command({
+  cmd: `maestro delegate "PURPOSE: Generate implementation plan from exploration results
 TASK: * Create plan.json overview * Generate TASK-*.json files (2-7 tasks) * Define dependencies * Set convergence criteria
 MODE: write
 CONTEXT: @<session>/explorations/*.json
 EXPECTED: Files: plan.json + .task/TASK-*.json
-CONSTRAINTS: 2-7 tasks, include id/title/files[]/convergence.criteria/depends_on" --tool gemini --mode write`)
+CONSTRAINTS: 2-7 tasks, include id/title/files[]/convergence.criteria/depends_on" --role implement --mode write`,
+  yield_time_ms: 30000,
+  max_output_tokens: 6000
+})
+// ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
+// NEVER skip — must wait for plan files to be written
 ```
 
 Output files:

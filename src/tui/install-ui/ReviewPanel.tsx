@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text, useInput } from 'ink';
+import { C, BORDER } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // ReviewPanel -- Installation summary before execution
@@ -56,14 +57,13 @@ export function ReviewPanel({
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">
+      <Text bold color={C.primary}>
         Installation Summary
       </Text>
 
       <Box
         flexDirection="column"
-        borderStyle="round"
-        borderColor="cyan"
+        {...BORDER.primary}
         paddingX={1}
         marginTop={1}
       >

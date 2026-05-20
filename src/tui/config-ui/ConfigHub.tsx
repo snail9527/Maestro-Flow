@@ -4,8 +4,10 @@ import { SkillConfigDashboard } from './SkillConfigDashboard.js';
 import { ToolsDashboard } from '../tools-ui/ToolsDashboard.js';
 import { HooksPanel } from './HooksPanel.js';
 import { SpecPanel } from './SpecPanel.js';
+import { SpecAnalyticsPanel } from './SpecAnalyticsPanel.js';
+import { C, SP, BORDER, SYM, KeyHints, SectionHeader, CursorMarker, wrapCursor } from '../shared/index.js';
 
-const TABS = ['Skills', 'Delegate', 'Hooks', 'Overlay', 'Specs', 'Install'] as const;
+const TABS = ['Skills', 'Delegate', 'Hooks', 'Overlay', 'Specs', 'Analytics', 'Install'] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_DESCRIPTIONS: Record<Tab, string> = {
@@ -14,6 +16,7 @@ const TAB_DESCRIPTIONS: Record<Tab, string> = {
   Hooks: 'Hook installation status — Claude Code subprocess hooks and toggles.',
   Overlay: 'Command overlays — non-invasive patches for .claude/commands and .codex/skills.',
   Specs: 'Spec system — project knowledge (coding, arch, debug, test conventions).',
+  Analytics: 'Spec injection analytics — hit rates, keyword matches, hook invocations, and CLI usage.',
   Install: 'Install / uninstall maestro assets — components, hooks, MCP server.',
 };
 
@@ -44,8 +47,8 @@ export function ConfigHub({
 
   useInput((input, key) => {
     if (entered) return;
-    if (key.leftArrow) setTabIdx(i => (i > 0 ? i - 1 : TABS.length - 1));
-    if (key.rightArrow || input === '\t') setTabIdx(i => (i < TABS.length - 1 ? i + 1 : 0));
+    if (key.leftArrow) setTabIdx(i => wrapCursor(i, -1, TABS.length));
+    if (key.rightArrow || input === '\t') setTabIdx(i => wrapCursor(i, 1, TABS.length));
     if (key.return) setEntered(true);
     if (input === 'q' || key.escape) exit();
   });
@@ -79,23 +82,26 @@ export function ConfigHub({
     if (tab === 'Specs') {
       return <SpecPanel workDir={workDir} onBack={backToHub} />;
     }
+    if (tab === 'Analytics') {
+      return <SpecAnalyticsPanel workDir={workDir} onBack={backToHub} />;
+    }
     if (tab === 'Install') {
       return <InstallLauncher onBack={backToHub} />;
     }
   }
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="cyan">MAESTRO CONFIG</Text>
+    <Box flexDirection="column" paddingX={SP.detailPadX}>
+      <Box {...BORDER.primary} flexDirection="column" paddingX={SP.panelPadX} paddingY={SP.panelPadY}>
+        <SectionHeader title="MAESTRO CONFIG" />
         <Text> </Text>
 
-        <Box gap={1}>
+        <Box gap={SP.tabGap}>
           {TABS.map((t, i) => (
-            <Box key={t} paddingX={1}>
+            <Box key={t}>
               {i === tabIdx
-                ? <Text bold inverse color="cyan">{` ${t} `}</Text>
-                : <Text dimColor>{` ${t} `}</Text>
+                ? <Text bold inverse color={C.primary}>{` ${t} `}</Text>
+                : <Text color={C.neutral}>{` ${t} `}</Text>
               }
             </Box>
           ))}
@@ -103,10 +109,8 @@ export function ConfigHub({
 
         <Text> </Text>
         <Text>{TAB_DESCRIPTIONS[tab]}</Text>
-
-        <Text> </Text>
-        <Text dimColor>  ←/→ switch tab  ↵ enter  [q] quit</Text>
       </Box>
+      <KeyHints hints="[←/→] Switch tab  [Enter] Enter  [q] Quit" />
     </Box>
   );
 }
@@ -157,17 +161,16 @@ function OverlayFallback({ message, onBack }: { message: string; onBack: () => v
   });
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="cyan">OVERLAY MANAGER</Text>
+    <Box flexDirection="column" paddingX={SP.detailPadX}>
+      <Box {...BORDER.primary} flexDirection="column" paddingX={SP.panelPadX} paddingY={SP.panelPadY}>
+        <SectionHeader title="OVERLAY MANAGER" />
         <Text> </Text>
         <Text dimColor>{message}</Text>
         <Text> </Text>
         <Text dimColor>  CLI: maestro overlay add {'<'}file{'>'}</Text>
         <Text dimColor>       maestro overlay apply</Text>
-        <Text> </Text>
-        <Text dimColor>  [q] back to hub</Text>
       </Box>
+      <KeyHints hints="[q] Back to hub" />
     </Box>
   );
 }
@@ -183,8 +186,8 @@ function InstallLauncher({ onBack }: { onBack: () => void }) {
 
   useInput((input, key) => {
     if (choice !== 'menu') return;
-    if (key.upArrow) setCursor(c => Math.max(0, c - 1));
-    if (key.downArrow) setCursor(c => Math.min(options.length - 1, c + 1));
+    if (key.upArrow) setCursor(c => wrapCursor(c, -1, options.length));
+    if (key.downArrow) setCursor(c => wrapCursor(c, 1, options.length));
     if (key.return) {
       setChoice(cursor === 0 ? 'install' : 'uninstall');
     }
@@ -192,18 +195,17 @@ function InstallLauncher({ onBack }: { onBack: () => void }) {
   });
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="cyan">INSTALL / UNINSTALL</Text>
+    <Box flexDirection="column" paddingX={SP.detailPadX}>
+      <Box {...BORDER.primary} flexDirection="column" paddingX={SP.panelPadX} paddingY={SP.panelPadY}>
+        <SectionHeader title="INSTALL / UNINSTALL" />
         <Text> </Text>
         <Text>Launch the install or uninstall wizard from the CLI:</Text>
         <Text> </Text>
         <Text dimColor>  CLI: maestro install          — interactive install wizard</Text>
         <Text dimColor>       maestro install wizard    — full TUI wizard</Text>
         <Text dimColor>       maestro uninstall         — remove installed assets</Text>
-        <Text> </Text>
-        <Text dimColor>  [q] back to hub</Text>
       </Box>
+      <KeyHints hints="[q] Back to hub" />
     </Box>
   );
 }

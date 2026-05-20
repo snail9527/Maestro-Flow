@@ -394,7 +394,7 @@ export function ChatInput({ processId: externalProcessId, executor }: ChatInputP
               onClick={handleSend}
               disabled={!text.trim() || isDisabled}
               className="shrink-0 w-[28px] h-[28px] rounded-[7px] flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed border-none cursor-pointer"
-              style={{ backgroundColor: 'var(--color-accent-orange)', color: '#fff', transition: 'all 150ms cubic-bezier(0.34,1.56,0.64,1)' }}
+              style={{ backgroundColor: 'var(--style-send-btn-bg)', color: 'var(--style-send-btn-color)', transition: 'all 150ms cubic-bezier(0.34,1.56,0.64,1)' }}
               onMouseEnter={(e) => { if (!isDisabled) (e.currentTarget as HTMLElement).style.transform = 'scale(1.06)'; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.transform = 'scale(1)'; }}
               aria-label="Send message"

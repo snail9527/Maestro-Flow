@@ -168,7 +168,7 @@ describe('E2E: StateManager cache consistency', () => {
       await writePhase(`0${i}-phase`, {
         phase: i,
         title: `Phase ${i}`,
-        status: 'pending',
+        status: 'not_started',
       } as PhaseCard);
     }
 
@@ -202,7 +202,7 @@ describe('E2E: StateManager cache consistency', () => {
   it('adding a new phase via applyFileChange inserts in sorted order', async () => {
     await writeStateJson({});
     await writePhase('01-first', { phase: 1, title: 'First', status: 'completed' } as PhaseCard);
-    await writePhase('03-third', { phase: 3, title: 'Third', status: 'pending' } as PhaseCard);
+    await writePhase('03-third', { phase: 3, title: 'Third', status: 'not_started' } as PhaseCard);
     await stateManager.buildInitialState();
 
     // Insert phase 2 between 1 and 3

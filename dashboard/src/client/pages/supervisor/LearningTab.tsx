@@ -221,7 +221,7 @@ function PatternDetail({ pattern, maxFrequency, suggestions }: {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {suggestions.map((s, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 100, background: SUGGESTION_COLORS[s.type] ?? 'var(--color-bg-tertiary)', color: '#fff', flexShrink: 0 }}>{s.type}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 100, background: SUGGESTION_COLORS[s.type] ?? 'var(--color-bg-tertiary)', color: 'var(--color-text-inverse)', flexShrink: 0 }}>{s.type}</span>
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-primary)' }}>{s.title}</div>
                     <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{s.description}</div>

@@ -11,10 +11,11 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { readdirSync } from 'node:fs';
 
-const CATEGORIES = ['session', 'tip', 'template', 'recipe', 'reference', 'decision'] as const;
+const CATEGORIES = ['session', 'tip', 'template', 'recipe', 'reference', 'decision', 'asset', 'blueprint', 'document'] as const;
 const PREFIX_MAP: Record<string, string> = {
   session: 'KNW', tip: 'TIP', template: 'TPL',
   recipe: 'RCP', reference: 'REF', decision: 'DCS',
+  asset: 'AST', blueprint: 'BLP', document: 'DOC',
 };
 
 function getKnowhowDir(): string {
@@ -46,14 +47,17 @@ export function registerKnowhowCommand(program: Command): void {
   knowhow
     .command('add')
     .description('Create a new knowhow entry')
-    .requiredOption('--type <type>', 'session|tip|template|recipe|reference|decision')
+    .requiredOption('--type <type>', 'session|tip|template|recipe|reference|decision|document')
     .requiredOption('--title <title>', 'Entry title')
     .requiredOption('--body <text>', 'Entry body (markdown)')
     .option('--body-file <path>', 'Read body from file')
-    .option('--tags <csv>', 'Comma-separated tags')
+    .option('--keywords <csv>', 'Comma-separated keywords')
     .option('--lang <lang>', '[template] Programming language')
     .option('--source <url>', '[reference] Original URL')
     .option('--status <status>', '[decision] proposed|accepted|superseded')
+    .option('--asset-type <type>', '[asset] Asset type (e.g. api-contract, data-model, prompt, config)')
+    .option('--code-paths <paths>', '[asset/blueprint] Comma-separated code paths')
+    .option('--category <category>', 'Spec category for agent discovery (coding, arch, test, debug, review, learning)')
     .action(async (opts) => {
       const type = opts.type as string;
       if (!CATEGORIES.includes(type as any)) {
@@ -74,9 +78,17 @@ export function registerKnowhowCommand(program: Command): void {
         console.error('--status is only valid for type "decision"');
         process.exit(1);
       }
+      if (opts.assetType && type !== 'asset') {
+        console.error('--asset-type is only valid for type "asset"');
+        process.exit(1);
+      }
+      if (opts.codePaths && type !== 'blueprint' && type !== 'asset') {
+        console.error('--code-paths is only valid for type "asset" or "blueprint"');
+        process.exit(1);
+      }
 
       const body = opts.bodyFile ? readFileSync(opts.bodyFile, 'utf-8') : opts.body;
-      const tags = opts.tags ? opts.tags.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+      const tags = opts.keywords ? opts.keywords.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
 
       const dir = getKnowhowDir();
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -88,14 +100,21 @@ export function registerKnowhowCommand(program: Command): void {
       const filename = `${prefix}-${ts}.md`;
 
       const { writeFileSync } = await import('node:fs');
-      const fmLines = ['---', `title: ${opts.title}`, `type: ${type}`, `category: ${type}`, `created: ${now.toISOString()}`];
+      const fmLines = ['---', `title: ${opts.title}`, `type: ${type}`, `created: ${now.toISOString()}`];
       if (tags.length > 0) {
-        fmLines.push('tags:');
+        fmLines.push('keywords:');
         for (const t of tags) fmLines.push(`  - ${t}`);
       }
       if (opts.lang) fmLines.push(`lang: ${opts.lang}`);
       if (opts.source) fmLines.push(`source: ${opts.source}`);
       if (opts.status) fmLines.push(`status: ${opts.status}`);
+      if (opts.category) fmLines.push(`category: ${opts.category}`);
+      if (opts.assetType) fmLines.push(`assetType: ${opts.assetType}`);
+      if (opts.codePaths) {
+        const paths = opts.codePaths.split(',').map((s: string) => s.trim()).filter(Boolean);
+        fmLines.push('codePaths:');
+        for (const p of paths) fmLines.push(`  - ${p}`);
+      }
       fmLines.push('---', '', body);
 
       writeFileSync(join(dir, filename), fmLines.join('\n'), 'utf-8');

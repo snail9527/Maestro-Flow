@@ -1,6 +1,6 @@
 ---
 name: manage-knowhow
-description: Manage knowhow entries across workflow and system stores (list, search, view, edit, delete, prune)
+description: Manage knowhow entries (workflow and system)
 argument-hint: "[list|search|view|edit|delete|prune] [query|id|file] [--store workflow|system|all] [--tag tag] [--type type]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---

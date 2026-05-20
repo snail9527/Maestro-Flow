@@ -28,6 +28,7 @@ import {
 import { spawnSync } from 'node:child_process';
 import { select, confirm } from '@inquirer/prompts';
 import { ExitPromptError } from '@inquirer/core';
+import { injectContent } from '../core/tag-injector.js';
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -468,7 +469,10 @@ function applyWorkflow(name: string): void {
 
   if (!existsSync(CLAUDE_DIR)) mkdirSync(CLAUDE_DIR, { recursive: true });
 
-  copyFileSync(wf.claudeMd, CLAUDE_MD);
+  const source = readFileSync(wf.claudeMd, 'utf-8');
+  const existing = existsSync(CLAUDE_MD) ? readFileSync(CLAUDE_MD, 'utf-8') : '';
+  const result = injectContent(existing, source, 'core');
+  writeFileSync(CLAUDE_MD, result, 'utf-8');
 
   if (wf.cliTools && existsSync(wf.cliTools)) {
     copyFileSync(wf.cliTools, CLI_TOOLS);
@@ -479,13 +483,30 @@ function applyWorkflow(name: string): void {
 
 function detectCurrentWorkflow(): string | null {
   if (!existsSync(CLAUDE_MD)) return null;
-  const current = readFileSync(CLAUDE_MD, 'utf-8').trim();
+  const current = readFileSync(CLAUDE_MD, 'utf-8');
+  const coreContent = extractCoreSection(current);
   const config = load();
   for (const [name, wf] of Object.entries(config.workflows)) {
     if (!existsSync(wf.claudeMd)) continue;
-    if (readFileSync(wf.claudeMd, 'utf-8').trim() === current) return name;
+    const sourceContent = readFileSync(wf.claudeMd, 'utf-8').trim();
+    // Compare core section content (tagged) or full content (legacy)
+    if (coreContent !== null) {
+      if (coreContent === sourceContent) return name;
+    } else {
+      if (current.trim() === sourceContent) return name;
+    }
   }
   return null;
+}
+
+/** Extract the content between core section markers, or null if not tagged. */
+function extractCoreSection(text: string): string | null {
+  const startMarker = '<!-- maestro:start section="core" -->';
+  const endMarker = '<!-- maestro:end section="core" -->';
+  const startIdx = text.indexOf(startMarker);
+  const endIdx = text.indexOf(endMarker);
+  if (startIdx === -1 || endIdx === -1) return null;
+  return text.slice(startIdx + startMarker.length, endIdx).trim();
 }
 
 // ---------------------------------------------------------------------------

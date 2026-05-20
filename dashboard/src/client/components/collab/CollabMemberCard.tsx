@@ -22,7 +22,7 @@ export function CollabMemberCard({ member }: { member: CollabMember }) {
       {/* Avatar placeholder */}
       <div
         className="relative flex-shrink-0 rounded-full flex items-center justify-center"
-        style={{ width: 40, height: 40, backgroundColor: '#6b7280' }}
+        style={{ width: 40, height: 40, backgroundColor: 'var(--color-accent-gray)' }}
       >
         <span className="text-white text-[length:14px] font-semibold select-none">
           {member.name.charAt(0).toUpperCase()}

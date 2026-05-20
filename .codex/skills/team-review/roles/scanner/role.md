@@ -59,7 +59,16 @@ Build prompt with target file patterns, toolchain dedup summary, and per-dimensi
 - PRF: Algorithm complexity, N+1 queries, unnecessary sync, memory leaks, missing caching
 - MNT: Architectural coupling, abstraction leaks, convention violations, dead code
 
-Execute via `maestro delegate --role review --mode analysis --rule analysis-review-code-quality`. Parse JSON array response, validate required fields (dimension, title, location.file), enforce per-dimension limit (max 5 each), filter minimum severity (medium+). Write `<session>/scan/semantic-findings.json`.
+Execute via:
+```
+exec_command({
+  cmd: `maestro delegate "<prompt>" --role review --mode analysis --rule analysis-review-code-quality`,
+  yield_time_ms: 30000, max_output_tokens: 6000
+})
+// ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
+// NEVER skip — semantic findings are required for aggregation
+```
+Parse JSON array response, validate required fields (dimension, title, location.file), enforce per-dimension limit (max 5 each), filter minimum severity (medium+). Write `<session>/scan/semantic-findings.json`.
 
 ## Phase 4: Aggregate & Output
 

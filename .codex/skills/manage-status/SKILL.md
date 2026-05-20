@@ -1,6 +1,6 @@
 ---
 name: manage-status
-description: Display project dashboard with phase progress, active tasks, and next steps
+description: Show project dashboard with progress and next steps
 argument-hint: ""
 allowed-tools: Read, Bash, Glob, Grep
 ---

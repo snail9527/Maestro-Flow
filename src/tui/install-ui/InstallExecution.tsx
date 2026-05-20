@@ -5,12 +5,15 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { writeFileSync } from 'node:fs';
 import { paths } from '../../config/paths.js';
+import { C } from '../shared/index.js';
 import {
   scanComponents,
   scanDisabledItems,
   restoreDisabledState,
   applyOverlaysPostInstall,
   addMcpServer,
+  addCodexMcpServer,
+  addExtraMcpServer,
   copyRecursive,
   injectDocFile,
   createTargetBackup,
@@ -23,7 +26,7 @@ import {
   findManifest,
   cleanManifestFiles,
 } from '../../core/manifest.js';
-import { installHooksByLevel, installStatusline as installStatuslineFn, type HookLevel } from '../../commands/hooks.js';
+import { installHooksByLevel, installCodexHooksByLevel, installStatusline as installStatuslineFn, type HookLevel } from '../../commands/hooks.js';
 import type { InstallFlowConfig } from './InstallConfirm.js';
 import { t } from '../../i18n/index.js';
 
@@ -37,6 +40,10 @@ export interface InstallFlowResult {
   filesSkipped: number;
   hooksInstalled: number;
   mcpRegistered: boolean;
+  codexHooksInstalled: number;
+  codexMcpRegistered: boolean;
+  extraMcpRegistered: string[];
+  extraMcpFailed: string[];
   manifestPath: string;
   statuslineInstalled: boolean;
   backupPath: string | null;
@@ -74,6 +81,10 @@ export function InstallExecution({ config, pkgRoot, version, onComplete }: Insta
         let filesSkipped = 0;
         let hooksInstalled = 0;
         let mcpRegistered = false;
+        let codexHooksInstalled = 0;
+        let codexMcpRegistered = false;
+        const extraMcpRegistered: string[] = [];
+        const extraMcpFailed: string[] = [];
         let statuslineInstalled = false;
         let backupPath: string | null = null;
         const warnings: string[] = [];
@@ -169,16 +180,50 @@ export function InstallExecution({ config, pkgRoot, version, onComplete }: Insta
           mcpRegistered = addMcpServer(config.mode, config.projectPath, config.mcpTools, config.mcpProjectRoot || undefined);
         }
 
-        // CLI tools config
+        // Codex Hooks
+        if (config.installCodexHooks) {
+          if (cancelled) return;
+          setStatus(t.install.execInstallingCodexHooks.replace('{level}', config.codexHookLevel));
+          const result = installCodexHooksByLevel(config.codexHookLevel, {
+            project: config.mode === 'project',
+          });
+          codexHooksInstalled = result.installedHooks.length;
+        }
+
+        // Codex MCP
+        if (config.installCodexMcp) {
+          if (cancelled) return;
+          setStatus(t.install.execRegisteringCodexMcp);
+          codexMcpRegistered = addCodexMcpServer(config.mode, config.projectPath, config.codexMcpTools, config.codexMcpProjectRoot || undefined);
+        }
+
+        // Extra MCP targets (opt-in: Cursor / Qoder / Trae / Kiro / Roo / VS Code Copilot / Gemini CLI)
+        if (config.installExtraMcp) {
+          for (const targetId of config.extraMcpTargetIds) {
+            if (cancelled) return;
+            setStatus(`Registering MCP for ${targetId}...`);
+            const ok = addExtraMcpServer(
+              targetId,
+              config.mode,
+              config.projectPath,
+              config.mcpTools,
+              config.mcpProjectRoot || undefined,
+            );
+            (ok ? extraMcpRegistered : extraMcpFailed).push(targetId);
+          }
+        }
+
+        // CLI tools config — first install creates, upgrade merges missing tools
         if (!cancelled) {
           const { initCliToolsConfig } = await import('../../config/cli-tools-config.js');
-          const created = await initCliToolsConfig();
-          if (created) setStatus('Initialized cli-tools.json');
+          const result = await initCliToolsConfig();
+          if (result.created) setStatus('Initialized cli-tools.json');
+          else if (result.added.length > 0) setStatus(`cli-tools.json: added ${result.added.join(', ')}`);
         }
 
         setDone(true);
         setStatus(t.install.execComplete);
-        onComplete({ filesInstalled, dirsCreated, filesSkipped, hooksInstalled, mcpRegistered, manifestPath, statuslineInstalled, backupPath, migrationWarnings: warnings });
+        onComplete({ filesInstalled, dirsCreated, filesSkipped, hooksInstalled, mcpRegistered, codexHooksInstalled, codexMcpRegistered, extraMcpRegistered, extraMcpFailed, manifestPath, statuslineInstalled, backupPath, migrationWarnings: warnings });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -196,8 +241,8 @@ export function InstallExecution({ config, pkgRoot, version, onComplete }: Insta
   if (error) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text color="red" bold>{t.install.execFailed}</Text>
-        <Text color="red">{error}</Text>
+        <Text color={C.error} bold>{t.install.execFailed}</Text>
+        <Text color={C.error}>{error}</Text>
       </Box>
     );
   }
@@ -206,10 +251,10 @@ export function InstallExecution({ config, pkgRoot, version, onComplete }: Insta
     <Box flexDirection="column" paddingX={1}>
       <Box>
         {done ? (
-          <Text color="green" bold>{t.install.execDone}</Text>
+          <Text color={C.success} bold>{t.install.execDone}</Text>
         ) : (
           <Box>
-            <Text color="cyan"><Spinner type="dots" /></Text>
+            <Text color={C.primary}><Spinner type="dots" /></Text>
             <Text> {status}</Text>
           </Box>
         )}

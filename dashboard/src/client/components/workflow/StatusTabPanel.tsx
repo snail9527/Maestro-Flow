@@ -37,18 +37,21 @@ function StatusBadge({ status }: StatusBadgeProps) {
   let colorClasses: string;
 
   switch (status) {
-    case 'pending':
     case 'not_started':
       colorClasses = 'bg-[var(--color-bg-hover)] text-[var(--color-text-tertiary)]';
       break;
-    case 'in_progress':
-    case 'running':
+    case 'planning':
+    case 'executing':
       colorClasses = 'bg-blue-950/40 text-blue-400';
       break;
     case 'completed':
     case 'passed':
     case 'verified':
       colorClasses = 'bg-green-950/40 text-green-400';
+      break;
+    case 'verifying':
+    case 'reviewing':
+      colorClasses = 'bg-orange-950/40 text-orange-400';
       break;
     case 'failed':
     case 'blocked':

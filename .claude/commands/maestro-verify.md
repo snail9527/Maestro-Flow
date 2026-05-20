@@ -1,6 +1,6 @@
 ---
 name: maestro-verify
-description: Goal-Backward verification with 3-layer must-have checks, anti-pattern scan, Nyquist test coverage validation, and gap-fix plan generation
+description: Use after execution to verify goals are actually achieved with evidence-based structural checks
 argument-hint: "[phase] [--skip-tests] [--skip-antipattern] [--dir <path>]"
 allowed-tools:
   - Read
@@ -38,6 +38,16 @@ Registers VRF artifact in state.json on completion.
 $ARGUMENTS — phase number or no args for milestone-wide, with optional flags.
 
 Flags (`--skip-tests`, `--skip-antipattern`, `--dir`), scope routing, output paths, and VRF artifact registration schema are defined in workflow `verify.md`.
+
+### Pre-load context (before verification)
+
+1. **Codebase docs**: If `.workflow/codebase/` exists, read `ARCHITECTURE.md` for expected module wiring and `FEATURES.md` for component mapping. Use in Layer 3 (Connection) checks.
+2. **Review specs**: Run `maestro spec load --category review` to load review standards. Use as quality baseline for anti-pattern scan and constraint checks.
+3. **Wiki constraints**: Run `maestro wiki search "architecture constraint" --json 2>/dev/null`. If results found, include documented invariants as additional truth checks in Layer 1.
+4. **Role Knowledge**:
+   - Browse: `maestro wiki list --category review`
+   - Load task-relevant entries: `maestro wiki load <id1> [id2...]`
+5. All are optional — proceed without if unavailable.
 </context>
 
 <execution>
@@ -45,18 +55,13 @@ Follow '~/.maestro/workflows/verify.md' completely.
 
 ### Post-verify Knowledge Inquiry
 
-After verification completes, evaluate inquiry triggers:
+| Condition | Ask | Route |
+|-----------|-----|-------|
+| Anti-pattern blockers found (TODO/FIXME/stubs) | "Update quality-rules.md?" | spec-add quality |
+| Architecture constraint violations | "Update architecture-constraints.md?" | spec-add arch |
+| Recurring test coverage gap (same module across tasks) | "Add to test-conventions.md?" | spec-add test |
 
-1. **Anti-pattern detection**: If anti-pattern scan found blockers (TODO/FIXME, stubs, empty returns):
-   → Ask: "Verification found {N} anti-patterns. Should `quality-rules.md` be updated to enforce these checks? (`/spec-add quality`)"
-
-2. **Constraint violation**: If Goal-Backward check found constraint_violations or missing wiring:
-   → Ask: "Verification found architecture constraint violations. Should `architecture-constraints.md` be updated? (`/spec-add arch`)"
-
-3. **Test coverage gaps**: If Nyquist gaps found with recurring pattern (same module/type across tasks):
-   → Ask: "Persistent test coverage gap detected in {module}. Should it be added to `test-conventions.md` as a required test area? (`/spec-add test`)"
-
-If user confirms, invoke `Skill({ skill: "spec-add", args: "<category> <content>" })`.
+On confirm → `Skill("spec-add", "<category> <content>")`.
 
 **Next-step routing on completion:**
 - All checks pass, no gaps → /quality-review
@@ -65,6 +70,20 @@ If user confirms, invoke `Skill({ skill: "spec-add", args: "<category> <content>
 
 **Gap-fix closure loop:**
 Gaps found → maestro-plan --gaps → maestro-execute → maestro-verify (re-run)
+
+**Completion status:**
+```
+--- COMPLETION STATUS ---
+STATUS: DONE|DONE_WITH_CONCERNS|NEEDS_RETRY
+CONCERNS: {description if applicable}
+NEXT: /quality-review
+--- END STATUS ---
+```
+
+Status mapping:
+- **DONE** — All checks pass, no gaps → NEXT: /quality-review
+- **DONE_WITH_CONCERNS** — Gaps found (must-have failures or anti-pattern blockers) → NEXT: /maestro-execute (after /maestro-plan --gaps)
+- **NEEDS_RETRY** — Verification could not complete (missing artifacts, corrupt data)
 </execution>
 
 <error_codes>

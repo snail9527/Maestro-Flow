@@ -22,6 +22,10 @@ export const DOMAIN_TAGS = [
 
 export type DomainTag = (typeof DOMAIN_TAGS)[number];
 
+/** Reasoning effort levels for thinking models. */
+export const REASONING_EFFORTS = ['low', 'medium', 'high', 'max'] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
 export interface ToolEntry {
   enabled: boolean;
   primaryModel: string;
@@ -33,6 +37,12 @@ export interface ToolEntry {
   settingsFile?: string;
   /** Base tool name for aliases (e.g. "claude" for "claude-analysis") */
   baseTool?: string;
+  /** Reasoning effort level (undefined = tool default).
+   *  Translated per-adapter: Claude → --effort, Codex → -c reasoning.effort. */
+  reasoningEffort?: ReasoningEffort;
+  /** Stale-stream silence window in ms before force-terminating a silent CLI
+   *  (undefined = adapter default, 10 min). Overridden by `delegate --timeout`. */
+  streamTimeoutMs?: number;
 }
 
 export interface RoleMapping {
@@ -91,7 +101,8 @@ export async function loadCliToolsConfig(workDir?: string): Promise<CliToolsConf
   let global: CliToolsConfig = DEFAULT_CONFIG;
   try {
     const raw = await readFile(globalPath, 'utf-8');
-    global = JSON.parse(raw) as CliToolsConfig;
+    const parsed = JSON.parse(raw) as Partial<CliToolsConfig>;
+    global = { ...DEFAULT_CONFIG, ...parsed, tools: { ...parsed.tools } };
   } catch {
     // No global config — use defaults
   }
@@ -133,13 +144,15 @@ export function selectTool(
   name: string | undefined,
   config: CliToolsConfig,
 ): SelectedTool | undefined {
+  const tools = config.tools ?? {};
+
   // Exact match by name
-  if (name && config.tools[name]?.enabled) {
-    return { name, entry: config.tools[name] };
+  if (name && tools[name]?.enabled) {
+    return { name, entry: tools[name] };
   }
 
   // Fallback: first enabled tool in config order
-  for (const [toolName, entry] of Object.entries(config.tools)) {
+  for (const [toolName, entry] of Object.entries(tools)) {
     if (entry.enabled) {
       return { name: toolName, entry };
     }
@@ -173,10 +186,11 @@ export function selectToolByRole(
   }
 
   // Fallback chain: try each named tool in order
+  const tools = config.tools ?? {};
   if (mapping.fallbackChain) {
     for (const toolName of mapping.fallbackChain) {
-      if (config.tools[toolName]?.enabled) {
-        return { name: toolName, entry: config.tools[toolName] };
+      if (tools[toolName]?.enabled) {
+        return { name: toolName, entry: tools[toolName] };
       }
     }
   }
@@ -250,7 +264,7 @@ export function rankToolsByDomain(
   const fullstack: SelectedTool[] = [];
   const rest: SelectedTool[] = [];
 
-  for (const [name, entry] of Object.entries(config.tools)) {
+  for (const [name, entry] of Object.entries(config.tools ?? {})) {
     if (!entry.enabled) continue;
     const tool: SelectedTool = { name, entry };
     if (entry.tags.includes(domain)) {
@@ -326,20 +340,16 @@ export async function resetCliToolsConfig(): Promise<CliToolsConfig> {
   return config;
 }
 
-/**
- * Initialize ~/.maestro/cli-tools.json with auto-detected tool availability.
- * No-op if the file already exists.
- * Returns true if created, false if skipped.
- */
-export async function initCliToolsConfig(): Promise<boolean> {
-  const configPath = join(homedir(), '.maestro', 'cli-tools.json');
-  try {
-    await readFile(configPath, 'utf-8');
-    return false; // already exists
-  } catch {
-    // doesn't exist — create it
-  }
+export interface InitResult {
+  /** Whether the file was created or modified. */
+  changed: boolean;
+  /** Tool names newly added (empty for first-time create or no-op). */
+  added: string[];
+  /** True when the file did not exist before this call. */
+  created: boolean;
+}
 
+function buildDefaultTools(): Record<string, ToolEntry> {
   const tools: Record<string, ToolEntry> = {};
   for (const def of TOOL_DEFS) {
     tools[def.name] = {
@@ -349,32 +359,93 @@ export async function initCliToolsConfig(): Promise<boolean> {
       type: def.type,
     };
   }
+  return tools;
+}
 
-  const config: CliToolsConfig = { version: '1.1.0', tools };
-  await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, JSON.stringify(config, null, 2) + '\n');
-  return true;
+function mergeMissingToolDefs(existing: Record<string, ToolEntry>): { merged: Record<string, ToolEntry>; added: string[] } {
+  const merged: Record<string, ToolEntry> = { ...existing };
+  const added: string[] = [];
+  for (const def of TOOL_DEFS) {
+    if (merged[def.name]) continue; // preserve user-customized entries verbatim
+    merged[def.name] = {
+      enabled: isCliAvailable(def.cmd),
+      primaryModel: def.primaryModel,
+      tags: def.tags,
+      type: def.type,
+    };
+    added.push(def.name);
+  }
+  return { merged, added };
+}
+
+/**
+ * Initialize / upgrade ~/.maestro/cli-tools.json.
+ *
+ * - First install (file missing): create from defaults with availability detection.
+ * - Upgrade (file present): merge defaults into existing — only adds tools that
+ *   are missing. Existing entries (primaryModel, secondaryModel, settingsFile,
+ *   reasoningEffort, tags, enabled) are preserved verbatim.
+ *
+ * Returns details about what changed.
+ */
+export async function initCliToolsConfig(): Promise<InitResult> {
+  const configPath = join(homedir(), '.maestro', 'cli-tools.json');
+
+  let existingRaw: string | undefined;
+  try {
+    existingRaw = await readFile(configPath, 'utf-8');
+  } catch {
+    // file missing — fall through to create
+  }
+
+  if (existingRaw === undefined) {
+    const config: CliToolsConfig = { version: '1.1.0', tools: buildDefaultTools() };
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify(config, null, 2) + '\n');
+    return { changed: true, added: [], created: true };
+  }
+
+  let existing: CliToolsConfig;
+  try {
+    existing = JSON.parse(existingRaw) as CliToolsConfig;
+  } catch {
+    // Malformed — leave it alone, don't blow away user data
+    return { changed: false, added: [], created: false };
+  }
+
+  const { merged, added } = mergeMissingToolDefs(existing.tools ?? {});
+  if (added.length === 0) return { changed: false, added: [], created: false };
+
+  const next: CliToolsConfig = { ...existing, version: existing.version ?? '1.1.0', tools: merged };
+  await writeFile(configPath, JSON.stringify(next, null, 2) + '\n');
+  return { changed: true, added, created: false };
 }
 
 /**
  * Synchronous version of initCliToolsConfig for non-async contexts (e.g. forceInstall).
+ * Same semantics: first-install creates, upgrade merges only missing tool defs.
  */
-export function initCliToolsConfigSync(): boolean {
+export function initCliToolsConfigSync(): InitResult {
   const configPath = join(homedir(), '.maestro', 'cli-tools.json');
-  if (existsSync(configPath)) return false;
 
-  const tools: Record<string, ToolEntry> = {};
-  for (const def of TOOL_DEFS) {
-    tools[def.name] = {
-      enabled: isCliAvailable(def.cmd),
-      primaryModel: def.primaryModel,
-      tags: def.tags,
-      type: def.type,
-    };
+  if (!existsSync(configPath)) {
+    const config: CliToolsConfig = { version: '1.1.0', tools: buildDefaultTools() };
+    mkdirSync(dirname(configPath), { recursive: true });
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    return { changed: true, added: [], created: true };
   }
 
-  const config: CliToolsConfig = { version: '1.1.0', tools };
-  mkdirSync(dirname(configPath), { recursive: true });
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-  return true;
+  let existing: CliToolsConfig;
+  try {
+    existing = JSON.parse(readFileSync(configPath, 'utf-8')) as CliToolsConfig;
+  } catch {
+    return { changed: false, added: [], created: false };
+  }
+
+  const { merged, added } = mergeMissingToolDefs(existing.tools ?? {});
+  if (added.length === 0) return { changed: false, added: [], created: false };
+
+  const next: CliToolsConfig = { ...existing, version: existing.version ?? '1.1.0', tools: merged };
+  writeFileSync(configPath, JSON.stringify(next, null, 2) + '\n');
+  return { changed: true, added, created: false };
 }

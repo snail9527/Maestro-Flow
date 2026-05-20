@@ -41,7 +41,7 @@ Archive completed milestone, move artifacts to history, and prepare for next.
 ## Step 2.5: Load Existing Learnings
 
 ```
-existing_learnings = maestro spec load --category learning
+existing_learnings = maestro spec load --category coding
 ```
 
 Check existing entries to avoid duplicates when appending in Step 3.

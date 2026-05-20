@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { type WizardStep, type InstallConfig, type InstallResult, DEFAULT_INSTALL_CONFIG, WIZARD_STEPS } from './types.js';
+import { C, SYM } from '../shared/index.js';
 import { GradientHeader } from './GradientHeader.js';
 import { ShortcutFooter } from './ShortcutFooter.js';
 import { ComponentGrid } from './ComponentGrid.js';
@@ -111,14 +112,14 @@ export function CyberdeckBlueprint({ pkgRoot, version }: CyberdeckBlueprintProps
       <Box flexGrow={1} flexDirection="column" paddingX={1}>
         {currentStep === 'mode' && (
           <Box flexDirection="column">
-            <Text bold color="cyan">Installation Mode</Text>
+            <Text bold color={C.primary}>Installation Mode</Text>
             <Box marginTop={1}>
-              <Text color={config.mode === 'global' ? 'green' : 'gray'}>
-                {config.mode === 'global' ? '[x]' : '[ ]'} Global
+              <Text color={config.mode === 'global' ? C.success : C.neutral}>
+                {config.mode === 'global' ? SYM.checkOn : SYM.checkOff} Global
               </Text>
               <Text>  </Text>
-              <Text color={config.mode === 'project' ? 'green' : 'gray'}>
-                {config.mode === 'project' ? '[x]' : '[ ]'} Project
+              <Text color={config.mode === 'project' ? C.success : C.neutral}>
+                {config.mode === 'project' ? SYM.checkOn : SYM.checkOff} Project
               </Text>
             </Box>
             <Box marginTop={1}>

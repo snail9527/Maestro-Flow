@@ -26,12 +26,16 @@ This instruction is loaded by team-worker agents when spawned with roles: `analy
    ```
 
 2. **Explore domain** (use CLI analysis tools):
-   ```bash
-   maestro delegate "PURPOSE: Research domain for {requirement}
+   ```
+   exec_command({
+     cmd: `maestro delegate "PURPOSE: Research domain for {requirement}
    TASK: • Identify problem statement • Define target users • Extract constraints • Map integration points
    CONTEXT: @**/* | Memory: {requirement}
    EXPECTED: Structured research context with problem/users/domain/constraints
-   CONSTRAINTS: Read-only analysis" --tool gemini --mode analysis --rule analysis-trace-code-execution
+   CONSTRAINTS: Read-only analysis" --role analyze --mode analysis --rule analysis-trace-code-execution`,
+     yield_time_ms: 30000, max_output_tokens: 6000
+   })
+   // ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
    ```
 
 3. **Extract structured context**:
@@ -293,12 +297,16 @@ This instruction is loaded by team-worker agents when spawned with roles: `analy
    ```
 
 2. **Explore codebase** (use CLI analysis tools):
-   ```bash
-   maestro delegate "PURPOSE: Explore codebase for {requirement}
+   ```
+   exec_command({
+     cmd: `maestro delegate "PURPOSE: Explore codebase for {requirement}
    TASK: • Identify relevant files • Find existing patterns • Locate integration points
    CONTEXT: @**/* | Memory: {requirement}
    EXPECTED: Exploration findings with file paths and patterns
-   CONSTRAINTS: Read-only analysis" --tool gemini --mode analysis --rule analysis-trace-code-execution
+   CONSTRAINTS: Read-only analysis" --role explore --mode analysis --rule analysis-trace-code-execution`,
+     yield_time_ms: 30000, max_output_tokens: 6000
+   })
+   // ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
    ```
 
 3. **Generate implementation plan**:

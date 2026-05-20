@@ -73,7 +73,6 @@ export function createWikiRoutes(
       roadmap: 0,
       spec: 0,
       issue: 0,
-      lesson: 0,
       knowhow: 0,
       note: 0,
     };
@@ -234,6 +233,8 @@ function parseFilters(q: Record<string, string>): WikiFilters {
   if (q.q) out.q = q.q;
   if (q.category) out.category = q.category;
   if (q.createdBy) out.createdBy = q.createdBy;
+  if (q.tool === 'true') out.tool = true;
+
   return out;
 }
 

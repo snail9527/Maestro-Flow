@@ -4,27 +4,17 @@
 
 /**
  * Get emoji icon for category by ID
+ * Matches categories defined in inventory.json
  */
 export function getCategoryIcon(categoryId: string): string {
   const icons: Record<string, string> = {
-    pipeline: '⚡',
+    maestro: '🤖',
     spec: '📋',
     quality: '✅',
     manage: '⚙️',
-    maestro: '🤖',
     team: '👥',
-    cli: '💻',
-    brainstorm: '💡',
-    workflow: '🔄',
-    ddd: '📚',
-    issue: '🐛',
-    paper: '📝',
-    scholar: '🎓',
-    context: '💾',
-    data: '📊',
-    experiment: '🧪',
-    ui_design: '🎨',
-    session: '🪪',
+    learn: '📖',
+    wiki: '🗺️',
   };
   return icons[categoryId] || '📁';
 }

@@ -80,6 +80,11 @@ export interface CliRunOptions {
   baseTool?: string;
   /** Delegate role — maps to spec categories for targeted spec injection */
   role?: string;
+  /** Reasoning effort level — overrides config-level setting */
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
+  /** Stale-stream silence window (ms) before force-terminating a silent CLI.
+   *  Overrides cli-tools.json `streamTimeoutMs`; undefined = adapter default (10 min). */
+  streamTimeout?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +99,7 @@ const TOOL_TO_AGENT_TYPE: Record<string, AgentType> = {
   'codex-server': 'codex-server',
   claude: 'claude-code',
   opencode: 'opencode',
+  agy: 'agy',
 };
 
 // ---------------------------------------------------------------------------
@@ -108,6 +114,7 @@ const AGENT_TYPE_TO_TERMINAL_CMD: Record<string, string> = {
   'codex-server': 'codex',
   'claude-code': 'claude',
   'opencode': 'opencode',
+  'agy': 'agy',
 };
 
 // ---------------------------------------------------------------------------
@@ -122,6 +129,7 @@ const TOOL_PREFIX: Record<string, string> = {
   'codex-server': 'cxs',
   claude: 'cld',
   opencode: 'opc',
+  agy: 'agy',
 };
 
 export function generateCliExecId(tool: string): string {
@@ -143,18 +151,18 @@ export function generateCliExecId(tool: string): string {
 // ---------------------------------------------------------------------------
 
 const ROLE_SPEC_CATEGORIES: Record<string, SpecCategory[]> = {
-  analyze:    ['arch', 'coding', 'quality'],
+  analyze:    ['arch', 'coding', 'debug'],
   explore:    ['arch', 'coding'],
-  review:     ['review', 'quality', 'coding'],
-  implement:  ['coding', 'arch', 'quality', 'test'],
+  review:     ['review', 'coding'],
+  implement:  ['coding', 'arch', 'test'],
   plan:       ['arch', 'coding'],
   brainstorm: ['arch'],
   research:   ['arch'],
 };
 
 const MODE_SPEC_CATEGORIES: Record<string, SpecCategory[]> = {
-  analysis: ['arch', 'coding', 'quality', 'review'],
-  write:    ['coding', 'arch', 'quality', 'test'],
+  analysis: ['arch', 'coding', 'review'],
+  write:    ['coding', 'arch', 'test'],
 };
 
 async function assemblePrompt(
@@ -243,10 +251,24 @@ async function createAdapter(agentType: AgentType, backend?: 'direct' | 'termina
 // Entry renderer — writes normalized entries to stdout/stderr
 // ---------------------------------------------------------------------------
 
+/** Tracks whether we've seen partial assistant messages for a given processId.
+ *  When a final (non-partial) message arrives after partials, skip it to avoid
+ *  duplicate output — the content was already streamed via the partials. */
+const _seenPartials = new Set<string>();
+
 function renderEntry(entry: NormalizedEntry): void {
   switch (entry.type) {
     case 'assistant_message':
-      process.stdout.write(entry.content);
+      if (entry.partial) {
+        _seenPartials.add(entry.processId);
+        process.stdout.write(entry.content);
+      } else if (_seenPartials.has(entry.processId)) {
+        // Final message after partials — content already streamed, skip
+        _seenPartials.delete(entry.processId);
+      } else {
+        // Final message without preceding partials — render normally
+        process.stdout.write(entry.content);
+      }
       break;
 
     case 'tool_use':
@@ -357,6 +379,9 @@ function spawnQueuedDelegateWorker(
   }
   if (options.sessionId) {
     args.push('--session', options.sessionId);
+  }
+  if (options.reasoningEffort) {
+    args.push('--effort', options.reasoningEffort);
   }
 
   const child = spawn(process.execPath, args, {
@@ -539,9 +564,7 @@ export class CliAgentRunner {
     const bridgeConnected = bridgeEnabled
       ? await bridge.tryConnect(CliAgentRunner.getDashboardWsUrl(), 1000)
       : false;
-    if (!bridgeConnected) {
-      process.stderr.write('[Dashboard not connected — real-time view unavailable]\n');
-    }
+    // Dashboard connection is optional — no warning when unavailable
 
     const config: AgentConfig = {
       type: agentType,
@@ -551,6 +574,8 @@ export class CliAgentRunner {
       approvalMode: options.mode === 'write' ? 'auto' : 'suggest',
       interactive: adapter.supportsInteractive?.() === true,
       settingsFile: options.settingsFile?.replace(/^~(?=[\\/])/, homedir()),
+      reasoningEffort: options.reasoningEffort,
+      streamTimeoutMs: options.streamTimeout,
     };
 
     const agentProcess = await adapter.spawn(config);

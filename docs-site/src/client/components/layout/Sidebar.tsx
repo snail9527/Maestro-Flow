@@ -1,30 +1,15 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useI18n } from '@/client/i18n/index.js';
+import { useSidebar } from './SidebarContext.js';
 import { inventoryData, getCommandsByCategory, getCommandSlug, type Command, type Skill } from '@/client/routes/route-config.js';
 import { getAllGuideMeta } from '@/client/data/index.js';
 import { getGuideIcon } from '@/client/utils/guideIcons.js';
+import { getCategoryIcon } from '@/client/utils/categoryIcons.js';
 
 // ---------------------------------------------------------------------------
-// Sidebar — warm minimal collapsible category navigation with colored dots
+// Sidebar — Gemini CLI style: clean grouped navigation, blue active pills
 // ---------------------------------------------------------------------------
-
-// Category color mapping for nav dots
-const categoryColors: Record<string, string> = {
-  pipeline: 'bg-accent-green',
-  spec: 'bg-accent-blue',
-  quality: 'bg-accent-orange',
-  manage: 'bg-accent-gray',
-  maestro: 'bg-accent-purple',
-  team: 'bg-accent-yellow',
-  cli: 'bg-accent-blue',
-  brainstorm: 'bg-accent-orange',
-  workflow: 'bg-accent-green',
-  ddd: 'bg-accent-purple',
-  issue: 'bg-accent-red',
-  ui_design: 'bg-accent-pink',
-  session: 'bg-accent-blue',
-};
 
 interface CategorySection {
   id: string;
@@ -38,6 +23,21 @@ interface CategorySection {
 export function Sidebar() {
   const { t } = useI18n();
   const location = useLocation();
+  const { isOpen: isMobileOpen, close: closeSidebar } = useSidebar();
+
+  useEffect(() => {
+    closeSidebar();
+  }, [location.pathname, closeSidebar]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isMobileOpen) {
+        closeSidebar();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isMobileOpen, closeSidebar]);
 
   const defaultSections: CategorySection[] = useMemo(() => {
     return inventoryData.categories.map((cat) => ({
@@ -66,34 +66,64 @@ export function Sidebar() {
   };
 
   return (
-    <aside
-      role="navigation"
-      aria-label={t('sidebar.categories')}
-      className="fixed top-[var(--size-topbar-height)] bottom-0 left-0 w-[var(--size-sidebar-width)] bg-bg-secondary border-r border-border overflow-y-auto z-50"
-    >
-      <nav className="py-[var(--spacing-4)]" aria-label="Command categories">
-        {/* Guides section */}
-        <SidebarGuidesSection />
+    <>
+      {/* Mobile backdrop overlay */}
+      {isMobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-40 lg:hidden"
+          onClick={closeSidebar}
+          aria-hidden="true"
+        />
+      )}
 
-        {/* Divider */}
-        <div className="mx-[var(--spacing-3)] my-[var(--spacing-2)] border-t border-border-divider" />
+      <aside
+        role="navigation"
+        aria-label={t('sidebar.categories')}
+        className={[
+          'fixed left-0 w-[var(--size-sidebar-width)] overflow-y-auto',
+          'bg-bg-primary border-r border-border-divider z-50',
+          'transition-transform duration-[var(--duration-smooth)] ease-[var(--ease-notion)]',
+          'max-lg:-translate-x-full',
+          isMobileOpen ? 'max-lg:translate-x-0' : '',
+        ].join(' ')}
+        style={{ top: 'calc(var(--size-banner-height) + var(--size-topbar-height))', bottom: 0 }}
+      >
+        <nav className="py-[var(--spacing-4)]" aria-label={t('sidebar.aria_nav')}>
+          {/* Quick Start - top level */}
+          <SidebarQuickStartLink />
 
-        {/* Category sections */}
-        {sections.map((section) => (
-          <SidebarSection
-            key={section.id}
-            section={section}
-            isActive={isActivePath(section.id)}
-            onToggle={() => toggleSection(section.id)}
-          />
-        ))}
-      </nav>
-    </aside>
+          {/* Divider */}
+          <div className="mx-[var(--spacing-4)] my-[var(--spacing-2)] border-t border-border-divider" />
+
+          {/* Guides section */}
+          <SidebarGuidesSection />
+
+          {/* Divider */}
+          <div className="mx-[var(--spacing-4)] my-[var(--spacing-2)] border-t border-border-divider" />
+
+          {/* Changelog link */}
+          <SidebarChangelogLink />
+
+          {/* Divider */}
+          <div className="mx-[var(--spacing-4)] my-[var(--spacing-2)] border-t border-border-divider" />
+
+          {/* Category sections */}
+          {sections.map((section) => (
+            <SidebarSection
+              key={section.id}
+              section={section}
+              isActive={isActivePath(section.id)}
+              onToggle={() => toggleSection(section.id)}
+            />
+          ))}
+        </nav>
+      </aside>
+    </>
   );
 }
 
 // ---------------------------------------------------------------------------
-// SidebarSection — collapsible section with group label and items
+// SidebarSection — collapsible section with group label
 // ---------------------------------------------------------------------------
 
 interface SidebarSectionProps {
@@ -105,43 +135,24 @@ interface SidebarSectionProps {
 function SidebarSection({ section, isActive, onToggle }: SidebarSectionProps) {
   const { t } = useI18n();
   const hasItems = section.commands.length > 0 || section.claudeSkills.length > 0 || section.codexSkills.length > 0;
-  const dotColor = categoryColors[section.id] || 'bg-accent-gray';
 
   return (
-    <div className="px-[var(--spacing-3)] mb-[var(--spacing-2)]">
-      {/* Section header — group label style */}
+    <div className="px-[var(--spacing-3)] mb-[var(--spacing-1)]">
+      {/* Section header */}
       <div className="flex items-center justify-between">
         <NavLink
           to={`/${section.id}`}
           className={({ isActive: linkIsActive }) => [
-            'flex items-center gap-[var(--spacing-2)] px-[var(--spacing-3)] py-[var(--spacing-2)]',
-            'text-[length:10px] font-[var(--font-weight-semibold)] uppercase tracking-[var(--letter-spacing-wide)]',
-            'transition-all duration-[var(--duration-fast)]',
-            'rounded-[var(--radius-default)] flex-1',
+            'flex items-center gap-[var(--spacing-2)] px-[8px] py-[4.8px]',
+            'text-[length:14px] font-[var(--font-weight-semibold)]',
+            'transition-colors duration-[var(--duration-fast)]',
+            'rounded-[var(--radius-sm)] flex-1',
             linkIsActive || isActive
-              ? 'text-text-primary'
+              ? 'text-accent-blue'
               : 'text-text-tertiary hover:text-text-secondary',
           ].join(' ')}
         >
-          {hasItems && (
-            <svg
-              className={[
-                'w-3 h-3 transition-transform duration-[var(--duration-fast)]',
-                section.isOpen ? 'rotate-12' : '',
-              ].join(' ')}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12 2L2 7l10 5 10-5-10-5z" />
-              <path d="M2 17l10 5 10-5" />
-              <path d="M2 12l10 5 10-5" />
-            </svg>
-          )}
+          <span className="text-[length:14px]">{getCategoryIcon(section.id)}</span>
           {t(section.titleKey)}
         </NavLink>
 
@@ -151,7 +162,7 @@ function SidebarSection({ section, isActive, onToggle }: SidebarSectionProps) {
             onClick={onToggle}
             aria-expanded={section.isOpen}
             aria-label={`Toggle ${t(section.titleKey)} section`}
-            className="p-1 rounded-[var(--radius-sm)] hover:bg-bg-hover text-text-tertiary transition-all duration-[var(--duration-fast)]"
+            className="p-1.5 min-w-7 min-h-7 flex items-center justify-center rounded-[var(--radius-sm)] hover:bg-bg-hover text-text-tertiary transition-colors duration-[var(--duration-fast)]"
           >
             <svg
               className={[
@@ -171,14 +182,13 @@ function SidebarSection({ section, isActive, onToggle }: SidebarSectionProps) {
 
       {/* Section items */}
       {section.isOpen && hasItems && (
-        <div className="mt-[var(--spacing-0-5)] flex flex-col gap-[var(--spacing-0-5)]">
+        <div className="mt-[var(--spacing-0-5)] flex flex-col gap-px">
           {section.commands.map((cmd) => (
             <SidebarItem
               key={cmd.name}
               category={section.id}
               item={getCommandSlug(cmd.name)}
               type="command"
-              dotColor={dotColor}
             />
           ))}
           {section.claudeSkills.map((skill) => (
@@ -187,7 +197,6 @@ function SidebarSection({ section, isActive, onToggle }: SidebarSectionProps) {
               category="skills"
               item={skill.name}
               type="claude-skill"
-              dotColor="bg-accent-purple"
             />
           ))}
           {section.codexSkills.map((skill) => (
@@ -196,7 +205,6 @@ function SidebarSection({ section, isActive, onToggle }: SidebarSectionProps) {
               category="codex"
               item={skill.name}
               type="codex-skill"
-              dotColor="bg-accent-orange"
             />
           ))}
         </div>
@@ -206,29 +214,43 @@ function SidebarSection({ section, isActive, onToggle }: SidebarSectionProps) {
 }
 
 // ---------------------------------------------------------------------------
-// SidebarItem — individual navigation item with colored dot
+// SidebarItem — Gemini CLI style: blue pill for active state
 // ---------------------------------------------------------------------------
 
 interface SidebarItemProps {
   category: string;
   item: string;
   type: 'command' | 'claude-skill' | 'codex-skill';
-  dotColor: string;
 }
 
-function SidebarItem({ category, item, type, dotColor }: SidebarItemProps) {
+function SidebarItem({ category, item, type }: SidebarItemProps) {
+  const { t } = useI18n();
   const href = `/${category}/${item}`;
   const location = useLocation();
   const isActive = location.pathname === href;
 
-  // Badge for skill types
+  // Icon per type
+  const icon = type === 'command' ? (
+    <svg className="w-3.5 h-3.5 shrink-0 text-text-tertiary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  ) : type === 'claude-skill' ? (
+    <svg className="w-3.5 h-3.5 shrink-0 text-text-tertiary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  ) : (
+    <svg className="w-3.5 h-3.5 shrink-0 text-text-tertiary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
+    </svg>
+  );
+
   const badge = type === 'claude-skill' ? (
-    <span className="ml-auto text-[length:9px] font-[var(--font-weight-semibold)] px-[var(--spacing-1-5)] py-[1px] rounded-full bg-status-bg-planning text-accent-purple">
-      Skill
+    <span className="ml-auto text-[length:9px] font-[var(--font-weight-semibold)] px-[var(--spacing-1-5)] py-[1px] rounded-[var(--radius-full)] bg-tint-purple text-accent-purple">
+      {t('sidebar.badge_skill')}
     </span>
   ) : type === 'codex-skill' ? (
-    <span className="ml-auto text-[length:9px] font-[var(--font-weight-semibold)] px-[var(--spacing-1-5)] py-[1px] rounded-full bg-status-bg-verifying text-accent-orange">
-      Codex
+    <span className="ml-auto text-[length:9px] font-[var(--font-weight-semibold)] px-[var(--spacing-1-5)] py-[1px] rounded-[var(--radius-full)] bg-tint-orange text-accent-orange">
+      {t('sidebar.badge_codex')}
     </span>
   ) : null;
 
@@ -236,16 +258,16 @@ function SidebarItem({ category, item, type, dotColor }: SidebarItemProps) {
     <NavLink
       to={href}
       className={[
-        'flex items-center gap-[var(--spacing-2)] px-[var(--spacing-3)] py-[var(--spacing-1-5)]',
-        'text-[length:var(--font-size-sm)]',
+        'flex items-center gap-[var(--spacing-2)] px-[8px] py-[4.2px]',
+        'text-[length:14px]',
         'transition-all duration-[var(--duration-fast)]',
-        'rounded-[var(--radius-default)]',
+        'rounded-[var(--radius-sm)]',
         isActive
-          ? 'bg-bg-active text-text-primary font-[var(--font-weight-semibold)]'
+          ? 'bg-accent-blue text-text-inverse font-[var(--font-weight-semibold)]'
           : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
       ].join(' ')}
     >
-      <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${dotColor}`}></span>
+      <span className={isActive ? 'text-white' : ''}>{icon}</span>
       <span className="truncate">{item}</span>
       {badge}
     </NavLink>
@@ -253,7 +275,7 @@ function SidebarItem({ category, item, type, dotColor }: SidebarItemProps) {
 }
 
 // ---------------------------------------------------------------------------
-// SidebarGuidesSection — collapsible guides navigation
+// SidebarGuidesSection
 // ---------------------------------------------------------------------------
 
 function SidebarGuidesSection() {
@@ -261,34 +283,33 @@ function SidebarGuidesSection() {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(true);
   const isZh = locale === 'zh-CN';
-  const guides = useMemo(() => getAllGuideMeta(), []);
+  const guides = useMemo(() => getAllGuideMeta().filter((g) => g.slug !== 'quick-start'), []);
   const isGuidesActive = location.pathname.startsWith('/guides');
 
   return (
-    <div className="px-[var(--spacing-3)] mb-[var(--spacing-2)]">
-      {/* Section header */}
+    <div className="px-[var(--spacing-3)] mb-[var(--spacing-1)]">
       <div className="flex items-center justify-between">
         <NavLink
           to="/guides"
           className={({ isActive: linkIsActive }) => [
-            'flex items-center gap-[var(--spacing-2)] px-[var(--spacing-3)] py-[var(--spacing-2)]',
-            'text-[length:var(--font-size-sm)] font-[var(--font-weight-semibold)] uppercase tracking-[var(--letter-spacing-wide)]',
-            'transition-all duration-[var(--duration-fast)]',
-            'rounded-[var(--radius-default)] flex-1',
+            'flex items-center gap-[var(--spacing-2)] px-[8px] py-[4.8px]',
+            'text-[length:14px] font-[var(--font-weight-semibold)]',
+            'transition-colors duration-[var(--duration-fast)]',
+            'rounded-[var(--radius-sm)] flex-1',
             linkIsActive || isGuidesActive
-              ? 'text-text-primary'
+              ? 'text-accent-blue'
               : 'text-text-tertiary hover:text-text-secondary',
           ].join(' ')}
         >
           {getGuideIcon('book-open', 'w-3.5 h-3.5')}
-          {isZh ? '指南' : 'Guides'}
+          {t('sidebar.guides')}
         </NavLink>
 
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
           aria-expanded={isOpen}
-          className="p-1 rounded-[var(--radius-sm)] hover:bg-bg-hover text-text-tertiary transition-all duration-[var(--duration-fast)]"
+          className="p-1.5 min-w-7 min-h-7 flex items-center justify-center rounded-[var(--radius-sm)] hover:bg-bg-hover text-text-tertiary transition-colors duration-[var(--duration-fast)]"
         >
           <svg
             className={[
@@ -305,9 +326,8 @@ function SidebarGuidesSection() {
         </button>
       </div>
 
-      {/* Guide items */}
       {isOpen && (
-        <div className="mt-[var(--spacing-0-5)] flex flex-col gap-[var(--spacing-0-5)]">
+        <div className="mt-[var(--spacing-0-5)] flex flex-col gap-px">
           {guides.map((guide) => {
             const href = `/guides/${guide.slug}`;
             const isActive = location.pathname === href;
@@ -316,12 +336,12 @@ function SidebarGuidesSection() {
                 key={guide.slug}
                 to={href}
                 className={[
-                  'flex items-center gap-[var(--spacing-2)] px-[var(--spacing-3)] py-[var(--spacing-1-5)]',
+                  'flex items-center gap-[var(--spacing-2)] px-[var(--spacing-3)] py-[var(--spacing-1)]',
                   'text-[length:var(--font-size-sm)]',
                   'transition-all duration-[var(--duration-fast)]',
-                  'rounded-[var(--radius-default)]',
+                  'rounded-[var(--radius-sm)]',
                   isActive
-                    ? 'bg-bg-active text-text-primary font-[var(--font-weight-semibold)]'
+                    ? 'bg-accent-blue text-text-inverse font-[var(--font-weight-semibold)]'
                     : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
                 ].join(' ')}
               >
@@ -332,6 +352,69 @@ function SidebarGuidesSection() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SidebarQuickStartLink — top-level entry, same hierarchy as Guides
+// ---------------------------------------------------------------------------
+
+function SidebarQuickStartLink() {
+  const { t } = useI18n();
+  const location = useLocation();
+  const isActive = location.pathname === '/quick-start';
+
+  return (
+    <div className="px-[var(--spacing-3)]">
+      <NavLink
+        to="/quick-start"
+        className={[
+          'flex items-center gap-[var(--spacing-2)] px-[var(--spacing-3)] py-[var(--spacing-1-5)]',
+          'text-[length:var(--font-size-sm)] font-[var(--font-weight-medium)]',
+          'transition-all duration-[var(--duration-fast)]',
+          'rounded-[var(--radius-sm)]',
+          isActive
+            ? 'bg-accent-blue text-text-inverse'
+            : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
+        ].join(' ')}
+      >
+        {getGuideIcon('rocket', 'w-4 h-4')}
+        {t('sidebar.quick_start')}
+      </NavLink>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SidebarChangelogLink
+// ---------------------------------------------------------------------------
+
+function SidebarChangelogLink() {
+  const { t } = useI18n();
+  const location = useLocation();
+  const isActive = location.pathname === '/changelog';
+
+  return (
+    <div className="px-[var(--spacing-3)]">
+      <NavLink
+        to="/changelog"
+        className={[
+          'flex items-center gap-[var(--spacing-2)] px-[var(--spacing-3)] py-[var(--spacing-1-5)]',
+          'text-[length:var(--font-size-sm)] font-[var(--font-weight-medium)]',
+          'transition-all duration-[var(--duration-fast)]',
+          'rounded-[var(--radius-sm)]',
+          isActive
+            ? 'bg-accent-blue text-text-inverse'
+            : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
+        ].join(' ')}
+      >
+        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="4 17 10 11 4 5" />
+          <line x1="12" y1="19" x2="20" y2="19" />
+        </svg>
+        {t('nav.changelog')}
+      </NavLink>
     </div>
   );
 }

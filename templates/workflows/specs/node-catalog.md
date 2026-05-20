@@ -15,7 +15,7 @@ Only commands that exist in `~/.claude/commands/` are listed.
 | `maestro-spec-generate` | requirement | specification | `"{goal}"` |
 | `maestro-roadmap` | requirement | roadmap | `"{goal}"` |
 | `maestro-quick` | requirement | code | `"{goal}"` |
-| `maestro-ui-design` | requirement | ui-design | `{phase}` |
+| `maestro-impeccable` | requirement | ui-design | `"{phase}" --chain build` |
 
 ## Quality Commands (as skill nodes)
 

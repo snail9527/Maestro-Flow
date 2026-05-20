@@ -7,6 +7,7 @@ import {
   DELEGATE_ROLES,
   type CliToolsConfig,
 } from '../../config/cli-tools-config.js';
+import { C, SYM } from '../shared/index.js';
 
 export interface RegisterSettingsProps {
   config: CliToolsConfig;
@@ -131,7 +132,7 @@ export function RegisterSettings({ config, workDir, onBack }: RegisterSettingsPr
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text bold color="cyan">Register Settings (Claude)</Text>
+      <Text bold color={C.primary}>Register Settings (Claude)</Text>
       <Text> </Text>
 
       {existing.length > 0 && (
@@ -157,21 +158,21 @@ export function RegisterSettings({ config, workDir, onBack }: RegisterSettingsPr
               onSubmit={handleNameSubmit}
             />
           </Box>
-          {error && <Text color="red">  {error}</Text>}
+          {error && <Text color={C.error}>  {error}</Text>}
           <Text dimColor>Enter alias name. Use "claude" to set base settings.</Text>
         </Box>
       )}
 
       {phase === 'role' && (
         <Box flexDirection="column">
-          <Box gap={1}><Text>Name:</Text><Text bold color="green">{alias}</Text></Box>
+          <Box gap={1}><Text>Name:</Text><Text bold color={C.success}>{alias}</Text></Box>
           <Text>Assign to role:</Text>
           {DELEGATE_ROLES.map((r, i) => (
             <Box key={r} gap={1}>
-              <Text color={i === roleCursor ? 'cyan' : undefined}>
-                {i === roleCursor ? ' ▸' : '  '} {i + 1}.
+              <Text color={i === roleCursor ? C.primary : undefined}>
+                {i === roleCursor ? ` ${SYM.cursor}` : '  '} {i + 1}.
               </Text>
-              <Text bold={i === roleCursor} color={i === roleCursor ? 'cyan' : undefined}>{r}</Text>
+              <Text bold={i === roleCursor} color={i === roleCursor ? C.primary : undefined}>{r}</Text>
             </Box>
           ))}
           <Text dimColor>[↑↓] Navigate  [1-7] Select  [Enter] Confirm</Text>
@@ -180,8 +181,8 @@ export function RegisterSettings({ config, workDir, onBack }: RegisterSettingsPr
 
       {phase === 'path' && (
         <Box flexDirection="column">
-          <Box gap={1}><Text>Name:</Text><Text bold color="green">{alias}</Text></Box>
-          {role && <Box gap={1}><Text>Role:</Text><Text color="yellow">{role}</Text></Box>}
+          <Box gap={1}><Text>Name:</Text><Text bold color={C.success}>{alias}</Text></Box>
+          {role && <Box gap={1}><Text>Role:</Text><Text color={C.warning}>{role}</Text></Box>}
           <Box gap={1}>
             <Text>Path:</Text>
             <TextInput
@@ -190,19 +191,19 @@ export function RegisterSettings({ config, workDir, onBack }: RegisterSettingsPr
               onSubmit={handlePathSubmit}
             />
           </Box>
-          {error && <Text color="red">  {error}</Text>}
+          {error && <Text color={C.error}>  {error}</Text>}
         </Box>
       )}
 
       {phase === 'scope' && (
         <Box flexDirection="column">
-          <Box gap={1}><Text>Name:</Text><Text bold color="green">{alias}</Text></Box>
-          {role && <Box gap={1}><Text>Role:</Text><Text color="yellow">{role}</Text></Box>}
+          <Box gap={1}><Text>Name:</Text><Text bold color={C.success}>{alias}</Text></Box>
+          {role && <Box gap={1}><Text>Role:</Text><Text color={C.warning}>{role}</Text></Box>}
           <Box gap={1}><Text>Path:</Text><Text dimColor>{path}</Text></Box>
           <Text> </Text>
           <Text>Save to:</Text>
-          <Box gap={2}><Text color="cyan">[g]</Text><Text>Global</Text></Box>
-          <Box gap={2}><Text color="cyan">[p]</Text><Text>Project</Text></Box>
+          <Box gap={2}><Text color={C.primary}>[g]</Text><Text>Global</Text></Box>
+          <Box gap={2}><Text color={C.primary}>[p]</Text><Text>Project</Text></Box>
         </Box>
       )}
 
@@ -210,14 +211,14 @@ export function RegisterSettings({ config, workDir, onBack }: RegisterSettingsPr
 
       {phase === 'done' && (
         <Box flexDirection="column">
-          <Text color="green">✓ {message}</Text>
+          <Text color={C.success}>{SYM.enabled} {message}</Text>
           <Text dimColor>[Enter] Back</Text>
         </Box>
       )}
 
       {phase === 'error' && (
         <Box flexDirection="column">
-          <Text color="red">✗ {error}</Text>
+          <Text color={C.error}>{SYM.disabled} {error}</Text>
           <Text dimColor>[Enter] Back</Text>
         </Box>
       )}

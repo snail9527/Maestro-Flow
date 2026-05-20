@@ -1,6 +1,6 @@
 ---
 name: quality-debug
-description: Parallel hypothesis-driven debugging with UAT integration and structured root cause collection
+description: Use when bugs, test failures, or unexpected behavior need systematic root cause investigation
 argument-hint: "[issue description] [--from-uat <phase>] [--parallel]"
 allowed-tools:
   - Read
@@ -43,6 +43,12 @@ Each artifact's type determines its outputs at `.workflow/{a.path}/`:
 
 Extract conclusions from related artifacts that may affect this debug session — review findings guide investigation direction, prior debug avoids redundant work.
 
+### Pre-load (optional, proceed without)
+- Codebase docs: `.workflow/codebase/ARCHITECTURE.md` → module boundaries
+- Wiki: `maestro wiki search "<symptom keywords>" --json` → prior investigations
+- Specs: `maestro spec load --category debug --keyword "<symptom>"` → known issues/workarounds
+- Role knowledge: `maestro wiki list --category debug` → select relevant → `maestro wiki load`
+
 **Output**: `DEBUG_DIR = .workflow/scratch/{YYYYMMDD}-debug-P{N}-{slug}/` (P{N} = phase number when phase-scoped; omit for standalone). Output directory rules defined in workflow debug.md Step 4.
 </context>
 
@@ -69,18 +75,13 @@ Append to state.json.artifacts[]:
 
 ### Post-debug Knowledge Inquiry
 
-After root cause is confirmed, evaluate inquiry triggers:
+| Condition | Ask | Route |
+|-----------|-----|-------|
+| Recurring root cause pattern (seen in prior debug) | "Document in debug-notes.md?" | spec-add debug |
+| Non-obvious fix / workaround | "Record as learning?" | spec-add learning |
+| Root cause = architectural boundary violation | "Update architecture-constraints.md?" | spec-add arch |
 
-1. **Recurring pattern**: If root cause matches a recurring pattern (similar to prior debug sessions):
-   → Ask: "This root cause pattern has appeared before. Should it be documented in `debug-notes.md` to prevent recurrence? (`/spec-add debug`)"
-
-2. **Non-obvious fix**: If fix involved a non-obvious approach or workaround:
-   → Ask: "This fix used a non-obvious strategy. Should it be recorded as a learning? (`/spec-add learning`)"
-
-3. **Architectural gap**: If root cause traces to architectural boundary violation or missing constraint:
-   → Ask: "Root cause points to an architectural gap. Should `architecture-constraints.md` be updated? (`/spec-add arch`)"
-
-If user confirms, invoke `Skill({ skill: "spec-add", args: "<category> <content>" })`.
+On confirm → `Skill("spec-add", "<category> <content>")`.
 
 **Next-step routing on completion:**
 - Root cause found, fix needed → `/maestro-plan {phase} --gaps`
@@ -109,7 +110,11 @@ If user confirms, invoke `Skill({ skill: "spec-add", args: "<category> <content>
 - [ ] evidence.ndjson written with structured NDJSON entries
 - [ ] understanding.md tracks evolving understanding per cluster
 - [ ] Root causes collected with fix_direction and affected_files
+- [ ] Multi-factor confidence scored per gap (Step 7.0) replacing simple high/medium/low
+- [ ] Readiness gate checked before ROOT CAUSE declaration
+- [ ] Pressure pass completed on confirmed hypothesis
+- [ ] Confidence table appended to understanding.md
 - [ ] If --from-uat: uat.md gaps updated with diagnosis artifacts
-- [ ] Results unified into diagnosis summary
+- [ ] Results unified into diagnosis summary with confidence section
 - [ ] Next step routed (plan --gaps + execute if fix needed, verify if fix applied, resume if inconclusive)
 </success_criteria>

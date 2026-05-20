@@ -4,6 +4,7 @@ import type { InstallConfig } from './types.js';
 import { McpConfig } from './McpConfig.js';
 import { HooksConfig } from './HooksConfig.js';
 import { BackupConfig } from './BackupConfig.js';
+import { C, BORDER } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // ConfigPanel -- Tab-based container for MCP / Hooks / Backup configuration
@@ -57,7 +58,7 @@ export function ConfigPanel({
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">
+      <Text bold color={C.primary}>
         Configuration
       </Text>
 
@@ -68,7 +69,7 @@ export function ConfigPanel({
           return (
             <Text
               key={tab}
-              color={isActive ? 'cyan' : 'gray'}
+              color={isActive ? C.primary : C.neutral}
               bold={isActive}
             >
               {isActive ? `[${tab}]` : ` ${tab} `}
@@ -80,8 +81,7 @@ export function ConfigPanel({
       <Box
         flexDirection="column"
         marginTop={1}
-        borderStyle="single"
-        borderColor="gray"
+        {...BORDER.detail}
         paddingX={1}
       >
         {activeTab === 0 && (

@@ -15,12 +15,10 @@ import { KanbanTaskRow } from '@/client/components/kanban/TaskRow.js';
 
 const TINT_VARS: Record<string, string> = {
   not_started: 'var(--color-tint-pending)',
-  pending: 'var(--color-tint-pending)',
-  exploring: 'var(--color-tint-exploring)',
   planning: 'var(--color-tint-planning)',
   executing: 'var(--color-tint-executing)',
   verifying: 'var(--color-tint-verifying)',
-  testing: 'var(--color-tint-testing)',
+  reviewing: 'var(--color-tint-reviewing)',
   completed: 'var(--color-tint-completed)',
   blocked: 'var(--color-tint-blocked)',
 };
@@ -170,10 +168,10 @@ export function WfPhaseCard({ phase, onSelectTask, recommendedAdvance }: WfPhase
             to={`/kanban?phase=${phase.phase}`}
             onClick={(e) => e.stopPropagation()}
             className="inline-flex items-center gap-[var(--spacing-1)] mt-[var(--spacing-1-5)] text-[length:var(--font-size-xs)] font-[var(--font-weight-medium)] px-[var(--spacing-2)] py-[var(--spacing-0-5)] rounded-full no-underline transition-colors hover:opacity-80"
-            style={{ backgroundColor: 'rgba(184, 149, 64, 0.1)', color: '#B89540' }}
+            style={{ backgroundColor: 'var(--color-status-bg-executing)', color: 'var(--color-status-executing)' }}
             title={`${runningIssueCount} issue(s) running — view in Kanban`}
           >
-            <span className="inline-block w-[5px] h-[5px] rounded-full animate-pulse" style={{ backgroundColor: '#B89540' }} />
+            <span className="inline-block w-[5px] h-[5px] rounded-full animate-pulse" style={{ backgroundColor: 'var(--color-status-executing)' }} />
             {runningIssueCount} running
           </Link>
         )}

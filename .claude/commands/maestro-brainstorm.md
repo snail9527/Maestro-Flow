@@ -1,6 +1,6 @@
 ---
 name: maestro-brainstorm
-description: Unified brainstorming with dual-mode operation - auto pipeline and single role analysis
+description: Use when exploring ideas, evaluating approaches, or needing multi-perspective analysis before implementation
 argument-hint: "[topic|role-name] [--yes] [--count N] [--session ID] [--update] [--skip-questions] [--include-questions] [--style-skill PKG]"
 allowed-tools:
   - Read
@@ -44,6 +44,18 @@ $ARGUMENTS -- topic text for auto mode, or role name for single role mode.
 - `--skip-questions`: Skip context gathering questions
 - `--include-questions`: Force context gathering even if analysis exists
 - `--style-skill PKG`: Style package for ui-designer role
+
+### Pre-load specs
+1. **Architecture specs**: Run `maestro spec load --category arch` to load architecture constraints. Use as context for multi-role analysis — ensures roles respect documented decisions.
+2. Optional — proceed without if unavailable.
+
+### Role Knowledge
+1. Browse accumulated knowledge for this role:
+   `maestro wiki list --category arch`
+2. Analyze the index, identify entries relevant to the current task
+3. Load selected documents:
+   `maestro wiki load <id1> [id2] [id3...]`
+4. Review loaded knowledge before proceeding
 </context>
 
 <execution>
@@ -57,6 +69,7 @@ Auto mode:
 - Project initialized, quick roadmap → Skill({ skill: "maestro-roadmap", args: "--from-brainstorm {session_id}" })
 - Need deeper analysis first → Skill({ skill: "maestro-analyze", args: "{topic}" })
 - `html-prototypes/` produced with 2+ files and user wants to browse → load `~/.maestro/workflows/brainstorm-visualize.md` and launch visualizer server (optional, user-triggered)
+- DESIGN.md established during Step 3.5 → suggest: "Run `/maestro-impeccable build <feature-description>` to build with the established design system"
 
 Single role mode:
 - More roles needed → Skill({ skill: "maestro-brainstorm", args: "{next_role} --session {session_id}" })
@@ -82,15 +95,18 @@ Single role mode:
 - [ ] design-research.md persisted when Step 1.7 external research ran (fail-soft: absence not a failure)
 - [ ] Spec Review Gate passed (Step 3.5) or `--yes` bypassed
 - [ ] Role analysis files for each selected NON-UI role in `.brainstorming/{role}/`
-- [ ] If `ui-designer` in selected_roles: `ui-designer/analysis.md` exists AND exactly one of `html-prototypes/` / `ascii-mockups/` / `api-sketches/` exists with `README.md` + ≥1 prototype file
-- [ ] ui-designer/analysis.md references each prototype via `@-notation`
-- [ ] HTML prototypes are self-contained (no external `<link>`/`<script src>` URLs — warn only)
+- [ ] If `ui-designer` in selected_roles AND Step 3.5 ran: `.workflow/impeccable/DESIGN.md` exists (visual style established via impeccable explore)
+- [ ] If `ui-designer` in selected_roles: `ui-designer/analysis.md` exists with UX analysis (interaction flows, state design, information architecture)
 - [ ] Feature specs in `.brainstorming/feature-specs/` (or synthesis-specification.md)
-- [ ] UI-bearing feature specs reference the corresponding prototype in Section 3 (Interface Contract)
+- [ ] UI-bearing feature specs reference DESIGN.md for visual constraints in Section 3 (Interface Contract)
 - [ ] feature-index.json and synthesis-changelog.md
 - [ ] Final Output Gate passed (Step 5.5) or `--yes` bypassed
 - [ ] All user decisions captured with Decision Recording Protocol
 - [ ] Session metadata updated with completion status
+- [ ] Confidence scored per role completion and after cross-role analysis
+- [ ] Readiness gate checked before spec generation
+- [ ] Pressure pass completed on at least 1 feature spec
+- [ ] Confidence summary appended to synthesis-changelog.md
 
 **Single role mode**:
 - [ ] analysis.md written to `{output_dir}/{role}/`

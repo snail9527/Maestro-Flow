@@ -1,6 +1,6 @@
 ---
 name: maestro-roadmap
-description: Roadmap generation with dual mode — light (requirement→roadmap) or full (requirement→spec package→roadmap)
+description: Generate roadmap from requirements (light or full mode)
 argument-hint: "<requirement> [--mode light|full] [-y] [-c] [-m progressive|direct|auto] [--from-brainstorm SESSION-ID] [--revise [instructions]] [--review]"
 allowed-tools:
   - Read
@@ -69,6 +69,10 @@ maestro-plan → maestro-execute → maestro-verify
 ```
 
 **Note (full mode):** `maestro-init` MUST run before `--mode full`. It creates the `.workflow/` directory and project context.
+
+### Pre-load specs
+1. **Architecture specs**: Run `maestro spec load --category arch` to load architecture constraints. Use as context for phase decomposition — ensures roadmap respects documented decisions and boundaries.
+2. Optional — proceed without if unavailable.
 </context>
 
 <execution>
@@ -100,7 +104,7 @@ Follow `~/.maestro/workflows/spec-generate.md` completely.
 |-----------|-----------|
 | Roadmap approved, need analysis | /maestro-analyze 1 |
 | Simple project, ready to plan | /maestro-plan 1 |
-| Need UI design first | /maestro-ui-design 1 |
+| Need UI design first | /maestro-impeccable build |
 | View project dashboard | /manage-status |
 | Need project setup (full mode) | /maestro-init |
 </execution>

@@ -2,11 +2,13 @@
 // SpecInjectionPlugin — Injects project specs into coordinator prompts
 // ---------------------------------------------------------------------------
 
-import type { MaestroPlugin } from '../../types/index.js';
+import type { MaestroPlugin, SpecInjectionConfig } from '../../types/index.js';
 import type { WorkflowHookRegistry } from '../workflow-hooks.js';
-import { loadSpecs, type SpecCategory } from '../../tools/spec-loader.js';
+import { loadSpecs, loadExtraDocs, type SpecCategory, type LoadSpecsOptions } from '../../tools/spec-loader.js';
+import { loadSpecInjectionConfig } from '../../config/index.js';
 import { resolveSelf } from '../../tools/team-members.js';
 import { evaluateKeywordInjection } from '../keyword-spec-injector.js';
+import { logInjectionEvent } from '../spec-analytics.js';
 
 /**
  * In-process plugin for `maestro coordinate` — injects relevant specs
@@ -26,13 +28,48 @@ export class SpecInjectionPlugin implements MaestroPlugin {
   apply(registry: WorkflowHookRegistry): void {
     registry.transformPrompt.tap(this.name, (prompt: string) => {
       const parts: string[] = [prompt];
+      const config = loadSpecInjectionConfig(this.projectPath);
 
-      // Category-based injection
+      // Category-based injection with keyword filters
       const category = inferCategory(prompt);
       const uid = resolveUidSafe();
-      const catResult = loadSpecs(this.projectPath, category, uid);
+
+      const loaderOpts: LoadSpecsOptions = {};
+      if (config.keywordFilters?.include?.length) loaderOpts.includeKeywords = config.keywordFilters.include;
+      if (config.keywordFilters?.exclude?.length) loaderOpts.excludeKeywords = config.keywordFilters.exclude;
+
+      const catDocConfig = config.categoryDocs?.[category];
+      if (catDocConfig?.specFiles?.length) loaderOpts.extraSpecFiles = catDocConfig.specFiles;
+
+      const catResult = loadSpecs(this.projectPath, category, uid, undefined, undefined, loaderOpts);
       if (catResult.content) {
         parts.push(catResult.content);
+      }
+
+      // Load category-level extra documents
+      if (catDocConfig?.docs?.length) {
+        const docsResult = loadExtraDocs(this.projectPath, catDocConfig.docs);
+        if (docsResult.content) parts.push(docsResult.content);
+      }
+
+      // Always-inject (session start): docs, keyword-matched entries, categories
+      if (config.always) {
+        if (config.always.docs?.length) {
+          const alwaysResult = loadExtraDocs(this.projectPath, config.always.docs);
+          if (alwaysResult.content) parts.push(alwaysResult.content);
+        }
+        if (config.always.keywords?.length) {
+          const kwOpts: LoadSpecsOptions = { includeKeywords: config.always.keywords };
+          const kwResult = loadSpecs(this.projectPath, undefined, uid, undefined, undefined, kwOpts);
+          if (kwResult.content) parts.push(kwResult.content);
+        }
+        if (config.always.categories?.length) {
+          for (const cat of config.always.categories) {
+            if (cat === category) continue;
+            const catRes = loadSpecs(this.projectPath, cat as import('../../tools/spec-loader.js').SpecCategory, uid);
+            if (catRes.content) parts.push(catRes.content);
+          }
+        }
       }
 
       // Keyword-based injection (with session dedup)
@@ -43,7 +80,22 @@ export class SpecInjectionPlugin implements MaestroPlugin {
         }
       }
 
-      return parts.length > 1 ? parts.join('\n\n---\n\n') : prompt;
+      const injected = parts.length > 1;
+      const injectedContent = injected ? parts.slice(1).join('\n\n---\n\n') : '';
+      const inferredCat = category;
+
+      logInjectionEvent(this.projectPath, {
+        source: 'spec-injection-plugin',
+        promptSnippet: prompt.slice(0, 300),
+        inferredCategory: inferredCat,
+        categories: injected ? [inferredCat] : [],
+        specCount: catResult.totalLoaded,
+        contentLength: injectedContent.length,
+        inject: injected,
+        reason: injected ? undefined : 'no-content',
+      }, config.analytics);
+
+      return injected ? parts.join('\n\n---\n\n') : prompt;
     });
   }
 }
@@ -62,15 +114,19 @@ function resolveUidSafe(): string | undefined {
 }
 
 /**
- * Infer spec category from prompt keywords.
+ * Infer category from prompt keywords.
  * The coordinator doesn't have agent-type metadata, so we use
  * heuristic keyword matching on the assembled prompt.
+ *
+ * Principle: category = "who consumes" (agent type), not "what it's about".
+ * Multi-word phrases don't need \b; single words use \b to avoid sub-matches.
  */
 function inferCategory(prompt: string): SpecCategory {
   const lower = prompt.toLowerCase();
-  if (/\b(review|audit|check quality)\b/.test(lower)) return 'review';
-  if (/\b(test|spec|coverage|assert)\b/.test(lower)) return 'test';
-  if (/\b(debug|diagnose|fix|error|bug)\b/.test(lower)) return 'debug';
-  if (/\b(plan|design|architect|decompose|explore|discover|search|analyze)\b/.test(lower)) return 'arch';
+  if (/\b(review|audit|compliance|lint)\b|code review|security audit|quality gate/.test(lower)) return 'review';
+  if (/\b(test(?:ing)?|coverage|assert|verify|validate|e2e|regression)\b/.test(lower)) return 'test';
+  if (/\b(debug|diagnose|bug|trace|crash|hang|leak)\b|root cause/.test(lower)) return 'debug';
+  if (/\b(plan|design|architect|decompose|blueprint)\b|migration strategy/.test(lower)) return 'arch';
+  if (/\b(ui|ux|frontend|component|style|css|scss|tailwind|design system|layout|animation|responsive|landing|dashboard|impeccable)\b/.test(lower)) return 'ui';
   return 'coding'; // Default for implementation work
 }

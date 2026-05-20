@@ -61,14 +61,20 @@ Bash("<test-command> 2>&1 || true")
 **Auto-fix delegation** (on failure):
 
 ```
-Bash(`maestro delegate "PURPOSE: Fix test failures to achieve pass rate >= 0.95; success = all tests pass
+exec_command({
+  cmd: `maestro delegate "PURPOSE: Fix test failures to achieve pass rate >= 0.95; success = all tests pass
 TASK: • Analyze test failure output • Identify root causes • Fix test code only (not source) • Preserve test intent
 MODE: write
 CONTEXT: @<session>/<test-dir>/**/* | Memory: Test framework: <framework>, iteration <N>/3
 EXPECTED: Fixed test files with: corrected assertions, proper async handling, fixed imports, maintained coverage
 CONSTRAINTS: Only modify test files | Preserve test structure | No source code changes
 Test failures:
-<test-output>" --tool gemini --mode write --cd <session>`)
+<test-output>" --role implement --mode write --cd <session>`,
+  yield_time_ms: 30000,
+  max_output_tokens: 6000
+})
+// ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
+// NEVER skip — must wait for fix to complete before re-running tests
 ```
 
 **Save results**: `<session>/results/run-<N>.json`

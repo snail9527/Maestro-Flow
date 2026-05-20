@@ -498,6 +498,18 @@ END OUTER
 
 ---
 
+### Step 7.5: Test Confidence Scoring
+
+Scored after each REFLECT step. Dimensions (5): scenario_coverage, test_quality, diagnostic_accuracy, strategy_effectiveness, infrastructure_fitness. Factors (weights): completeness(.30), pass_rate_trend(.25), classification_accuracy(.20), coverage_breadth(.15), consistency(.10). Append confidence table to reflection-log.md.
+
+**Enhanced Convergence**: pass_rate ≥ 95% AND confidence ≥ 60% → converged. pass_rate ≥ 95% BUT confidence < 60% → continue (tests may be weak). max_iter reached or all failures = code_defect → Step 8.
+
+**Quality mechanisms**: Pressure Pass (before Step 8) — select 2-3 passing tests from highest-pass-rate layer, verify they exercise real behavior (not mock-only, non-trivial assertions). Devil's Advocate — pass_rate > 80% → challenge assertion specificity, error path coverage, mock over-reliance. Stall Detection — delta < 5% for 2 iterations + pass_rate flat → force Reflective strategy.
+
+**Readiness Gate** (before Step 8, skip if max_iter=1): scenario_coverage < 40% | no pressure pass | diagnostic_accuracy < 40% | unclassified failures. If blocked → force one additional iteration. Add confidence section to report.json.
+
+---
+
 ### Step 8: Complete & Write Artifacts
 
 1. Update session state:

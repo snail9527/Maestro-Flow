@@ -32,14 +32,12 @@ if (existsSync(srcSkills)) {
   console.log(`Copied skills: ${readdirSync(destSkills).length} directories`);
 }
 
-// Copy guides (Chinese .md only, skip .en.md)
+// Copy guides (all .md files including .en.md for bilingual support)
 const srcGuides = join(root, 'guide');
 const destGuides = join(__dirname, 'guides');
 if (existsSync(srcGuides)) {
   mkdirSync(destGuides, { recursive: true });
-  const guideFiles = readdirSync(srcGuides).filter(f =>
-    f.endsWith('.md') && !f.endsWith('.en.md')
-  );
+  const guideFiles = readdirSync(srcGuides).filter(f => f.endsWith('.md'));
   for (const file of guideFiles) {
     copyFileSync(join(srcGuides, file), join(destGuides, file));
   }

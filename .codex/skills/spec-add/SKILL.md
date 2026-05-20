@@ -1,6 +1,6 @@
 ---
 name: spec-add
-description: Add a spec entry to the appropriate specs file by category
+description: Add spec entry by category with role tagging
 argument-hint: "<category> <content>"
 allowed-tools: Read, Write, Bash, Glob, Grep
 ---
@@ -15,7 +15,7 @@ $spec-add "arch Use Zod for runtime validation over io-ts"
 $spec-add "quality All API endpoints must return structured error objects"
 ```
 
-**Valid categories**: coding, arch, quality, debug, test, review, learning, bug, pattern, decision, rule, validation.
+**Valid categories**: coding, arch, quality, debug, test, review, learning, tools, bug, pattern, decision, rule, validation.
 
 **CLI alternative**: `maestro spec add <category> "<title>" "<content>" --keywords kw1,kw2 --source <src>`. Used by workflow agents (analyze, plan, execute) for programmatic spec enrichment.
 </purpose>
@@ -33,6 +33,7 @@ $ARGUMENTS — `<category> <content>` where category selects the target file.
 | `test` | `test-conventions.md` |
 | `review` | `review-standards.md` |
 | `learning` | `learnings.md` |
+| `tools` | `tools.md` |
 | `bug` | `learnings.md` |
 | `pattern` | `coding-conventions.md` |
 | `decision` | `architecture-constraints.md` |
@@ -40,6 +41,8 @@ $ARGUMENTS — `<category> <content>` where category selects the target file.
 | `validation` | `quality-rules.md` |
 
 Extended types (`bug`, `pattern`, `decision`, `rule`, `validation`) are stored in the file of their closest core category but retain their specific category in the `<spec-entry>` tag.
+
+Category is determined by the first positional argument.
 </context>
 
 <execution>
@@ -89,7 +92,7 @@ Display: category, target file, extracted keywords, and commands for verify (`/s
 |------|----------|-------------|
 | E001 | fatal | Category and content are both required |
 | E002 | fatal | `.workflow/specs/` not initialized -- run `Skill({ skill: "spec-setup" })` first |
-| E003 | fatal | Invalid category -- must be one of: coding, arch, quality, debug, test, review, learning, bug, pattern, decision, rule, validation |
+| E003 | fatal | Invalid category -- must be one of: coding, arch, quality, debug, test, review, learning, ui, bug, pattern, decision, rule, validation |
 </error_codes>
 
 <success_criteria>

@@ -24,6 +24,7 @@ import { paths } from '../../config/paths.js';
 import { loadAllOverlays, loadOverlay, validateOverlayMeta } from './loader.js';
 import { applyOverlay, removeOverlay as stripMarkers } from './patcher.js';
 import {
+  CLAUDE_MD_TARGET,
   OVERLAY_MANIFEST_VERSION,
   type AppliedOverlay,
   type AppliedTarget,
@@ -32,6 +33,7 @@ import {
   type OverlayMeta,
   type OverlayManifest,
 } from './types.js';
+import { injectContent, removeContent } from '../tag-injector.js';
 
 // ---------------------------------------------------------------------------
 // Manifest persistence
@@ -83,6 +85,7 @@ export function deleteOverlayManifest(
 
 /**
  * Resolve a target name to file path(s) based on the overlay's `cli` field.
+ * - _claude-md → `.claude/CLAUDE.md` (routed through tag-injector)
  * - claude → `.claude/commands/{name}.md`
  * - codex  → `.codex/skills/{name}/SKILL.md`
  * - both   → both paths
@@ -91,8 +94,16 @@ function resolveTargetPaths(
   targetBase: string,
   targetName: string,
   cli: OverlayCli,
-): { path: string; cli: 'claude' | 'codex' }[] {
-  const result: { path: string; cli: 'claude' | 'codex' }[] = [];
+): { path: string; cli: 'claude' | 'codex' | 'claude-md' }[] {
+  // Special target: CLAUDE.md via tag-injector
+  if (targetName === CLAUDE_MD_TARGET) {
+    return [{
+      path: join(targetBase, '.claude', 'CLAUDE.md'),
+      cli: 'claude-md',
+    }];
+  }
+
+  const result: { path: string; cli: 'claude' | 'codex' | 'claude-md' }[] = [];
   if (cli === 'claude' || cli === 'both') {
     result.push({
       path: join(targetBase, '.claude', 'commands', `${targetName}.md`),
@@ -139,6 +150,10 @@ export function applyOverlays(opts: ApplyOptions): ApplyReport {
   const { overlays, errors: loadErrors } = loadAllOverlays(opts.overlayDir);
   const enabledOverlays = overlays.filter((o) => o.meta.enabled !== false);
 
+  // Sort by priority descending — high-priority overlays are processed first.
+  // Overlays without an explicit priority default to 0 (applied last).
+  enabledOverlays.sort((a, b) => (b.meta.priority ?? 0) - (a.meta.priority ?? 0));
+
   const skipped: ApplyReport['skipped'] = [];
   const appliedOverlays: AppliedOverlay[] = [];
   let filesChanged = 0;
@@ -146,12 +161,19 @@ export function applyOverlays(opts: ApplyOptions): ApplyReport {
 
   // Group patches by target so each target file is read and written once
   // per applyOverlays invocation.
-  const byTarget = new Map<string, { overlay: OverlayFile; cmdPath: string }[]>();
+  interface TargetEntry { overlay: OverlayFile; cmdPath: string }
+  const byTarget = new Map<string, TargetEntry[]>();
+  const claudeMdEntries: TargetEntry[] = [];
   for (const overlay of enabledOverlays) {
     const cli = overlay.meta.cli ?? 'claude';
     for (const target of overlay.meta.targets) {
       const resolved = resolveTargetPaths(opts.targetBase, target, cli);
-      for (const { path: cmdPath } of resolved) {
+      for (const { path: cmdPath, cli: cliType } of resolved) {
+        // _claude-md targets are collected separately; the file may not exist yet.
+        if (cliType === 'claude-md') {
+          claudeMdEntries.push({ overlay, cmdPath });
+          continue;
+        }
         const disabledPath = cmdPath + '.disabled';
         if (!existsSync(cmdPath)) {
           if (existsSync(disabledPath)) {
@@ -178,6 +200,7 @@ export function applyOverlays(opts: ApplyOptions): ApplyReport {
     });
   }
 
+  // --- Standard command-file targets (patcher) ---
   for (const [cmdPath, entries] of byTarget) {
     let text = readFileSync(cmdPath, 'utf-8');
     const originalText = text;
@@ -199,6 +222,45 @@ export function applyOverlays(opts: ApplyOptions): ApplyReport {
 
     if (text !== originalText) {
       writeFileSync(cmdPath, text, 'utf-8');
+      filesChanged++;
+    } else {
+      filesUnchanged++;
+    }
+  }
+
+  // --- CLAUDE.md targets (tag-injector) ---
+  if (claudeMdEntries.length > 0) {
+    // All _claude-md entries resolve to the same CLAUDE.md path.
+    const claudeMdPath = claudeMdEntries[0].cmdPath;
+    const claudeMdDir = dirname(claudeMdPath);
+    if (!existsSync(claudeMdDir)) mkdirSync(claudeMdDir, { recursive: true });
+
+    let text = existsSync(claudeMdPath) ? readFileSync(claudeMdPath, 'utf-8') : '';
+    const originalText = text;
+
+    for (const { overlay } of claudeMdEntries) {
+      const sectionName = `overlay:${overlay.meta.name}`;
+      const sectionsPatched: string[] = [];
+
+      // Concatenate all patch contents for this overlay into one section block.
+      const combinedContent = overlay.meta.patches
+        .map((p) => p.content)
+        .join('\n\n');
+
+      text = injectContent(text, combinedContent, sectionName);
+      sectionsPatched.push(sectionName);
+
+      const applied: AppliedTarget = {
+        commandName: CLAUDE_MD_TARGET,
+        commandPath: claudeMdPath,
+        sectionsPatched,
+        markerIds: [sectionName],
+      };
+      appliedByOverlay.get(overlay.meta.name)!.targets.push(applied);
+    }
+
+    if (text !== originalText) {
+      writeFileSync(claudeMdPath, text, 'utf-8');
       filesChanged++;
     } else {
       filesUnchanged++;
@@ -266,7 +328,17 @@ export function removeOverlayFromTargets(
   for (const tgt of entry.targets) {
     if (!existsSync(tgt.commandPath)) continue;
     const text = readFileSync(tgt.commandPath, 'utf-8');
-    const { text: cleaned } = stripMarkers(text, overlayName);
+
+    let cleaned: string;
+    if (tgt.commandPath.endsWith('CLAUDE.md')) {
+      // CLAUDE.md uses tag-injector markers — remove with removeContent()
+      const sectionName = `overlay:${overlayName}`;
+      cleaned = removeContent(text, sectionName);
+    } else {
+      // Standard command files use patcher markers
+      cleaned = stripMarkers(text, overlayName).text;
+    }
+
     if (cleaned !== text) {
       writeFileSync(tgt.commandPath, cleaned, 'utf-8');
       filesChanged++;

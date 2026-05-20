@@ -3,10 +3,16 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 import { copyFileSync } from 'fs';
+import { createRequire } from 'module';
+
+const pkgVersion = createRequire(import.meta.url)('./package.json').version;
 
 // https://vite.dev/config/
 export default defineConfig({
   base: process.env.VITE_BASE_URL || '/',
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -35,6 +41,16 @@ export default defineConfig({
         '.',
         '..',
       ],
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Split mermaid into its own chunk to avoid 600KB+ single file
+          mermaid: ['mermaid'],
+        },
+      },
     },
   },
   publicDir: 'public',

@@ -1,8 +1,8 @@
 ---
 name: maestro-fork
-description: Create git worktree for milestone-level parallel development, or sync existing worktree with main. Copies .workflow/ context and scratch artifacts into worktree since .workflow/ is gitignored.
+description: Create or sync milestone worktree for parallel dev
 argument-hint: "-m <milestone-number> [--base <branch>] [--sync]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -17,6 +17,11 @@ Also supports `--sync` mode to pull latest main into an active worktree.
 <required_reading>
 @~/.maestro/workflows/fork.md
 </required_reading>
+
+<deferred_reading>
+- [worktrees.json](~/.maestro/templates/worktrees.json) — read when initializing or updating worktree registry
+- [worktree-scope.json](~/.maestro/templates/worktree-scope.json) — read when creating worktree scope marker
+</deferred_reading>
 
 <context>
 $ARGUMENTS — milestone number and optional flags.
@@ -63,6 +68,55 @@ Follow '~/.maestro/workflows/fork.md' completely.
 1. Find worktree from `worktrees.json`
 2. `cd worktree && git merge main`
 3. Re-copy shared files (project.md, roadmap.md, config.json, specs/)
+
+**Registry: `worktrees.json`** (`.workflow/worktrees.json` in main worktree):
+
+Initialize if not exists: `{ "version": "1.0", "worktrees": [], "fork_sessions": [] }`
+
+On fork, append to `worktrees[]`:
+```json
+{
+  "milestone_num": "{milestoneNum}",
+  "milestone": "{milestoneName}",
+  "slug": "{milestoneSlug}",
+  "branch": "milestone/{milestoneSlug}",
+  "path": "{worktreeRoot}/m{milestoneNum}-{milestoneSlug}",
+  "base_commit": "{baseCommit}",
+  "status": "active",
+  "created_at": "{UTC8_ISO}",
+  "owned_phases": ["{ownedPhaseNumbers}"],
+  "fork_session": "{forkSessionId}"
+}
+```
+
+Append to `fork_sessions[]`:
+```json
+{
+  "session_id": "fork-{UTC8_compact_timestamp}",
+  "created_at": "{UTC8_ISO}",
+  "milestone_num": "{milestoneNum}",
+  "milestone": "{milestoneName}",
+  "base_branch": "{baseBranch}",
+  "base_commit": "{baseCommit}"
+}
+```
+
+**Scope marker: `worktree-scope.json`** (`{wtPath}/.workflow/worktree-scope.json`):
+```json
+{
+  "worktree": true,
+  "milestone_num": "{milestoneNum}",
+  "milestone": "{milestoneName}",
+  "owned_phases": ["{ownedPhaseNumbers}"],
+  "phase_dependencies": "{phaseDeps}",
+  "main_worktree": "{resolve(cwd)}",
+  "branch": "milestone/{milestoneSlug}",
+  "base_commit": "{baseCommit}",
+  "created_at": "{UTC8_ISO}"
+}
+```
+
+Presence of `worktree-scope.json` signals "inside a worktree" — used by E003 validation to prevent nested forks.
 
 **Next steps:**
 - Fork → `cd {wt.path} && $maestro-analyze`

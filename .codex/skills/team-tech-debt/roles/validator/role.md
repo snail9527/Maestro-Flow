@@ -58,12 +58,18 @@ Execute 4-layer validation (all commands in worktree):
 **Auto-fix attempt** (when total_regressions <= 3):
 - Use CLI tool to fix regressions in worktree:
   ```
-  Bash(`cd "${worktreePath}" && maestro delegate "PURPOSE: Fix regressions found in validation
+  exec_command({
+    cmd: `cd "${worktreePath}" && maestro delegate "PURPOSE: Fix regressions found in validation
   TASK: ${regressionDetails}
   MODE: write
   CONTEXT: @${modifiedFiles.join(' @')}
   EXPECTED: Fixed regressions
-  CONSTRAINTS: Fix only regressions | Preserve debt cleanup changes | No suppressions" --tool gemini --mode write`)
+  CONSTRAINTS: Fix only regressions | Preserve debt cleanup changes | No suppressions" --role implement --mode write`,
+    yield_time_ms: 30000,
+    max_output_tokens: 6000
+  })
+  // ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
+  // NEVER skip — must wait for fix before re-running validation
   ```
 - Re-run validation checks after fix attempt
 

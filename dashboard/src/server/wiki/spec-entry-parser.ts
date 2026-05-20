@@ -20,6 +20,7 @@ export interface SpecEntry {
   timestamp: string;
   category: string;
   keywords: string[];
+  ref?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -27,7 +28,7 @@ export interface SpecEntry {
 // ---------------------------------------------------------------------------
 
 const ENTRY_TYPES = [
-  'coding', 'arch', 'quality', 'debug', 'test', 'review', 'learning',
+  'coding', 'arch', 'quality', 'debug', 'test', 'review', 'learning', 'tools',
   'bug', 'pattern', 'decision', 'rule', 'validation',
 ] as const;
 type EntryType = (typeof ENTRY_TYPES)[number];
@@ -36,8 +37,9 @@ const FILE_TYPE_MAP: Record<string, EntryType> = {
   learnings: 'learning',
   'coding-conventions': 'coding',
   'architecture-constraints': 'arch',
-  'quality-rules': 'quality',
+  'quality-rules': 'review',
   'debug-notes': 'debug',
+  tools: 'tools',
   'test-conventions': 'test',
   'review-standards': 'review',
 };
@@ -46,10 +48,11 @@ export const FILE_CATEGORY_MAP: Record<string, string> = {
   learnings: 'learning',
   'coding-conventions': 'coding',
   'architecture-constraints': 'arch',
-  'quality-rules': 'quality',
+  'quality-rules': 'review',
   'debug-notes': 'debug',
   'test-conventions': 'test',
   'review-standards': 'review',
+  tools: 'tools',
 };
 
 // ---------------------------------------------------------------------------
@@ -59,7 +62,6 @@ export const FILE_CATEGORY_MAP: Record<string, string> = {
 /** Heading regex: matches ## or ### at start of line. */
 export const HEADING_RE = /^(#{2,3})\s+(.+)$/;
 
-const SPEC_ENTRY_TAG_RE = /<spec-entry\s+([^>]+)>([\s\S]*?)<\/spec-entry>/g;
 const TAG_ATTR_RE = /([\w-]+)="([^"]*)"/g;
 
 /** Detect entry type from heading text or fall back to file-based default. */
@@ -96,12 +98,12 @@ export function extractCleanTitle(heading: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse markdown body into SpecEntry objects.
- * First extracts <spec-entry> closed-tag blocks, then parses remaining text
- * with legacy heading-based parser.
+ * Generic entry block parser. Extracts closed-tag blocks matching `tagName`,
+ * then parses remaining text with legacy heading-based parser.
  */
-export function parseSpecEntries(
+function parseEntryBlocks(
   body: string,
+  tagName: string,
   fileName: string,
   frontmatter?: Record<string, unknown>,
 ): SpecEntry[] {
@@ -109,12 +111,12 @@ export function parseSpecEntries(
   const entries: SpecEntry[] = [];
   let entryIndex = 0;
 
-  // Pass 1: Extract <spec-entry> closed-tag blocks
+  // Pass 1: Extract <tagName> closed-tag blocks
+  const tagRe = new RegExp(`<${tagName}\\s+([^>]+)>([\\s\\S]*?)<\\/${tagName}>`, 'g');
   const consumedRanges: Array<{ start: number; end: number }> = [];
   let tagMatch: RegExpExecArray | null;
-  SPEC_ENTRY_TAG_RE.lastIndex = 0;
 
-  while ((tagMatch = SPEC_ENTRY_TAG_RE.exec(body)) !== null) {
+  while ((tagMatch = tagRe.exec(body)) !== null) {
     const attrStr = tagMatch[1];
     const innerContent = tagMatch[2].trim();
     consumedRanges.push({ start: tagMatch.index, end: tagMatch.index + tagMatch[0].length });
@@ -128,9 +130,14 @@ export function parseSpecEntries(
 
     const titleMatch = innerContent.match(/^###\s+(.+)$/m);
     const title = titleMatch ? titleMatch[1].trim() : innerContent.split('\n')[0].trim();
-    const type = attrs.category ?? detectEntryType(title, fileName);
+    const type = attrs.type ?? detectEntryType(title, fileName);
     const id = `${stem}-${String(++entryIndex).padStart(3, '0')}`;
     const kws = attrs.keywords ? attrs.keywords.split(',').map((k) => k.trim()) : [];
+    const ref = attrs.ref || undefined;
+    const entryCategory = attrs.category
+      || (typeof frontmatter?.category === 'string' ? frontmatter.category : null)
+      || FILE_CATEGORY_MAP[stem]
+      || 'general';
 
     entries.push({
       id,
@@ -139,12 +146,9 @@ export function parseSpecEntries(
       content: innerContent,
       file: fileName,
       timestamp: attrs.date ?? '',
-      category:
-        attrs.category ??
-        (typeof frontmatter?.category === 'string'
-          ? frontmatter.category
-          : (FILE_CATEGORY_MAP[stem] ?? 'general')),
+      category: entryCategory,
       keywords: kws,
+      ...(ref ? { ref } : {}),
     });
   }
 
@@ -190,4 +194,26 @@ export function parseSpecEntries(
   }
 
   return entries;
+}
+
+/**
+ * Parse markdown body into SpecEntry objects from <spec-entry> blocks.
+ */
+export function parseSpecEntries(
+  body: string,
+  fileName: string,
+  frontmatter?: Record<string, unknown>,
+): SpecEntry[] {
+  return parseEntryBlocks(body, 'spec-entry', fileName, frontmatter);
+}
+
+/**
+ * Parse markdown body into SpecEntry objects from <knowhow-entry> blocks.
+ */
+export function parseKnowhowEntries(
+  body: string,
+  fileName: string,
+  frontmatter?: Record<string, unknown>,
+): SpecEntry[] {
+  return parseEntryBlocks(body, 'knowhow-entry', fileName, frontmatter);
 }

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { extractToc } from './MarkdownRenderer.js';
+import { useI18n } from '@/client/i18n/index.js';
 
 // ---------------------------------------------------------------------------
-// FloatingToc — sticky right-side TOC with scroll tracking
-// Used as a flex item alongside content for symmetric centering
+// FloatingToc — Gemini CLI style: "On this page" right-side TOC
 // ---------------------------------------------------------------------------
 
 interface FloatingTocProps {
@@ -11,6 +11,7 @@ interface FloatingTocProps {
 }
 
 export function FloatingToc({ content }: FloatingTocProps) {
+  const { t } = useI18n();
   const headings = extractToc(content);
   const [activeId, setActiveId] = useState<string>('');
   const rafRef = useRef(0);
@@ -29,7 +30,6 @@ export function FloatingToc({ content }: FloatingTocProps) {
         for (const { id } of headings) {
           const el = document.getElementById(id);
           if (!el) continue;
-          // Heading is "active" when it has scrolled past the top of the container + offset
           if (el.getBoundingClientRect().top <= containerTop + 80) {
             current = id;
           }
@@ -51,16 +51,16 @@ export function FloatingToc({ content }: FloatingTocProps) {
   return (
     <aside className="hidden xl:block shrink-0 w-[var(--size-toc-width)]">
       <nav
-        className="sticky top-[var(--spacing-6)] max-h-[calc(100vh-var(--size-topbar-height)-var(--spacing-12))] overflow-y-auto"
-        aria-label="Table of contents"
+        className="sticky top-[var(--spacing-8)] max-h-[calc(100vh-var(--size-topbar-height)-var(--spacing-16))] overflow-y-auto"
+        aria-label={t('toc.aria_label')}
       >
-        <div className="text-[length:10px] font-[var(--font-weight-semibold)] uppercase tracking-[var(--letter-spacing-wide)] text-text-tertiary mb-[var(--spacing-3)] px-[var(--spacing-1)]">
-          On this page
+        <div className="text-[length:12px] font-[var(--font-weight-semibold)] uppercase tracking-[var(--letter-spacing-wide)] text-text-tertiary mb-[var(--spacing-3)] px-[var(--spacing-1)]">
+          {t('toc.on_this_page')}
         </div>
-        <ul className="flex flex-col gap-[2px]">
+        <ul className="flex flex-col gap-px border-l border-border-divider">
           {headings.map(({ id, level, text }) => {
             const isActive = activeId === id;
-            const indent = level > 2 ? (level - 2) * 10 : 0;
+            const indent = level > 2 ? (level - 2) * 12 : 0;
             return (
               <li key={id}>
                 <a
@@ -70,10 +70,10 @@ export function FloatingToc({ content }: FloatingTocProps) {
                     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   }}
                   className={[
-                    'block text-[length:12px] leading-[1.5] py-[3px] px-[var(--spacing-2)] rounded-[var(--radius-sm)] transition-all duration-150 no-underline truncate',
+                    'block text-[length:13px] leading-[1.5] py-[3px] px-[var(--spacing-2)] transition-all duration-150 no-underline truncate',
                     isActive
-                      ? 'text-accent-blue font-[var(--font-weight-medium)] bg-tint-blue'
-                      : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover',
+                      ? 'text-accent-blue font-[var(--font-weight-medium)] border-l-2 -ml-px border-accent-blue'
+                      : 'text-text-tertiary hover:text-text-secondary',
                   ].join(' ')}
                   style={{ paddingLeft: `calc(var(--spacing-2) + ${indent}px)` }}
                 >

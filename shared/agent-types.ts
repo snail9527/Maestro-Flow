@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 
 /** Supported agent CLI types */
-export type AgentType = 'claude-code' | 'codex' | 'codex-server' | 'gemini' | 'gemini-a2a' | 'qwen' | 'opencode' | 'agent-sdk';
+export type AgentType = 'claude-code' | 'codex' | 'codex-server' | 'gemini' | 'gemini-a2a' | 'qwen' | 'opencode' | 'agy' | 'agent-sdk';
 
 /** Agent process lifecycle status */
 export type AgentProcessStatus =
@@ -40,6 +40,14 @@ export interface AgentConfig {
   mcpConfigPath?: string;
   /** Opaque metadata bag — used to pass team session context through the spawn pipeline */
   metadata?: Record<string, unknown>;
+  /** Reasoning effort level (undefined = tool default) */
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
+  /**
+   * Stale-stream silence window in ms before the adapter force-terminates a
+   * silent CLI. Undefined = StreamMonitor default (10 min). Threaded from
+   * `maestro delegate --timeout` / cli-tools.json `streamTimeoutMs`.
+   */
+  streamTimeoutMs?: number;
 }
 
 /** Runtime state of a spawned agent process */

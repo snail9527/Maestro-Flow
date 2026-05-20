@@ -41,7 +41,7 @@ Scan codebase from multiple perspectives (bug, security, test-coverage, code-qua
 
 **Medium/High complexity**: CLI fan-out -- one `maestro delegate --mode analysis` per perspective:
 
-For each active perspective, build prompt:
+For each active perspective, build prompt and execute:
 ```
 PURPOSE: Scan code from <perspective> perspective to discover potential issues
 TASK: Analyze code patterns for <perspective> problems, identify anti-patterns, check for common issues
@@ -50,7 +50,14 @@ CONTEXT: @<scan-scope>
 EXPECTED: List of findings with severity (critical/high/medium/low), file:line references, description
 CONSTRAINTS: Focus on actionable findings only
 ```
-Execute via: `maestro delegate "<prompt>" --role analyze --mode analysis`
+```
+exec_command({
+  cmd: `maestro delegate "<prompt>" --role analyze --mode analysis`,
+  yield_time_ms: 30000, max_output_tokens: 6000
+})
+// ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
+// NEVER skip — each perspective's findings are required for aggregation
+```
 
 After all perspectives complete:
 - Parse CLI outputs into structured findings

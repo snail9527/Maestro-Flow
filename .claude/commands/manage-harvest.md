@@ -1,6 +1,6 @@
 ---
 name: manage-harvest
-description: Extract knowledge from workflow artifacts and route to wiki / spec / issue stores
+description: Extract knowledge from artifacts into wiki/spec/issues
 argument-hint: "[<session-id|path>] [--to wiki|spec|issue|auto] [--source <type>] [--recent N] [--dry-run] [-y]"
 allowed-tools:
   - Read
@@ -54,7 +54,7 @@ Extraction patterns, classification rules, routing infrastructure, and fragment 
 - Review wiki entries → `maestro wiki list --type note`
 - Connect wiki graph → `/wiki-connect --fix`
 - Triage issues → `/manage-issue list --source harvest`
-- View specs → `/spec-load --category learning`
+- View specs → `/spec-load --role implement`
 - Full retrospective → `/quality-retrospective`
 </execution>
 

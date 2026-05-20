@@ -8,6 +8,7 @@ import {
   type CliToolsConfig,
   type RoleMapping,
 } from '../../config/cli-tools-config.js';
+import { C, SYM, SP, pad, wrapCursor, KeyHints, SectionHeader, CursorMarker } from '../shared/index.js';
 
 export interface RoleMappingsProps {
   config: CliToolsConfig;
@@ -36,8 +37,8 @@ export function RoleMappings({ config, workDir, onBack, onReload }: RoleMappings
 
     if (mode === 'list') {
       if (key.escape) { onBack(); return; }
-      if (key.upArrow) setCursor(c => c > 0 ? c - 1 : roles.length - 1);
-      if (key.downArrow) setCursor(c => c < roles.length - 1 ? c + 1 : 0);
+      if (key.upArrow) setCursor(c => wrapCursor(c, -1, roles.length));
+      if (key.downArrow) setCursor(c => wrapCursor(c, 1, roles.length));
       if (key.return || input === 'e') {
         // Edit fallback chain for this role
         const role = roles[cursor];
@@ -162,8 +163,4 @@ export function RoleMappings({ config, workDir, onBack, onReload }: RoleMappings
       <Text dimColor>[↑↓] Navigate  [Enter/e] Edit chain  [Esc] Back</Text>
     </Box>
   );
-}
-
-function pad(s: string, width: number): string {
-  return s.length >= width ? s.slice(0, width) : s + ' '.repeat(width - s.length);
 }

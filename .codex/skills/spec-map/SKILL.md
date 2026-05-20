@@ -1,6 +1,6 @@
 ---
 name: spec-map
-description: Analyze codebase with 4 parallel mapper agents via CSV wave pipeline. Produces .workflow/codebase/ documents for tech-stack, architecture, features, and cross-cutting concerns.
+description: Map codebase tech-stack, architecture, features, and concerns
 argument-hint: "[-y|--yes] [-c|--concurrency 4] [--continue] \"[focus area]\""
 allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---

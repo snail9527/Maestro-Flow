@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { writeFileSync } from 'node:fs';
 import { paths } from '../../config/paths.js';
+import { C } from '../shared/index.js';
 import {
   scanComponents,
   scanDisabledItems,
@@ -206,10 +207,10 @@ export function ExecutionView({
   if (error) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text color="red" bold>
+        <Text color={C.error} bold>
           Installation failed
         </Text>
-        <Text color="red">{error}</Text>
+        <Text color={C.error}>{error}</Text>
       </Box>
     );
   }
@@ -218,12 +219,12 @@ export function ExecutionView({
     <Box flexDirection="column" paddingX={1}>
       <Box>
         {done ? (
-          <Text color="green" bold>
+          <Text color={C.success} bold>
             {'  '}Done
           </Text>
         ) : (
           <Box>
-            <Text color="cyan">
+            <Text color={C.primary}>
               <Spinner type="dots" />
             </Text>
             <Text> {status}</Text>

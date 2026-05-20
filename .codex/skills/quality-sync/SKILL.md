@@ -1,6 +1,6 @@
 ---
 name: quality-sync
-description: Sync codebase docs after code changes -- traces git diff through component/feature/requirement layers
+description: Sync codebase docs by tracing git diff impact
 argument-hint: "[--full] [--since <commit|HEAD~N>] [--dry-run]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---

@@ -1,28 +1,17 @@
-# Maestro Hooks 系统指南
+---
+title: "Maestro Hooks 系统指南"
+---
 
-Maestro 的 Hook 系统为 Claude Code 提供自动化的上下文管理、规范注入和工作流感知能力。Hook 以子进程方式运行，通过 stdin/stdout JSON 协议与 Claude Code 交互。
+Maestro Hook 系统为 Claude Code 和 Codex 提供自动化的上下文管理、规范注入和工作流感知能力。Hook 以子进程方式运行，通过 stdin/stdout JSON 协议与宿主环境交互。
 
 ## 目录
 
 - [概览](#概览)
-  - [工作空间感知](#工作空间感知)
 - [Hook 清单](#hook-清单)
 - [安装级别](#安装级别)
 - [核心 Hook 详解](#核心-hook-详解)
-  - [context-monitor — 上下文监控](#context-monitor--上下文监控)
-  - [spec-injector — 规范自动注入](#spec-injector--规范自动注入)
-  - [context-budget — 上下文预算](#context-budget--上下文预算)
-  - [session-context — 会话上下文](#session-context--会话上下文)
-  - [delegate-monitor — 委托监控](#delegate-monitor--委托监控)
-  - [team-monitor — 团队监控](#team-monitor--团队监控)
-  - [skill-context — Skill 感知上下文](#skill-context--skill-感知上下文)
-  - [coordinator-tracker — 协调器进度追踪](#coordinator-tracker--协调器进度追踪)
-  - [workflow-guard — 工作流守卫](#workflow-guard--工作流守卫)
-- [状态转换记录](#状态转换记录transition-history)
-- [Coordinator 插件](#coordinator-插件)
 - [配置](#配置)
 - [命令参考](#命令参考)
-- [设计决策](#设计决策)
 
 ---
 
@@ -30,54 +19,28 @@ Maestro 的 Hook 系统为 Claude Code 提供自动化的上下文管理、规�
 
 ### 架构
 
-Maestro 的 Hook 分为两层：
+| 层 | 注册方式 | 运行方式 |
+|----|---------|---------|
+| Claude Code Hooks | `settings.json` | 子进程 `maestro hooks run <name>` |
+| Codex Hooks | `hooks.json` | 子进程 `maestro hooks run <name>` |
+| Coordinator Hooks | `WorkflowHookRegistry` | 进程内插件 |
 
-1. **Claude Code Hooks**（子进程）：通过 `settings.json` 注册，Claude Code 在特定事件时调用 `maestro hooks run <name>`
-2. **Coordinator Hooks**（进程内）：`maestro coordinate` 运行时的插件系统，通过 `WorkflowHookRegistry` 的事件钩子实现
+### 协议
 
-### 工作原理
+| 退出码 | 含义 |
+|--------|------|
+| `0` | 允许操作继续 |
+| `2` | 阻止操作 |
 
-```
-Claude Code 事件触发
-        │
-        ▼
-maestro hooks run <name>
-        │
-        ├─ requiresWorkspace? ──→ resolveWorkspace(cwd)
-        │     │                       │
-        │     │  null (无 workspace)   │  found
-        │     ▼                       ▼
-        │  exit(0) 静默退出      继续执行
-        │
-        ▼
-stdin → 读取 JSON → evaluator → stdout
-        │                           │
-        │  JSON { tool_name,        │  JSON { hookSpecificOutput: {
-        │    tool_input, ... }      │    updatedInput / additionalContext } }
-        │                           │
-        ▼                           ▼
-     读取上下文               返回处理结果
-```
-
-**协议**：
-- 退出码 `0` = 允许操作继续
-- 退出码 `2` = 阻止操作
-- `PreToolUse` 可返回 `updatedInput`（重写工具参数）或 `additionalContext`（附加上下文）
-- `PostToolUse` 可返回 `additionalContext`（附加上下文）
-- `Stop` 可返回 `decision: "block"` 阻止停止；无 `additionalContext` 支持，适合纯 I/O 副作用类 Hook
+| 事件类型 | 可返回 |
+|---------|--------|
+| `PreToolUse` | `updatedInput`（重写工具参数）/ `additionalContext` |
+| `PostToolUse` | `additionalContext` |
+| `Stop` | `decision: "block"`（无 `additionalContext`） |
 
 ### 工作空间感知
 
-Hook 系统具有**工作空间感知**能力。标记 `requiresWorkspace` 的 Hook 仅在检测到有效的 Maestro 工作空间时激活，否则静默退出（零开销）。
-
-**工作空间检测**（`src/hooks/workspace.ts`）：
-
-1. 从 `cwd` 向上遍历目录树（最多 10 层）
-2. 查找 `.workflow/state.json` 文件
-3. 验证 Maestro 指纹：`state.json` 必须包含 `version` 和 `phases_summary` 字段
-4. 优先选择同时包含 `.git/` 的目录（项目根目录启发式）
-
-**指纹验证防止误报**：其他工具也可能使用 `.workflow/` 目录名。只有包含 Maestro 特有字段的 `state.json` 才被识别为有效工作空间。
+标记 `requiresWorkspace` 的 Hook 仅在检测到有效 Maestro 工作空间时激活（向上遍历查找含 `version` + `phases_summary` 指纹的 `.workflow/state.json`），否则 `exit(0)` 静默退出，零开销。
 
 ---
 
@@ -85,314 +48,133 @@ Hook 系统具有**工作空间感知**能力。标记 `requiresWorkspace` 的 H
 
 | Hook | 事件类型 | Matcher | 级别 | Workspace | 用途 |
 |------|---------|---------|------|-----------|------|
-| `context-monitor` | PostToolUse | — | minimal | — | 监控上下文使用率，高使用率时注入警告 |
 | `spec-injector` | PreToolUse | Agent | minimal | 必需 | 按 agent 类型自动注入项目规范 |
-| `delegate-monitor` | PostToolUse | Bash\|Agent | standard | — | 监控异步委托任务的完成状态 |
+| `delegate-monitor` | PostToolUse | Bash\|Agent | standard | — | 监控异步委托任务完成状态 |
 | `team-monitor` | Stop | — | standard | — | 团队协作心跳记录 |
 | `telemetry` | Stop | — | standard | — | 执行遥测数据采集（每轮一次） |
 | `session-context` | Notification | — | standard | — | 会话启动时注入工作流状态 |
 | `skill-context` | UserPromptSubmit | — | standard | 必需 | Skill 调用时注入工作流状态和产物树 |
-| `coordinator-tracker` | Stop | — | standard | 必需 | 协调器链执行进度追踪，更新 bridge 文件供 statusline/skill-context 消费 |
+| `coordinator-tracker` | Stop | — | standard | 必需 | 协调器链执行进度追踪 |
+| `preflight-guard` | PreToolUse | Bash\|Write\|Edit\|Agent | standard | — | 命令执行前预检守卫 |
+| `spec-validator` | PreToolUse | Write\|Edit | standard | — | 规范写入验证 |
+| `keyword-spec-injector` | UserPromptSubmit | — | standard | — | 关键词匹配注入规范 |
 | `workflow-guard` | PreToolUse | Bash\|Write\|Edit | full | 必需 | 保护关键文件和操作 |
 
-> **Workspace 列**：标记「必需」的 Hook 在无 Maestro 工作空间时静默退出（`exit(0)`），不读取 stdin，零开销。其余 Hook 始终运行（不依赖工作流产物）。
->
-> **性能优化**：`team-monitor`、`telemetry`、`coordinator-tracker` 使用 Stop 事件（每轮仅触发 1 次），`delegate-monitor` 通过 Bash|Agent matcher 过滤。相比全部使用无 matcher 的 PostToolUse，每轮子进程 spawn 减少约 72%。
+> **性能优化**：Stop 事件 Hook 每轮仅触发 1 次；`delegate-monitor` 通过 Bash\|Agent matcher 过滤。相比无 matcher 的 PostToolUse，每轮子进程 spawn 减少约 72%。
+
+### Codex Hook 清单
+
+| Hook | 事件类型 | Matcher | 级别 | Workspace | 用途 |
+|------|---------|---------|------|-----------|------|
+| `session-context` | SessionStart | startup\|resume | minimal | 必需 | 会话启动注入工作流状态 |
+| `spec-injector` | SessionStart | startup | standard | 必需 | 会话启动注入规范 |
+| `skill-context` | UserPromptSubmit | — | standard | 必需 | Skill 调用注入上下文 |
+| `keyword-spec-injector` | UserPromptSubmit | — | standard | 必需 | 关键词匹配注入规范 |
+| `delegate-monitor` | PostToolUse | Bash | standard | — | 监控异步委托 |
+| `coordinator-tracker` | Stop | — | standard | 必需 | 协调器进度追踪 |
+| `team-monitor` | Stop | — | standard | — | 团队心跳记录 |
+| `telemetry` | Stop | — | standard | — | 遥测采集 |
+| `workflow-guard` | PreToolUse | Bash | full | 必需 | 保护文件（仅 Bash） |
+
+> **与 Claude Code 差异**：Codex `spec-injector` 用 SessionStart（无法拦截 Agent）；`workflow-guard` 仅防护 Bash；并发执行；正则 matcher。
 
 ---
 
 ## 安装级别
 
-Hook 按**累积级别**安装，高级别包含所有低级别的 Hook：
+Hook 按**累积级别**安装，高级别包含所有低级别：
 
 | 级别 | 包含内容 | 适用场景 |
 |------|---------|---------|
 | `none` | 无 Hook | 完全手动控制 |
-| `minimal` | Statusline + context-monitor + spec-injector | 日常开发，轻量监控 + 自动规范注入 |
-| `standard` | + delegate-monitor + team/telemetry/coordinator(Stop) + session-context + skill-context | 团队协作，完整监控 + Skill 感知 + 协调器追踪 |
-| `full` | + workflow-guard | 严格工作流，文件保护 |
+| `minimal` | Statusline + spec-injector | 日常开发 |
+| `standard` | + delegate-monitor + team/telemetry/coordinator(Stop) + session-context + skill-context | 团队协作 |
+| `full` | + workflow-guard | 严格工作流 |
 
 ### 安装命令
 
 ```bash
-# 安装指定级别
-maestro hooks install --level minimal
-maestro hooks install --level standard
-maestro hooks install --level full
+# Claude Code
+maestro hooks install --level <minimal|standard|full>
+maestro hooks install --level standard --project       # 项目级
 
-# 项目级安装（写入 .claude/settings.json）
-maestro hooks install --level standard --project
+# Codex（需 ~/.codex/config.toml 启用 codex_hooks）
+maestro hooks install --target codex --level <level>
+maestro hooks install --target codex --level standard --project
 
-# 查看当前状态
-maestro hooks status
-
-# 列出所有可用 Hook
-maestro hooks list
+# 查看
+maestro hooks status    # 安装状态
+maestro hooks list      # 可用 Hook 列表
 ```
 
 ---
 
 ## 核心 Hook 详解
 
-### context-monitor — 上下文监控
-
-**事件**: `PostToolUse` | **级别**: `minimal`
-
-每次工具调用后，读取 statusline 写入的 bridge 文件（`/tmp/maestro-ctx-{session_id}.json`），当上下文使用率过高时注入警告。
-
-**阈值**：
-
-| 剩余上下文 | 级别 | 行为 |
-|-----------|------|------|
-| > 35% | 正常 | 不注入 |
-| 25–35% | WARNING | 提示收尾当前任务 |
-| < 25% | CRITICAL | 提示停止并通知用户 |
-
-**防抖**：连续 5 次工具调用内不重复警告，严重度升级时立即触发。
-
-**Bridge 文件格式**：
-```json
-{
-  "session_id": "abc123",
-  "remaining_percentage": 42,
-  "used_pct": 58,
-  "timestamp": 1712900000
-}
-```
-
----
-
 ### spec-injector — 规范自动注入
 
 **事件**: `PreToolUse` (Agent) | **级别**: `minimal`
 
-当 Claude Code 生成 `Agent` 工具调用时，根据 `subagent_type` 自动将对应的项目规范注入到 agent 的 prompt 中。使用 `updatedInput` 模式直接重写 prompt，确保 agent 必定看到规范内容。
+根据 `subagent_type` 自动注入对应规范，使用 `updatedInput` 重写 prompt。
 
-**Agent 类型 → 规范分类映射**：
-
-| Agent 类型 | 注入的规范分类 |
-|-----------|--------------|
-| `code-developer` | coding |
-| `tdd-developer` | coding, test |
-| `workflow-executor` | coding |
-| `universal-executor` | coding |
-| `test-fix-agent` | coding, test |
-| `cli-lite-planning-agent` | arch |
-| `action-planning-agent` | arch |
-| `workflow-planner` | arch |
+| Agent 类型 | 注入分类 |
+|-----------|---------|
+| `code-developer` / `workflow-executor` / `universal-executor` | coding |
+| `tdd-developer` / `test-fix-agent` | coding, test |
+| `cli-lite-planning-agent` / `action-planning-agent` / `workflow-planner` | arch |
 | `workflow-reviewer` | review |
-| `debug-explore-agent` | debug |
-| `workflow-debugger` | debug |
-
-**工作流程**：
-
-```
-Agent 工具调用
-    │
-    ▼
-读取 tool_input.subagent_type
-    │
-    ▼
-查找 AGENT_SPEC_MAP[agentType]
-    │  ↓ 无匹配 → 直接放行
-    ▼
-loadSpecs(projectPath, category)
-    │
-    ▼
-evaluateContextBudget(content, sessionId)
-    │  ↓ action=skip → 放行，不注入
-    ▼
-返回 updatedInput: { ...toolInput, prompt: specs + "\n\n---\n\n" + originalPrompt }
-```
-
-**关键设计**：
-- 使用 `updatedInput`（命令式）而非 `additionalContext`（建议式）——确保规范内容出现在 agent prompt 最前面
-- `learnings.md` 通过 spec-loader 自动包含（category=learning）
-- 通过 context-budget 动态调整注入量，避免浪费上下文
-
-**示例输出**：
-```json
-{
-  "hookSpecificOutput": {
-    "hookEventName": "PreToolUse",
-    "updatedInput": {
-      "subagent_type": "code-developer",
-      "prompt": "# Coding Conventions\n...\n\n---\n\n<原始 prompt>"
-    }
-  }
-}
-```
-
----
+| `debug-explore-agent` / `workflow-debugger` | debug |
 
 ### context-budget — 上下文预算
 
-> 注意：context-budget 不是独立的 Hook，而是 spec-injector 内部集成的预算管理模块。
-
-**4 级预算策略**：
+> spec-injector 内部模块，非独立 Hook。
 
 | 剩余上下文 | 动作 | 策略 |
 |-----------|------|------|
-| > 50% | `full` | 注入全部规范内容 |
-| 35–50% | `reduced` | Markdown 感知截断：保留标题 + 每节第一段 |
-| 25–35% | `minimal` | 仅标题列表 + learnings |
-| < 25% | `skip` | 不注入（上下文已紧张） |
-
-**Markdown 截断算法**（`reduced` 级别）：
-
-1. 保留所有标题行（`#` 至 `######`）
-2. 保留每个标题后的第一段
-3. 省略后续段落，插入 `[... N lines omitted]`
-4. 保持 YAML frontmatter 完整
-5. 默认最大 4096 字符
-
-**headings-only 提取**（`minimal` 级别）：
-
-仅提取所有标题行，输出 `# Project Specs (headings only — context limited)` 开头的精简内容。
-
----
+| > 50% | `full` | 注入全部内容 |
+| 35-50% | `reduced` | 保留标题 + 每节首段（max 4096 字符） |
+| 25-35% | `minimal` | 仅标题列表 + learnings |
+| < 25% | `skip` | 不注入 |
 
 ### session-context — 会话上下文
 
 **事件**: `Notification` | **级别**: `standard`
 
-会话启动时注入轻量级工作流状态概览。**不注入完整规范内容**——完整规范由 spec-injector 按 agent 类型按需注入。
-
-**注入内容（3 个部分）**：
-
-1. **工作流状态**：读取 `.workflow/state.json`，展示当前 Phase、Step、Task、Status
-2. **可用规范列表**：扫描 `.workflow/specs/` 目录，列出文件名（仅标题，不含内容）
-3. **Git 上下文**：当前分支 + 最近一次提交
-
-**示例输出**：
-```
-## Maestro Workflow State | Phase: 3.2 | Task: implement-auth | Status: in_progress
-
-## Available Specs
-- coding-conventions
-- architecture-constraints
-- quality-rules
-(Auto-injected per agent type via spec-injector hook)
-
-## Git | Branch: feat/auth | Last: abc1234 add login endpoint
-```
-
----
+会话启动时注入轻量概览：工作流状态 + 规范文件列表 + Git 分支/最近提交。不注入完整规范（由 spec-injector 按需注入）。
 
 ### delegate-monitor — 委托监控
 
-**事件**: `PostToolUse` (Bash|Agent) | **级别**: `standard`
+**事件**: `PostToolUse` (Bash\|Agent) | **级别**: `standard`
 
-监控异步委托任务（通过 MCP 的 `delegate_message` 发起的后台任务）。读取 `/tmp/maestro-notify-{session_id}.jsonl` 通知文件，将完成/失败状态注入到主会话上下文。
-
-**Matcher 优化**：仅在 Bash 和 Agent 工具调用后触发。异步委托通常通过这两类工具发起和完成，其他工具调用（Read、Edit、Glob 等）期间无需检查通知状态。
-
----
+读取 `/tmp/maestro-notify-{session_id}.jsonl` 注入异步委托完成/失败状态。Bash\|Agent matcher 避免只读操作触发。
 
 ### team-monitor — 团队监控
 
 **事件**: `Stop` | **级别**: `standard`
 
-团队协作模式下的心跳记录。每轮结束时向 `.workflow/collab/activity.jsonl` 写入一条活动记录，让队友知道谁在哪个 phase/task 上工作。
-
-**Stop 事件优化**：心跳仅需每轮记录一次，无需每个工具调用后都 spawn 子进程。Stop 事件无 `tool_name` 字段，使用 `turn_complete` 作为活动 action。内部 60s dedupe 窗口仍然生效。
-
----
+每轮向 `.workflow/collab/activity.jsonl` 写入心跳，Stop 事件每轮仅 1 次。
 
 ### skill-context — Skill 感知上下文
 
 **事件**: `UserPromptSubmit` | **级别**: `standard`
 
-当用户输入工作流 Skill 调用（如 `/maestro-execute 2`、`/maestro-plan 1`）时，自动注入当前工作流状态、阶段产物文件树和前序阶段成果。
+匹配 Skill 调用时注入工作流状态 + 阶段产物树 + 前序成果（`additionalContext`，不重写 prompt）。支持模式：`/maestro-execute {N}`、`/maestro-plan {N}`、`/maestro-verify {N}`、`/maestro-analyze {N}`、`/maestro-milestone-audit`、`/quality-review {N}`、`/quality-test {N}`、`/maestro`、`/maestro-coordinate`、`/maestro-link-coordinate`
 
-**支持的 Skill 模式**：
-
-| 模式 | 示例 |
-|------|------|
-| `/maestro-execute {N}` | `/maestro-execute 2` |
-| `/maestro-plan {N}` | `/maestro-plan 1` |
-| `/maestro-verify {N}` | `/maestro-verify 3` |
-| `/maestro-analyze {N}` | `/maestro-analyze 2` |
-| `/maestro-milestone-audit [N]` | `/maestro-milestone-audit` |
-| `/quality-review {N}` | `/quality-review 2` |
-| `/quality-test {N}` | `/quality-test 1` |
-| `/maestro` | `/maestro "build OAuth2"` |
-| `/maestro-coordinate` | `/maestro-coordinate start full-lifecycle` |
-| `/maestro-link-coordinate` | `/maestro-link-coordinate -c coord-...` |
-
-**协调器 Skill 的额外注入**（Section 0）：
-
-当匹配到 `/maestro`、`/maestro-coordinate`、`/maestro-link-coordinate` 时，在工作流状态之前优先注入 **coordinator-tracker 的 bridge 数据**。若存在 paused/step_paused 会话，则展示完整的 next-step 提示（见 coordinator-tracker 章节），提醒用户是 resume 还是启动新链：
-
-```
-## Coordinator Session Active
-Chain: full-lifecycle [3/6] | Status: paused
-Last: maestro-verify
-Next: quality-review 2
-Then: quality-test 2 → maestro-milestone-audit → maestro-milestone-complete
-Resume: /maestro -c
-```
-
-**注入内容（3 部分）**：
-
-**Section 1: 工作流状态摘要**
-```
-## Workflow Context for maestro-execute
-Milestone: MVP | Phase: 2 (1/4 completed) | Status: phase_2_pending
-Key decisions: 9 | Deferred items: 4
-Last transition: phase MVP (2026-04-10T00:00:00Z)
-```
-
-**Section 2: 阶段产物文件树**
-```
-## Phase 2 Artifacts (.workflow/phases/02-kanban-gantt/)
-index.json | plan.json | analysis.md
-.task/ (9 tasks: 5 completed, 1 in_progress, 3 pending)
-  TASK-001 ✓ | TASK-002 ✓ | TASK-003 → | TASK-004 … | ...
-.summaries/ (5 files)
-```
-
-**Section 3: 前序阶段成果**
-```
-## Deferred Items (4 total, showing high/critical)
-- [high] Missing auth flow → Add OAuth
-
-## Verification Gaps (Phase 1)
-- OAuth not implemented
-
-## Prior Phase Learnings (Phase 1)
-- [pattern] Schema isolation works well
-```
-
-**关键设计**：
-- 使用 `additionalContext`（非 `updatedInput`）——不能改写用户 prompt，否则干扰 Skill 展开
-- 非 Skill prompt 零开销（regex 不匹配立即返回 null）
-- 与 `prompt-guard`（同为 UserPromptSubmit）互不干扰，输出叠加
-
----
+协调器 Skill 额外注入 coordinator-tracker bridge 的 next-step 提示：`Chain: full-lifecycle [3/6] | Status: paused | Next: quality-review 2 | Resume: /maestro -c`
 
 ### coordinator-tracker — 协调器进度追踪
 
 **事件**: `Stop` | **级别**: `standard` | **Workspace**: 必需
 
-每轮结束时读取协调器会话状态，更新 bridge 文件供 Statusline 和 skill-context 消费。
+每轮结束时更新 bridge 文件供 Statusline 和 skill-context 消费。纯 I/O 操作，不产生 `additionalContext`。
 
-**追踪策略**：
-
-| 数据来源 | 命令 | 说明 |
-|---------|------|------|
-| `.workflow/.maestro/*/status.json` | `/maestro`、`/maestro-coordinate` | 读取最近修改的 status.json |
-| `.workflow/.maestro/*/walker-state.json` | `/maestro-link-coordinate` | 通过 `readLatestSession()` fallback 读取 |
-
-**Stop 事件优化**：coordinator-tracker 仅更新 bridge 文件（纯 I/O 操作），不再产生 `additionalContext` 输出。next-step 提示的注入职责由 `skill-context` hook（UserPromptSubmit 事件）承担——当用户调用 `/maestro`、`/maestro-coordinate`、`/maestro-link-coordinate` 时，skill-context 读取 bridge 文件并注入提示。这一职责分离使 coordinator-tracker 可以安全地从 PostToolUse（每个工具调用 1 次）迁移到 Stop（每轮 1 次），大幅减少子进程 spawn。
-
-**Bridge 文件**（`/tmp/maestro-coord-{cc_session_id}.json`）：
+<details>
+<summary>Bridge 文件示例</summary>
 
 ```json
 {
   "session_id": "cc-session-abc123",
   "maestro_session_id": "maestro-20260412-103500",
-  "coordinator": "maestro",
   "chain_name": "full-lifecycle",
   "intent": "implement OAuth2 authentication",
   "phase": 2,
@@ -400,92 +182,32 @@ index.json | plan.json | analysis.md
   "steps_completed": 3,
   "current_step": { "index": 3, "skill": "quality-review", "args": "2" },
   "next_step": { "index": 4, "skill": "quality-test", "args": "2" },
-  "remaining_steps": [
-    { "skill": "quality-test", "args": "2" },
-    { "skill": "maestro-milestone-audit", "args": "" },
-    { "skill": "maestro-milestone-complete", "args": "" }
-  ],
   "status": "paused",
   "updated_at": 1744668285953
 }
 ```
 
-> **`session_id`**（`cc-session-abc123`）= Claude Code session_id，compact 后不变，用于跨轮次识别 bridge 文件。
-> **`maestro_session_id`**（`maestro-20260412-103500`）= maestro 命令自身生成的会话 ID，用于 `-c` 恢复时定位 `.workflow/.maestro/{maestro_session_id}/` 目录。
+</details>
 
-**Statusline 进度段**（`buildCoordinatorSegment`）：
-
-```
-claude-sonnet-4-6 | P2 | [3/6]quality-review | maestro2
-                        ^^^^^^^^^^^^^^^^^^^^^^^^
-                        coordinator segment
-```
-
-暂停态显示 `[P]quality-review`。
-
-**链图 next 节点解析**（`resolveNextNode`）：
-
-从当前节点沿 `node.next` 边遍历，跳过 decision/gate/eval 节点（取 `default` 边），遇到 `command` 节点返回，遇到 `terminal` 节点返回 `null`。最多遍历 10 跳。
-
-**手动测试**：
-
-```bash
-# 创建模拟 status.json
-mkdir -p .workflow/.maestro/test-session
-echo '{
-  "session_id": "test-session",
-  "chain_name": "full-lifecycle",
-  "intent": "test",
-  "phase": 2,
-  "steps": [
-    { "skill": "maestro-plan", "args": "2", "status": "completed" },
-    { "skill": "maestro-execute", "args": "2", "status": "completed" },
-    { "skill": "maestro-verify", "args": "2", "status": "running" },
-    { "skill": "quality-review", "args": "2", "status": "pending" }
-  ],
-  "current_step": 2,
-  "status": "paused"
-}' > .workflow/.maestro/test-session/status.json
-
-# 运行 hook
-echo '{"session_id":"test-cc-123","cwd":"'$(pwd)'"}' | maestro hooks run coordinator-tracker
-```
-
----
+**Statusline**：`claude-sonnet-4-6 | P2 | [3/6]quality-review`（暂停态 `[P]quality-review`）
 
 ### workflow-guard — 工作流守卫
 
-**事件**: `PreToolUse` (Bash|Write|Edit) | **级别**: `full`
+**事件**: `PreToolUse` (Bash\|Write\|Edit) | **级别**: `full`
 
-在 `Bash`、`Write`、`Edit` 操作前检查：
-- 是否操作了受保护的文件
-- 是否违反工作流阶段约束
-- 退出码 `2` 可阻止危险操作
+检查受保护文件和工作流阶段约束。退出码 `2` 阻止操作。
 
----
+### Coordinator 插件
 
-## Coordinator 插件
+`SpecInjectionPlugin`（进程内）通过关键词推断规范分类：
 
-除了 Claude Code 的子进程 Hook 外，`maestro coordinate`（图协调器）提供进程内插件系统。
-
-### SpecInjectionPlugin
-
-**文件**: `src/hooks/plugins/spec-injection-plugin.ts`
-
-在 Coordinator 执行图节点命令时，通过 `transformPrompt` 钩子自动注入规范。与 Claude Code 的 spec-injector 使用相同的 spec-loader 基础设施，但因无法获取 agent-type 信息，采用**关键词启发式推断**：
-
-| 关键词模式 | 推断分类 |
-|-----------|---------|
+| 关键词 | 推断分类 |
+|-------|---------|
 | review, audit, check quality | review |
 | test, spec, coverage, assert | test |
 | debug, diagnose, fix, error, bug | debug |
-| plan, design, architect, decompose, explore, discover, search, analyze | arch |
+| plan, design, architect, decompose, explore, analyze | arch |
 | 其他（默认） | coding |
-
-**注册方式**（`coordinate.ts`）：
-```typescript
-hookManager.applyPlugin(new SpecInjectionPlugin(workflowRoot));
-```
 
 ---
 
@@ -493,18 +215,12 @@ hookManager.applyPlugin(new SpecInjectionPlugin(workflowRoot));
 
 ### Hook 开关
 
-通过 `maestro hooks toggle` 可单独开关特定 Hook：
-
-```bash
-maestro hooks toggle spec-injector off   # 关闭规范注入
-maestro hooks toggle spec-injector on    # 开启规范注入
-```
-
-开关状态存储在 Maestro 配置文件中，Hook 运行时检查。
+`maestro hooks toggle <name> <on|off>` — 单独开关 Hook。
 
 ### 自定义 Agent-Spec 映射
 
-在 Maestro 配置中可覆盖默认的 agent 类型 → 规范分类映射：
+<details>
+<summary>配置示例</summary>
 
 ```json
 {
@@ -522,15 +238,18 @@ maestro hooks toggle spec-injector on    # 开启规范注入
 
 | 字段 | 说明 |
 |------|------|
-| `mapping` | 覆盖/扩展 agent → category 映射 |
+| `mapping` | 覆盖/扩展 agent -> category 映射 |
 | `always` | 始终注入的额外文件路径列表 |
-| `maxContentLength` | 截断前的最大字符数 |
+| `maxContentLength` | 截断前最大字符数 |
 
-自定义映射与默认映射**合并**，不会替换默认值。
+自定义映射与默认映射**合并**，不替换。
+
+</details>
 
 ### 项目规范文件
 
-规范文件存放在 `.workflow/specs/` 目录，每个文件包含 YAML frontmatter 声明分类：
+<details>
+<summary>规范文件示例</summary>
 
 ```markdown
 ---
@@ -546,7 +265,18 @@ category: coding
 
 **可用分类**: `coding`, `arch`, `quality`, `review`, `test`, `debug`, `learning`
 
-初始化规范：`maestro spec init` → 交互式生成 `.workflow/specs/` 目录和规范文件。
+初始化：`maestro spec init`
+
+</details>
+
+### 状态转换记录
+
+转换自动写入 `state.json` 的 `transition_history[]`。API：
+
+```typescript
+import { buildTransitionEntry, appendTransition } from '../tools/transition-recorder.js';
+appendTransition('.workflow/state.json', buildTransitionEntry({ type: 'phase', fromPhase: 1, toPhase: 2, milestone: 'MVP' }));
+```
 
 ---
 
@@ -554,103 +284,24 @@ category: coding
 
 ```bash
 # 安装 / 卸载
-maestro hooks install --level <level>     # 安装 Hook（none|minimal|standard|full）
-maestro hooks install --level standard --project  # 项目级安装
+maestro hooks install --level <level>                          # 安装
+maestro hooks install --level standard --project               # 项目级
+maestro hooks uninstall --global                               # 卸载全局
+maestro hooks uninstall --project                              # 卸载项目级
 
-# 查看状态
-maestro hooks status                       # 显示所有 Hook 安装状态和级别
-maestro hooks list                         # 列出可用 Hook 及定义
+# Codex
+maestro hooks install --target codex --level <level>
+maestro hooks uninstall --target codex
+
+# 查看
+maestro hooks status          # 安装状态
+maestro hooks list            # 可用 Hook
+maestro hooks config          # 当前配置
 
 # 开关
-maestro hooks toggle <name> <on|off>       # 单独开关
+maestro hooks toggle <name> <on|off>
 
-# 手动运行（调试用）
-maestro hooks run <name>                   # 手动运行 Hook，从 stdin 读取 JSON
-
-# 示例：测试 spec-injector
-echo '{"tool_name":"Agent","tool_input":{"subagent_type":"code-developer","prompt":"test"}}' | maestro hooks run spec-injector
+# 手动运行（调试）
+echo '{"tool_name":"Agent","tool_input":{"subagent_type":"code-developer","prompt":"test"}}' \
+  | maestro hooks run spec-injector
 ```
-
----
-
-## 状态转换记录（Transition History）
-
-阶段和里程碑转换时自动记录审计轨迹，存储在 `state.json` 的 `transition_history[]` 数组中。
-
-### Schema
-
-```json
-{
-  "transition_history": [
-    {
-      "type": "phase",
-      "from_phase": 1,
-      "to_phase": 2,
-      "milestone": "MVP",
-      "transitioned_at": "2026-04-12T10:30:00Z",
-      "trigger": "phase-transition",
-      "force": false,
-      "snapshot": {
-        "phases_completed": 1,
-        "phases_total": 4,
-        "deferred_count": 4,
-        "verification_status": "gaps_found",
-        "learnings_count": 10
-      }
-    }
-  ]
-}
-```
-
-### 记录时机
-
-| 触发点 | type | trigger |
-|--------|------|---------|
-| `/maestro-milestone-complete` 完成 | `phase` | `milestone-complete` |
-| `/maestro-milestone-complete` 完成 | `milestone` | `milestone-complete` |
-
-### 工具函数
-
-`src/tools/transition-recorder.ts` 提供可复用的纯函数：
-
-```typescript
-import { buildTransitionEntry, appendTransition } from '../tools/transition-recorder.js';
-
-const entry = buildTransitionEntry({
-  type: 'phase',
-  fromPhase: 1, toPhase: 2,
-  milestone: 'MVP',
-  trigger: 'phase-transition',
-  force: false,
-  phasesCompleted: 1, phasesTotal: 4,
-  deferredCount: 4, verificationStatus: 'gaps_found', learningsCount: 10,
-});
-
-appendTransition('.workflow/state.json', entry);
-```
-
----
-
-## 设计决策
-
-1. **`updatedInput` 而非 `additionalContext`**：spec-injector 使用 `updatedInput` 直接重写 agent prompt，确保规范内容一定出现在 agent 的上下文中，而非建议式附加。
-
-2. **Budget 集成到 spec-injector**：context-budget 不是独立 Hook，而是 spec-injector 内部模块。避免两个 PreToolUse Hook 串行执行增加延迟。
-
-3. **spec-injector 在 minimal 级别**：这是最高价值的 Hook——每次 Agent 调用都受益于自动规范注入，省去手动 `maestro spec load` 步骤。
-
-4. **声明式映射 + 配置覆盖**：`AGENT_SPEC_MAP` 硬编码合理默认值，`specInjection.mapping` 允许项目级自定义。
-
-5. **session-context 仅提供概览**：会话启动时只注入状态 + 规范列表，不注入完整内容。完整规范由 spec-injector 按 agent 类型按需注入。
-
-6. **skill-context 使用 `additionalContext`**：UserPromptSubmit hook 不能用 `updatedInput` 改写用户 prompt，否则会干扰 Skill 展开（`/maestro-execute 2` 需要保持原样才能被 Claude Code 识别为 Skill 调用）。
-
-7. **Transition History 在工作流内联记录**：不使用 PostToolUse Hook 检测转换完成（低频事件、检测不可靠），而是直接在 `phase-transition.md` 和 `milestone-complete.md` 工作流步骤中记录。零额外开销、确定性执行。
-
-8. **声明式 Workspace Gate**：Hook 定义中的 `requiresWorkspace: true` 标志实现统一的工作空间检测。Dispatcher（`maestro hooks run <name>`）在读取 stdin 前即完成检测——无 Maestro 工作空间则 `exit(0)` 静默退出。这避免了每个 Hook 各自判断 workspace 的分散逻辑，也避免了非工作流项目中的无谓进程开销。工作空间通过 Maestro 指纹（`state.json` 含 `version` + `phases_summary`）识别，防止与其他工具的 `.workflow/` 目录混淆。
-
-9. **coordinator-tracker：两个 session_id 的职责分离**：系统中存在两个 ID——Claude Code `session_id`（compact 后不变，用于 bridge 文件命名）和 maestro `session_id`（命令自生成，用于定位 `.workflow/.maestro/` 子目录）。两者互不干扰：hook 以 Claude Code session_id 为 key 管理 bridge 文件；`maestro_session_id` 作为元数据保留在 bridge 中供 `-c` 恢复时使用。
-
-10. **coordinator-tracker/team-monitor/telemetry 使用 Stop 事件**：这三个 Hook 的核心功能（更新 bridge 文件、记录心跳、记录遥测）不需要实时性——每轮结束时执行一次即可。将它们从 PostToolUse（每个工具调用触发）迁移到 Stop（每轮触发 1 次），每轮减少约 60 次子进程 spawn。coordinator-tracker 的 next-step 提示注入职责转移给 skill-context（UserPromptSubmit），在用户下一次输入协调器命令时自动注入。
-
-11. **delegate-monitor 使用 Bash|Agent matcher**：异步委托任务通过 Bash 或 Agent 工具发起和完成，通知文件仅在这些操作后可能出现新条目。添加 matcher 后，Read/Edit/Glob 等高频只读操作不再触发通知检查。

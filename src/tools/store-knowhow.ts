@@ -24,7 +24,7 @@ import { getProjectRoot } from '../utils/path-validator.js';
 
 // --- Types ---
 
-const CATEGORIES = ['session', 'tip', 'template', 'recipe', 'reference', 'decision'] as const;
+const CATEGORIES = ['session', 'tip', 'template', 'recipe', 'reference', 'decision', 'asset', 'blueprint', 'document'] as const;
 type KnowHowCategory = (typeof CATEGORIES)[number];
 
 const PREFIX_MAP: Record<KnowHowCategory, string> = {
@@ -34,6 +34,9 @@ const PREFIX_MAP: Record<KnowHowCategory, string> = {
   recipe: 'RCP',
   reference: 'REF',
   decision: 'DCS',
+  asset: 'AST',
+  blueprint: 'BLP',
+  document: 'DOC',
 };
 
 const DECISION_STATUSES = ['proposed', 'accepted', 'superseded'] as const;
@@ -53,6 +56,9 @@ const ParamsSchema = z.object({
   lang: z.string().optional(),       // template: programming language
   source: z.string().optional(),     // reference: original URL
   status: z.enum(DECISION_STATUSES).optional(), // decision: lifecycle status
+  assetType: z.string().optional(),  // asset: asset subtype
+  codePaths: z.array(z.string()).optional(), // asset/blueprint: related code paths
+  category: z.string().optional(),  // spec category for tool discovery (coding, arch, test, etc.)
   // search params
   query: z.string().optional(),
   limit: z.number().optional().default(20),
@@ -101,7 +107,7 @@ function parseFrontmatter(raw: string): { data: Record<string, unknown>; body: s
 // --- Operations ---
 
 function executeAdd(params: Params): CcwToolResult {
-  const { type, title, body, tags, lang, source, status } = params;
+  const { type, title, body, tags, lang, source, status, assetType, codePaths, category } = params;
 
   if (!type) return { success: false, error: 'Parameter "type" is required for add operation' };
   if (!title) return { success: false, error: 'Parameter "title" is required for add operation' };
@@ -117,6 +123,12 @@ function executeAdd(params: Params): CcwToolResult {
   if (status && type !== 'decision') {
     return { success: false, error: 'Parameter "status" is only valid for type "decision"' };
   }
+  if (assetType && type !== 'asset') {
+    return { success: false, error: 'Parameter "assetType" is only valid for type "asset"' };
+  }
+  if (codePaths && type !== 'blueprint' && type !== 'asset') {
+    return { success: false, error: 'Parameter "codePaths" is only valid for type "asset" or "blueprint"' };
+  }
 
   const dir = getKnowhowDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -129,7 +141,6 @@ function executeAdd(params: Params): CcwToolResult {
   const fmLines = ['---'];
   fmLines.push(`title: ${escapeYamlValue(title)}`);
   fmLines.push(`type: ${type}`);
-  fmLines.push(`category: ${type}`);
   fmLines.push(`created: ${now}`);
   if (tags && tags.length > 0) {
     fmLines.push(`tags:`);
@@ -139,6 +150,12 @@ function executeAdd(params: Params): CcwToolResult {
   if (lang) fmLines.push(`lang: ${lang}`);
   if (source) fmLines.push(`source: ${escapeYamlValue(source)}`);
   if (status) fmLines.push(`status: ${status}`);
+  if (category) fmLines.push(`category: ${category}`);
+  if (assetType) fmLines.push(`assetType: ${escapeYamlValue(assetType)}`);
+  if (codePaths && codePaths.length > 0) {
+    fmLines.push('codePaths:');
+    for (const p of codePaths) fmLines.push(`  - ${p}`);
+  }
   fmLines.push('---', '', body);
 
   writeFileSync(filePath, fmLines.join('\n'), 'utf-8');
@@ -167,7 +184,7 @@ function executeSearch(params: Params): CcwToolResult {
   }
 
   const queryLower = query.toLowerCase();
-  const queryTerms = queryLower.split(/\s+/).filter(Boolean);
+  const queryTerms = tokenizeQuery(queryLower);
 
   const results: Array<{
     id: string; filename: string; title: string; type: string;
@@ -218,6 +235,33 @@ function executeSearch(params: Params): CcwToolResult {
   };
 }
 
+/**
+ * Tokenize search query — handles both English (space-split) and CJK (n-gram).
+ * English: split by whitespace. Chinese: extract 2-4 char n-grams.
+ */
+function tokenizeQuery(query: string): string[] {
+  // English terms: split on whitespace
+  const terms = query.split(/\s+/).filter(Boolean);
+
+  // For CJK sequences without spaces, generate n-grams
+  const cjkTerms: string[] = [];
+  const cjkSeqs = query.match(/[\u4e00-\u9fff\u3400-\u4dbf]{2,}/g) ?? [];
+  for (const seq of cjkSeqs) {
+    // Full sequence
+    if (seq.length >= 2 && seq.length <= 6) cjkTerms.push(seq);
+    // 2-4 char n-grams
+    for (let n = 2; n <= Math.min(4, seq.length); n++) {
+      for (let i = 0; i <= seq.length - n; i++) {
+        cjkTerms.push(seq.substring(i, i + n));
+      }
+    }
+  }
+
+  // Merge: non-CJK terms + CJK n-grams, deduplicated
+  const all = new Set([...terms.filter(t => !/^[\u4e00-\u9fff\u3400-\u4dbf]+$/.test(t)), ...cjkTerms]);
+  return [...all];
+}
+
 // --- Tool Schema ---
 
 export const schema: ToolSchema = {
@@ -232,19 +276,24 @@ export const schema: ToolSchema = {
       template:  lang (programming language)
       reference: source (URL)
       decision:  status (proposed | accepted | superseded)
-    Optional: tags (string[])
+      asset:     assetType (e.g. api-contract, prompt), codePaths (related source paths)
+      blueprint: codePaths (related source paths)
+    Optional: tags (string[]), category (spec category for agent discovery)
 
 *   **search** — Full-text search knowhow entries.
     Required: query
     Optional: limit (default: 20)
 
 **Types & prefixes:**
-  session   → KNW-{ts}.md   session state recovery
-  tip       → TIP-{ts}.md   quick note / reminder
-  template  → TPL-{ts}.md   code/config template
-  recipe    → RCP-{ts}.md   step-by-step guide
-  reference → REF-{ts}.md   external doc summary
-  decision  → DCS-{ts}.md   architecture decision record
+  session    → KNW-{ts}.md   session state recovery
+  tip        → TIP-{ts}.md   quick note / reminder
+  template   → TPL-{ts}.md   code/config template
+  recipe     → RCP-{ts}.md   step-by-step guide
+  reference  → REF-{ts}.md   external doc summary
+  decision   → DCS-{ts}.md   architecture decision record
+  asset      → AST-{ts}.md   reusable asset (prompt, config, workflow)
+  blueprint  → BLP-{ts}.md   architecture blueprint with code paths
+  document   → DOC-{ts}.md   general document / fallback category
 
 Entries are automatically indexed by WikiIndexer (type=knowhow, category={type}).`,
   inputSchema: {
@@ -286,6 +335,19 @@ Entries are automatically indexed by WikiIndexer (type=knowhow, category={type})
         type: 'string',
         enum: DECISION_STATUSES,
         description: '[decision] Lifecycle status: proposed → accepted → superseded.',
+      },
+      assetType: {
+        type: 'string',
+        description: '[asset] Asset subtype (e.g. prompt, config, workflow).',
+      },
+      codePaths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '[asset/blueprint] Related code paths.',
+      },
+      category: {
+        type: 'string',
+        description: 'Spec category for agent auto-discovery (coding, arch, test, debug, review, learning).',
       },
       // search
       query: {

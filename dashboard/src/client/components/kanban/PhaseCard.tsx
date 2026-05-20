@@ -11,12 +11,11 @@ import { STATUS_COLORS } from '@/shared/constants.js';
 
 /** Maps phase status to its CSS tint variable */
 const TINT_VARS: Record<string, string> = {
-  pending: 'var(--color-tint-pending)',
-  exploring: 'var(--color-tint-exploring)',
+  not_started: 'var(--color-tint-pending)',
   planning: 'var(--color-tint-planning)',
   executing: 'var(--color-tint-executing)',
   verifying: 'var(--color-tint-verifying)',
-  testing: 'var(--color-tint-testing)',
+  reviewing: 'var(--color-tint-reviewing)',
   completed: 'var(--color-tint-completed)',
   blocked: 'var(--color-tint-blocked)',
 };

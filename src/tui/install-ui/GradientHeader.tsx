@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import Gradient from 'ink-gradient';
 import BigText from 'ink-big-text';
 import { type WizardStep, WIZARD_STEPS } from './types.js';
+import { StepProgress } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // GradientHeader — neon gradient header with step progress
@@ -41,17 +42,10 @@ export function GradientHeader({ currentStep, version }: GradientHeaderProps) {
         </Box>
       </Box>
 
-      <Box gap={1}>
-        {WIZARD_STEPS.map((step, i) => (
-          <Text
-            key={step}
-            bold={step === currentStep}
-            color={i < stepIndex ? 'green' : step === currentStep ? 'cyan' : 'gray'}
-          >
-            {i < stepIndex ? '[x]' : step === currentStep ? '[>]' : '[ ]'} {STEP_LABELS[step]}
-          </Text>
-        ))}
-      </Box>
+      <StepProgress
+        steps={WIZARD_STEPS.map(s => ({ key: s, label: STEP_LABELS[s] }))}
+        currentKey={currentStep}
+      />
     </Box>
   );
 }

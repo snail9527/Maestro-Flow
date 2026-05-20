@@ -59,6 +59,10 @@ export interface DelegateExecutionRequest {
   baseTool?: string;
   /** Delegate role for spec category mapping */
   role?: string;
+  /** Reasoning effort level */
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
+  /** Stale-stream silence window (ms) before force-terminating a silent CLI */
+  streamTimeout?: number;
 }
 
 interface ChildProcessLike {
@@ -154,6 +158,12 @@ export function buildDetachedDelegateWorkerArgs(
   }
   if (request.sessionId) {
     args.push('--session', request.sessionId);
+  }
+  if (request.reasoningEffort) {
+    args.push('--effort', request.reasoningEffort);
+  }
+  if (request.streamTimeout) {
+    args.push('--timeout', String(request.streamTimeout));
   }
 
   return args;
@@ -320,6 +330,8 @@ export function registerDelegateCommand(program: Command): void {
     .option('--includeDirs <dirs>', 'Additional directories (comma-separated)')
     .option('--session <id>', 'Claude Code session ID for completion notifications')
     .option('--backend <type>', 'Adapter backend: direct (default) or terminal (tmux/wezterm)')
+    .option('--effort <level>', 'Reasoning effort level (low, medium, high, max) — overrides tool config')
+    .option('--timeout <ms>', 'Stale-stream timeout in ms — force-terminate CLI after this much silence (default 600000 = 10 min); overrides tool config')
     .option('--async', 'Run detached in the background; results delivered via MCP channel notifications (default: synchronous)')
     .addOption(new Option('--worker').hideHelp())
     .action(async (prompt: string | undefined, opts: {
@@ -334,6 +346,8 @@ export function registerDelegateCommand(program: Command): void {
       includeDirs?: string;
       session?: string;
       backend?: string;
+      effort?: string;
+      timeout?: string;
       async?: boolean;
       worker?: boolean;
     }) => {
@@ -344,6 +358,15 @@ export function registerDelegateCommand(program: Command): void {
 
       const workDir = resolve(opts.cd ?? process.cwd());
       const config = await loadCliToolsConfig(workDir);
+
+      // Validate config: tools must be a non-empty object
+      if (!config.tools || Object.keys(config.tools).length === 0) {
+        console.error(
+          'Error: cli-tools.json is missing or has no "tools" configured.\n' +
+          'Run "maestro config delegate reset" to regenerate with auto-detected tools.',
+        );
+        process.exit(1);
+      }
 
       // Tool resolution priority: --to > --role > first-enabled fallback
       let selected;
@@ -367,6 +390,33 @@ export function registerDelegateCommand(program: Command): void {
         process.exit(1);
       }
 
+      // Resolve reasoning effort: CLI --effort overrides config-level setting
+      const VALID_EFFORTS = ['low', 'medium', 'high', 'max'] as const;
+      type Effort = (typeof VALID_EFFORTS)[number];
+      let reasoningEffort: Effort | undefined;
+      if (opts.effort) {
+        if (!VALID_EFFORTS.includes(opts.effort as Effort)) {
+          console.error(`Invalid effort: ${opts.effort}. Use "low", "medium", "high", or "max".`);
+          process.exit(1);
+        }
+        reasoningEffort = opts.effort as Effort;
+      } else {
+        reasoningEffort = selected?.entry?.reasoningEffort;
+      }
+
+      // Resolve stale-stream timeout: CLI --timeout overrides cli-tools.json
+      let streamTimeout: number | undefined;
+      if (opts.timeout !== undefined) {
+        const parsed = Number(opts.timeout);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          console.error(`Invalid timeout: ${opts.timeout}. Use a positive number of milliseconds.`);
+          process.exit(1);
+        }
+        streamTimeout = parsed;
+      } else {
+        streamTimeout = selected?.entry?.streamTimeoutMs;
+      }
+
       const backend = (opts.backend === 'terminal' ? 'terminal' : 'direct') as 'direct' | 'terminal';
       const execId = opts.id ?? generateCliExecId(toolName);
       const resume = opts.resume === true ? 'last' : opts.resume;
@@ -386,6 +436,8 @@ export function registerDelegateCommand(program: Command): void {
         settingsFile: selected?.entry?.settingsFile,
         baseTool: selected?.entry?.baseTool,
         role: opts.role,
+        reasoningEffort,
+        streamTimeout,
       };
 
       try {
@@ -405,11 +457,12 @@ export function registerDelegateCommand(program: Command): void {
         const runner = new CliAgentRunner();
         const syncMode = !opts.worker;
 
-        // Sync mode: emit ONE broker event at start so any active channel
-        // subscriber (CC launched with --dangerously-load-development-channels)
-        // sees a "started" notification. No subsequent events are published —
-        // sync output returns directly via stdout when the command completes.
+        // Sync mode: emit exec ID + ONE broker event at start so any active
+        // channel subscriber sees a "started" notification. Output and status
+        // summary are auto-appended on completion — callers don't need separate
+        // `delegate output` or `delegate status` commands.
         if (syncMode) {
+          process.stderr.write(`[MAESTRO_EXEC_ID=${execId}]\n`);
           try {
             const broker = new DelegateBrokerClient();
             broker.publishEvent({
@@ -432,12 +485,19 @@ export function registerDelegateCommand(program: Command): void {
 
         const exitCode = await runner.run({ ...request, sync: syncMode });
 
-        // In sync mode, output the final result after completion
+        // In sync mode, auto-append status summary + output so callers get
+        // everything in a single background callback — no manual `output`/`status`.
         if (syncMode) {
           const store = new CliHistoryStore();
-          const output = store.getOutput(execId);
+          const finalStatus = exitCode === 130 ? 'cancelled' : exitCode === 0 ? 'completed' : 'failed';
+
+          // Status summary line
+          process.stderr.write(`\n[DELEGATE ${finalStatus.toUpperCase()}] ${execId} ${toolName}/${mode}\n`);
+
+          // Output
+          const output = store.getOutput(execId, { lastReply: true });
           if (output) {
-            process.stderr.write('\n--- Output ---\n');
+            process.stderr.write('--- Output ---\n');
             process.stdout.write(output);
             if (!output.endsWith('\n')) process.stdout.write('\n');
           }
@@ -446,7 +506,6 @@ export function registerDelegateCommand(program: Command): void {
           // The runner skips broker events in sync mode, so we emit it here.
           try {
             const broker = new DelegateBrokerClient();
-            const finalStatus = exitCode === 130 ? 'cancelled' : exitCode === 0 ? 'completed' : 'failed';
             broker.publishEvent({
               jobId: execId,
               type: finalStatus,
@@ -530,9 +589,10 @@ export function registerDelegateCommand(program: Command): void {
     .description('Get assistant output for a delegated execution')
     .option('--verbose', 'Show full metadata and raw output')
     .option('--all', 'Include thinking/reasoning entries in output')
+    .option('--full', 'Return full output instead of just the last reply')
     .option('--offset <n>', 'Character offset to start from (for pagination)')
     .option('--limit <n>', 'Max characters to return (for pagination)')
-    .action((id: string, opts: { verbose?: boolean; all?: boolean; offset?: string; limit?: string }) => {
+    .action((id: string, opts: { verbose?: boolean; all?: boolean; full?: boolean; offset?: string; limit?: string }) => {
       const store = new CliHistoryStore();
       const meta = store.loadMeta(id);
 
@@ -561,18 +621,20 @@ export function registerDelegateCommand(program: Command): void {
         console.log('---');
       }
 
-      const output = store.getOutput(id, { includeAll: opts.all, offset, limit });
+      const output = store.getOutput(id, { includeAll: opts.all, lastReply: !opts.full, offset, limit });
       if (!output) {
         const status = statusLabel(meta);
         if (status === 'running') {
           console.error(`Execution ${id} is still running — no output yet.`);
         } else {
           console.error(`No output available for: ${id}`);
+          console.error(`Tip: run "maestro delegate tail ${id}" to see full event history.`);
         }
         process.exit(1);
       }
 
       process.stdout.write(output);
+      if (!output.endsWith('\n')) process.stdout.write('\n');
     });
 
   delegate

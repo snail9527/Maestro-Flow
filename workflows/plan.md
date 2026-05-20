@@ -47,6 +47,7 @@ OUTPUT_DIR = .workflow/scratch/plan-{PHASE_SLUG or milestone_slug}-{date}/
 | `--dir <path>` | Use arbitrary directory instead of phase resolution (skip roadmap validation) |
 | `--revise [instructions]` | Revise existing plan (skip P1-P3, load → modify → P4). Auto-discovers latest plan or use `--dir` |
 | `--check <plan-dir>` | Standalone plan verification (P4 only, read-only) |
+| `--tdd` | Generate TDD task chains (RED-GREEN-REFACTOR triplets). Load `@~/.maestro/workflows/tdd.md` for discipline and task structure |
 
 ---
 
@@ -55,8 +56,18 @@ OUTPUT_DIR = .workflow/scratch/plan-{PHASE_SLUG or milestone_slug}-{date}/
 ```
 --check <plan-dir>  → Check Mode (P4 only, read-only)
 --revise            → Revise Mode (load → modify → P4)
+--tdd               → TDD Mode: P1 → P2 → P3 (with TDD task chain generation) → P4 → P4.5 → P5
 default             → Create Mode: P1 → P2 → P3 → P4 → P4.5 → P5
 ```
+
+### TDD Mode
+
+When `--tdd` is active:
+1. Read `@~/.maestro/workflows/tdd.md` for TDD discipline, Iron Law, and task chain structure
+2. In P3 (Planning), decompose each behavior into RED-GREEN-REFACTOR triplets per `tdd.md § Task Chain Generation`
+3. Set `plan.json.tdd_mode = true` and include `tdd_groups[]`
+4. Wave assignment follows TDD dependency rules: `{N}a → {N}b → {N}c`
+5. Output is standard plan.json + .task/TASK-*.json — consumable by `maestro-execute` without modification
 
 ---
 
@@ -84,7 +95,7 @@ default             → Create Mode: P1 → P2 → P3 → P4 → P4.5 → P5
 4b. **Load design reference** (if available)
    - If `${PHASE_DIR}/design-ref/MASTER.md` exists: load MASTER.md, design-tokens.json, animation-tokens.json (optional), layout-templates/layout-*.json
      - Every UI task must include in `read_first[]`: design-tokens.json, animation-tokens.json, relevant layout-*.json, MASTER.md
-   - Else if phase goal matches UI keywords (`landing|page|dashboard|frontend|UI|component|界面`): suggest running `maestro-ui-design` (non-blocking)
+   - Else if phase goal matches UI keywords (`landing|page|dashboard|frontend|UI|component|界面`): suggest running `maestro-impeccable --chain build` (non-blocking)
 
 5. **Load upstream analysis** (if available)
    - If `${PHASE_DIR}/conclusions.json` exists with non-empty status: load as explorationContext (conclusions + explorations.json + perspectives.json)
@@ -251,12 +262,22 @@ Bidirectional linking: update matching issues in `.workflow/issues/issues.jsonl`
    - Critical issues → re-spawn planner with issues, revise, re-check
    - Warnings only → log and proceed
 
-3. **Update index.json**
-   - Set `index.json.plan` = `{ task_ids, task_count, complexity, waves, executor_assignments: {} }`
+3. **Plan Confidence Scoring**
+
+   Dimensions (5): requirements_coverage, task_quality, dependency_correctness, estimation_accuracy, collision_safety. Factors (weights): completeness(.30), specificity(.25), structural_validity(.20), user_validation(.15), consistency(.10). Re-score after each revision round.
+
+   Quality mechanisms: Pressure Pass (mandatory before P4.5) — verify highest-complexity task's read_first/convergence.criteria/action. Devil's Advocate — requirements_coverage > 0.7 → "隐含需求？". Scope Minimizer — task_count exceeds guard → "最小可行任务集？". Stall Detection — delta < 5% → suggest broader revision.
+
+4. **Plan Readiness Gate** (blocks P4.5)
+
+   Block if: requirements_coverage < 40% | task missing read_first/convergence.criteria | no pressure pass | circular deps. If blocked → AskUserQuestion: 修订计划 or 忽略风险并继续 (record residual_risks). Add confidence section to plan.json.
+
+5. **Update index.json**
+   - Set `index.json.plan` = `{ task_ids, task_count, complexity, waves, executor_assignments: {}, confidence: overall_score }`
    - Set `status: "planning"`, `updated_at: now()`
 
 ### Output
-- Updated plan.json (if revised)
+- Updated plan.json (if revised) with confidence section
 - Updated .task/ files (if revised)
 - Updated index.json with plan fields
 
@@ -286,7 +307,7 @@ Bidirectional linking: update matching issues in `.workflow/issues/issues.jsonl`
 
 ### Steps
 
-1. **Display plan summary** — summary, approach, task count, wave structure, complexity, key dependencies
+1. **Display plan summary** — summary, approach, task count, wave structure, complexity, key dependencies, **plan confidence** (overall %, weakest dimension, pressure pass result)
 
 2. **Present options via AskUserQuestion** (skip if `config.gates.confirm_plan == false`, auto-proceed)
    - Execute now → build executionContext, hand off to /workflow:execute

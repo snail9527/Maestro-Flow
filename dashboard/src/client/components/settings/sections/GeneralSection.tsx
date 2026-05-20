@@ -132,6 +132,10 @@ export function GeneralSection() {
         <StylePresetField />
       </SettingsCard>
 
+      <SettingsCard title="Navigation" description="Show or hide navigation items from the sidebar.">
+        <NavVisibilityField draft={draft} update={update} />
+      </SettingsCard>
+
       <SettingsCard
         title={t('settings.general.search_tool_card')}
         description={t('settings.general.search_tool_desc')}
@@ -216,6 +220,52 @@ export function GeneralSection() {
         onSave={() => void saveConfig('general')}
         onDiscard={() => discardDraft('general')}
       />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// NavVisibilityField — toggle visibility of nav items
+// ---------------------------------------------------------------------------
+
+const TOGGLABLE_NAV_ITEMS = [
+  { path: '/maestro-coordinate', label: 'Dispatch Center' },
+  { path: '/requirement', label: 'Requirement' },
+  { path: '/rooms', label: 'Meeting Room' },
+];
+
+function NavVisibilityField({
+  draft,
+  update,
+}: {
+  draft: GeneralSettings;
+  update: (patch: Partial<GeneralSettings>) => void;
+}) {
+  const hidden = draft.hiddenNavItems ?? ['/maestro-coordinate', '/requirement', '/rooms'];
+
+  const toggle = (path: string) => {
+    const next = hidden.includes(path)
+      ? hidden.filter((p) => p !== path)
+      : [...hidden, path];
+    update({ hiddenNavItems: next });
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      {TOGGLABLE_NAV_ITEMS.map((item) => {
+        const isVisible = !hidden.includes(item.path);
+        return (
+          <div key={item.path} className="flex items-center justify-between">
+            <span className="text-[length:var(--font-size-sm)] text-text-primary">
+              {item.label}
+            </span>
+            <SettingsToggle
+              enabled={isVisible}
+              onClick={() => toggle(item.path)}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }

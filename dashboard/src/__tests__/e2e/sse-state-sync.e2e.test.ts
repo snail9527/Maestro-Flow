@@ -138,7 +138,7 @@ describe('E2E: SSE state sync pipeline', () => {
 
   it('applyFileChange on phase index.json broadcasts phase:updated to SSE clients', async () => {
     await writeStateJson({});
-    await writePhase('01-init', { phase: 1, title: 'Init', status: 'pending' } as PhaseCard);
+    await writePhase('01-init', { phase: 1, title: 'Init', status: 'not_started' } as PhaseCard);
     await stateManager.buildInitialState();
 
     const messages: string[] = [];
@@ -256,7 +256,7 @@ describe('E2E: Multi-phase board state lifecycle', () => {
     await writeStateJson({ project_name: 'lifecycle-test', current_phase: 1, status: 'executing' });
     await writePhase('01-setup', { phase: 1, title: 'Setup', status: 'completed' } as PhaseCard);
     await writePhase('02-build', { phase: 2, title: 'Build', status: 'executing' } as PhaseCard);
-    await writePhase('03-verify', { phase: 3, title: 'Verify', status: 'pending' } as PhaseCard);
+    await writePhase('03-verify', { phase: 3, title: 'Verify', status: 'not_started' } as PhaseCard);
 
     // Step 3: Build initial state (triggers board:full SSE event)
     await stateManager.buildInitialState();
@@ -268,7 +268,7 @@ describe('E2E: Multi-phase board state lifecycle', () => {
     expect(board.phases).toHaveLength(3);
     expect(board.phases[0].status).toBe('completed');
     expect(board.phases[1].status).toBe('executing');
-    expect(board.phases[2].status).toBe('pending');
+    expect(board.phases[2].status).toBe('not_started');
 
     // Step 5: Simulate phase transition via file change
     await writePhase('02-build', { phase: 2, title: 'Build', status: 'completed' } as PhaseCard);

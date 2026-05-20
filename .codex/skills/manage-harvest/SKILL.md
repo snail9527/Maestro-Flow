@@ -1,6 +1,6 @@
 ---
 name: manage-harvest
-description: Extract knowledge fragments from workflow artifacts (analysis, brainstorm, debug, lite-plan, scratchpad, sessions) and route to wiki / spec / issue stores. Dedup via stable fragment IDs. Closed-loop with downstream consumers.
+description: Extract knowledge from artifacts into wiki/spec/issues
 argument-hint: "[<session-id|path>] [--to wiki|spec|issue|auto] [--source <type>] [--recent N] [--dry-run] [-y]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
@@ -42,7 +42,7 @@ $ARGUMENTS — session-id, path, or empty for scan mode.
 | debug | `.workflow/.debug/*/` | debug-log.md |
 | scratchpad | `.workflow/.scratchpad/` | *.md |
 | session | `.workflow/active/WFS-*/` | workflow-session.json |
-| learning | `.workflow/learning/` | lessons.jsonl |
+| learning | `.workflow/specs/` | learnings.md |
 </context>
 
 <execution>
@@ -54,14 +54,14 @@ Follow '~/.maestro/workflows/harvest.md' Stages 1–8.
 3. **Stable fragment IDs** — `HRV-{8 hex}` from `hash(source_id + content_hash)`
 4. **Never modify source artifacts** — purely extractive
 5. **Confidence filtering** — below threshold logged but not routed
-6. **Spec format enforcement** — all spec routing must use `<spec-entry>` closed-tag format with `category`, `keywords`, `date`, `source="harvest"` attributes
+6. **Spec format enforcement** — all spec routing must use `<spec-entry>` closed-tag format with `roles`, `keywords`, `date`, `source="harvest"` attributes
 
 **Routing rules:**
 - Universal design patterns → `coding` or `arch` category
 - Component-level pitfalls → `learning` category
 - Quality enforcement rules → `quality` category
 - Wiki: `maestro wiki create --type <type> --slug harvest-<source_type>-<short_id>`
-- Spec: `maestro wiki append spec-<file> --category <category> --body "<content>" --keywords "<kws>"` (unified write path) or `Skill({ skill: "spec-add", args: "<category> <content>" })`
+- Spec: `maestro wiki append spec-<file> --body "<content>" --keywords "<kws>"` (unified write path) or `Skill({ skill: "spec-add", args: "<category> <content>" })`
 - Issue: append to `issues.jsonl` matching canonical schema
 
 **Next steps:** `/manage-wiki health`, `maestro wiki list --type note`, `/wiki-connect --fix`, `/wiki-digest`, `/manage-issue list --source harvest`

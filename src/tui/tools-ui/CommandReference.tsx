@@ -4,6 +4,7 @@ import {
   selectToolByRole,
   type CliToolsConfig,
 } from '../../config/cli-tools-config.js';
+import { C, pad } from '../shared/index.js';
 
 export interface CommandReferenceProps {
   config: CliToolsConfig;
@@ -44,7 +45,7 @@ export function CommandReference({ config, onBack }: CommandReferenceProps) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text bold color="cyan">Command Reference</Text>
+      <Text bold color={C.primary}>Command Reference</Text>
       <Text dimColor>Shows which tool each command/skill resolves to via --role</Text>
       <Text> </Text>
 
@@ -60,8 +61,8 @@ export function CommandReference({ config, onBack }: CommandReferenceProps) {
       {entries.map((entry, i) => (
         <Box key={i} gap={1}>
           <Text>{pad(entry.command, 32)}</Text>
-          <Text color="yellow">{pad(entry.role, 24)}</Text>
-          <Text color="green" bold>{entry.resolvesTo}</Text>
+          <Text color={C.warning}>{pad(entry.role, 24)}</Text>
+          <Text color={C.success} bold>{entry.resolvesTo}</Text>
         </Box>
       ))}
 
@@ -69,8 +70,4 @@ export function CommandReference({ config, onBack }: CommandReferenceProps) {
       <Text dimColor>[Esc] Back</Text>
     </Box>
   );
-}
-
-function pad(s: string, width: number): string {
-  return s.length >= width ? s.slice(0, width) : s + ' '.repeat(width - s.length);
 }

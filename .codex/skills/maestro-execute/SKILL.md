@@ -1,14 +1,23 @@
 ---
 name: maestro-execute
-description: Wave-based parallel task execution via CSV wave pipeline. Reads plan.json to build CSV with pre-computed waves, executes tasks in parallel per wave with cross-wave context propagation. Core execution engine replacing maestro-execute command.
+description: Use when a confirmed plan is ready for implementation
 argument-hint: "[-y|--yes] [-c|--concurrency N] [--continue] \"<phase> [--auto-commit] [--method agent|cli] [--dir <path>]\""
-allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
 Wave-based parallel task execution using `spawn_agents_on_csv`. Reads plan.json to build a CSV where waves are pre-computed from the plan. Each wave runs tasks in parallel, with cross-wave context propagation via `prev_context`. This is the core execution engine of the maestro pipeline.
 
 **Core workflow**: Load Plan -> Build CSV from Tasks -> Wave-by-Wave Parallel Execution -> Aggregate Results
+
+## Iron Law
+
+**VERIFY EACH TASK OUTPUT BEFORE MARKING COMPLETE.** Every task needs convergence criteria checks — no task may be marked "completed" based on agent self-report alone.
+
+## Red Flags — These Thoughts Mean STOP
+- "The agent said it's done, so it must be done" / "I'll batch-verify all tasks at the end"
+- "This task is too simple to need verification" / "Let me mark it complete and fix later"
+All mean: **run convergence criteria check NOW**.
 
 **Topology**: Custom (waves inherited from plan.json -- no Kahn's algorithm needed)
 
@@ -52,6 +61,7 @@ Wave-based parallel task execution using `spawn_agents_on_csv`. Reads plan.json 
 |                                                                           |
 +---------------------------------------------------------------------------+
 ```
+
 </purpose>
 
 <context>
@@ -84,12 +94,12 @@ When `--yes` or `-y`: Auto-confirm task breakdown, skip blocked-task prompts, au
 ### tasks.csv (Master State)
 
 ```csv
-id,title,description,scope,convergence_criteria,hints,execution_directives,deps,context_from,wave,status,findings,files_modified,tests_passed,error
-"TASK-001","Setup auth module","Create authentication module with JWT token generation and verification. Export verifyToken and generateToken functions.","src/auth/","auth.ts contains export function verifyToken(; auth.ts contains export function generateToken(","Reference existing middleware pattern in src/middleware/auth.ts","npm test -- --grep auth","","","1","","","","",""
-"TASK-002","Create user model","Define User interface and database schema with email, passwordHash, role fields. Use existing Result type pattern.","src/models/","user.ts contains export interface User; user.ts contains email: string","See src/models/session.ts for existing model pattern","npm test -- --grep user","","","1","","","","",""
-"TASK-003","Auth middleware","Create Express middleware that validates JWT from Authorization header. Use verifyToken from auth module. Return 401 on invalid token.","src/middleware/","auth-middleware.ts contains export function authMiddleware(; auth-middleware.ts contains verifyToken","Follows existing middleware pattern in src/middleware/logging.ts","npm test -- --grep middleware","TASK-001","TASK-001","2","","","","",""
-"TASK-004","Login endpoint","Implement POST /api/login endpoint. Validate credentials against user model, return JWT on success. Use generateToken from auth module.","src/routes/","login.ts contains router.post('/api/login'; login.ts contains generateToken(","Wire into existing Express app in src/app.ts","curl -X POST localhost:3000/api/login","TASK-001;TASK-002","TASK-001;TASK-002","2","","","","",""
-"TASK-005","Integration tests","Write integration tests for full auth flow: register, login, access protected route, token refresh.","tests/","tests/auth.test.ts exists; npm test exits with code 0","Use existing test setup in tests/setup.ts","npm test","TASK-003;TASK-004","TASK-003;TASK-004","3","","","","",""
+id,title,description,scope,convergence_criteria,hints,execution_directives,deps,context_from,wave
+"TASK-001","Setup auth module","Create authentication module with JWT token generation and verification. Export verifyToken and generateToken functions.","src/auth/","auth.ts contains export function verifyToken(; auth.ts contains export function generateToken(","Reference existing middleware pattern in src/middleware/auth.ts","npm test -- --grep auth","","","1"
+"TASK-002","Create user model","Define User interface and database schema with email, passwordHash, role fields. Use existing Result type pattern.","src/models/","user.ts contains export interface User; user.ts contains email: string","See src/models/session.ts for existing model pattern","npm test -- --grep user","","","1"
+"TASK-003","Auth middleware","Create Express middleware that validates JWT from Authorization header. Use verifyToken from auth module. Return 401 on invalid token.","src/middleware/","auth-middleware.ts contains export function authMiddleware(; auth-middleware.ts contains verifyToken","Follows existing middleware pattern in src/middleware/logging.ts","npm test -- --grep middleware","TASK-001","TASK-001","2"
+"TASK-004","Login endpoint","Implement POST /api/login endpoint. Validate credentials against user model, return JWT on success. Use generateToken from auth module.","src/routes/","login.ts contains router.post('/api/login'; login.ts contains generateToken(","Wire into existing Express app in src/app.ts","curl -X POST localhost:3000/api/login","TASK-001;TASK-002","TASK-001;TASK-002","2"
+"TASK-005","Integration tests","Write integration tests for full auth flow: register, login, access protected route, token refresh.","tests/","tests/auth.test.ts exists; npm test exits with code 0","Use existing test setup in tests/setup.ts","npm test","TASK-003;TASK-004","TASK-003;TASK-004","3"
 ```
 
 **Columns**:
@@ -106,11 +116,13 @@ id,title,description,scope,convergence_criteria,hints,execution_directives,deps,
 | `deps` | Input | Semicolon-separated dependency task IDs |
 | `context_from` | Input | Semicolon-separated task IDs whose findings this task needs |
 | `wave` | Computed | Wave number from plan.json wave assignment |
-| `status` | Output | `pending` -> `completed` / `failed` / `blocked` / `skipped` |
+| `status` | Output | `pending` -> `completed` / `failed` / `blocked` / `skipped` (mapped from output_schema `result_status`) |
 | `findings` | Output | Implementation notes and observations (max 500 chars) |
 | `files_modified` | Output | Semicolon-separated list of created/modified files |
 | `tests_passed` | Output | Test pass/fail status from execution_directives |
 | `error` | Output | Error message if failed or blocked |
+
+**Column separation rule**: Wave CSV (input to spawn_agents_on_csv) and output_schema MUST NOT share column names. Wave CSV only contains Input columns + prev_context. Output columns are returned exclusively via output_schema (using `result_status`, not `status`). During merge, `result_status` maps back to the master CSV's `status` column.
 
 ### Per-Wave CSV (Temporary)
 
@@ -122,7 +134,7 @@ Each wave generates `wave-{N}.csv` with extra `prev_context` column populated fr
 |------|---------|-----------|
 | `tasks.csv` | Master state -- all tasks with status/findings | Updated after each wave |
 | `wave-{N}.csv` | Per-wave input (temporary) | Created before wave, deleted after |
-| `wave-{N}-results.csv` | Per-wave output | Created by spawn_agents_on_csv |
+| `wave-{N}-results.csv` | Per-wave output (uses `result_status`) | Created by spawn_agents_on_csv, deleted after merge |
 | `results.csv` | Final export of all task results | Created in Phase 3 |
 | `discoveries.ndjson` | Shared exploration board | Append-only, carries across waves |
 | `context.md` | Human-readable execution report | Created in Phase 3 |
@@ -148,7 +160,7 @@ Each wave generates `wave-{N}.csv` with extra `prev_context` column populated fr
 4. **Context Propagation**: prev_context built from master CSV findings, not from memory
 5. **Discovery Board is Append-Only**: Never clear, modify, or recreate discoveries.ndjson
 6. **Cascading Skip on Failure**: If a task fails/blocks, all dependent tasks are skipped
-7. **Cleanup Temp Files**: Remove wave-{N}.csv after results are merged
+7. **Cleanup Temp Files**: Remove `wave-{N}.csv` AND `wave-{N}-results.csv` after results are merged
 8. **Max 3 Fix Attempts**: Per task, auto-fix convergence failures up to 3 times, then mark blocked
 9. **Breakpoint Resume**: Always detect completed tasks and skip them on re-run
 10. **DO NOT STOP**: Continuous execution until all waves complete or user explicitly stops
@@ -176,6 +188,14 @@ Derive:
 mkdir -p {sessionFolder}
 ```
 
+### Pre-flight: Team Conflict Check
+
+Before any task execution, run:
+```
+Bash("maestro collab preflight --phase <phase-number>")
+```
+If exit code is 1, present warnings and ask whether to proceed.
+
 ### Phase 1: Plan Resolution -> CSV
 
 **Objective**: Resolve phase, load plan + task definitions, detect resume point, generate tasks.csv.
@@ -198,9 +218,21 @@ mkdir -p {sessionFolder}
 
 4. **Build tasks.csv**: For each pending task per wave, read `.task/TASK-{NNN}.json` and extract: title, description, scope (from files), convergence.criteria, hints, execution_directives. Set `deps` from task dependency, `context_from` = deps, `wave` from plan.json.
 
-5. **Load project specs**: Read `.workflow/specs/` for coding conventions and architecture constraints (passed to all agents)
+5. **Load project specs + tools**: Run `maestro spec load --category coding` to load coding conventions, architecture constraints, AND discoverable knowhow tools (passed to all agents)
 
-6. **User validation**: Display task/wave breakdown. Skip if AUTO_YES.
+6. **Load UI specs (conditional)**: If any task involves frontend/UI work (task scope/description contains component, page, style, layout, CSS, HTML, frontend; or focus_paths in `src/components/`, `src/pages/`, `src/styles/`, `src/ui/`), also run `maestro spec load --category ui` and include in agent context.
+
+7. **Load codebase + wiki context** (optional, passed to all agents):
+   - If `.workflow/codebase/ARCHITECTURE.md` exists: read and include as `codebase_context` in agent instructions
+   - Run `maestro wiki search "<phase keywords>" --json 2>/dev/null`; if results: include top 5 entries as `wiki_context`
+   - Both are optional — proceed without if unavailable
+
+7. **User validation**: Display task/wave breakdown. Skip if AUTO_YES.
+
+8. **TDD plan detection**: If `plan.json.tdd_mode == true`, enable TDD execution enforcement:
+   - RED tasks (meta.tdd_phase=red): after completion, verify test exists AND fails. If test passes → mark BLOCKED "Test passes before implementation — wrong test".
+   - GREEN tasks (meta.tdd_phase=green): after completion, verify ALL tests pass. If RED test still fails → mark BLOCKED.
+   - REFACTOR tasks (meta.tdd_phase=refactor): after completion, verify ALL tests still pass. If any fails → undo, mark BLOCKED.
 
 ### Phase 2: Wave Execution Engine
 
@@ -218,14 +250,14 @@ For each wave N in ascending order:
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-${N}.csv`,
   id_column: "id",
-  instruction: buildExecutorInstruction(sessionFolder, phaseDir, autoCommit, specsContent),
+  instruction: buildExecutorInstruction(sessionFolder, phaseDir, autoCommit, specsContent),  // agent: ~/.codex/agents/workflow-executor.toml
   max_concurrency: maxConcurrency, max_runtime_seconds: 3600,
   output_csv_path: `${sessionFolder}/wave-${N}-results.csv`,
-  output_schema: { id, status: [completed|failed|blocked], findings, files_modified, tests_passed, error }
+  output_schema: { id, result_status: [completed|failed|blocked], findings, files_modified, tests_passed, error }
 })
 ```
 
-4. Merge results into master `tasks.csv`, delete `wave-{N}.csv`
+4. Merge results into master `tasks.csv`: map `result_status` from `wave-{N}-results.csv` to the `status` column in master CSV. Delete `wave-{N}.csv` AND `wave-{N}-results.csv` after merge.
 
 #### Blocked Task Handling
 
@@ -255,10 +287,24 @@ Blocked/failed tasks cascade: mark all downstream dependents as `skipped` with e
    - Root cause/workaround → `maestro spec add debug "<title>" "<content>" --keywords ...`
    Mark artifact `harvested: true`
 
-6. **Post-task Knowledge Inquiry**: Prompt user to capture knowledge when:
-   - Execution deviation detected (plan change) -> `/spec-add arch`
-   - Retry success (>=2 retries) -> `/spec-add debug`
-   - Implicit design rationale found -> `/spec-add learning`
+6. **Post-task Knowledge Inquiry**: After each task completes, evaluate inquiry triggers:
+
+   - **Execution deviation**: If task summary mentions approach change, dependency swap, or plan deviation:
+     → Prompt: "TASK-{NNN} deviated from the plan. Record as architecture constraint?"
+     → On confirm: `maestro spec add arch "<decision>" "<rationale>" --keywords ... --source execute:{PLAN_DIR}`
+
+   - **Retry success**: If task required >=2 retries before completion:
+     → Prompt: "TASK-{NNN} succeeded after {N} retries. Document this fix pattern?"
+     → On confirm: `maestro spec add debug "<pattern>" "<content>" --keywords ... --source execute:{PLAN_DIR}`
+
+   - **Implicit knowledge**: If task summary contains design rationale ("chose X because", "rejected Y due to"):
+     → Prompt: "Design decision detected. Record as a learning?"
+     → On confirm: `maestro spec add learning "<decision>" "<rationale>" --keywords ... --source execute:{PLAN_DIR}`
+
+   Use `request_user_input` for prompts:
+   ```json
+   { "questions": [{ "id": "knowledge-capture", "header": "Knowledge Capture", "question": "...", "options": [{ "label": "Yes", "description": "Record to specs" }, { "label": "Skip", "description": "Continue without recording" }] }] }
+   ```
 
 7. **Generate context.md**: Execution report with summary (tasks/blocked/waves/auto-commit), per-wave result table (task, status, files, tests), blocked tasks, discovery board summary, next steps.
 
@@ -311,6 +357,9 @@ echo '{"ts":"<ISO>","worker":"TASK-001","type":"code_pattern","data":{"name":"Re
 - [ ] Completed tasks have .summaries/TASK-{NNN}-summary.md
 - [ ] .task/TASK-*.json statuses updated to match execution results
 - [ ] state.json updated with EXC artifact
+- [ ] Issue status synced for tasks with issue_id (all completed → resolved, any failed → in_progress)
+- [ ] Incremental specs extracted from summaries (learnings, design rationale, root causes)
+- [ ] Post-task knowledge inquiry triggered when applicable (deviation, retry>=2, design rationale)
 - [ ] context.md produced with execution report
 - [ ] Blocked tasks have checkpoint info for resume
 - [ ] Cascading skip applied for dependent tasks

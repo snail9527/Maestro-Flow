@@ -110,6 +110,7 @@ Real-time dashboard at `http://127.0.0.1:3001` with Kanban board, Gantt timeline
 ```bash
 maestro serve                  # → http://127.0.0.1:3001
 maestro view                   # Terminal TUI alternative
+maestro command-help           # Open interactive command reference in browser (alias: ch)
 ```
 
 ### 5. Multi-Agent Engine
@@ -177,7 +178,8 @@ maestro/
 ## Documentation
 
 - **[Maestro Ralph Guide](guide/maestro-ralph-guide.md)** — Adaptive lifecycle engine: position inference, decision nodes, quality modes, retry escalation
-- **[Command Usage Guide](guide/command-usage-guide.md)** — All 51 commands with workflow diagrams, pipeline chaining, Issue closed-loop
+- **[Command Usage Guide](guide/command-usage-guide.md)** — All 53 commands with workflow diagrams, pipeline chaining, Issue closed-loop
+- **[Command Reference (HTML)](guide/command-usage-guide.html)** — Interactive HTML version with search, card grid, and workflow examples (`maestro command-help` to open)
 - **[CLI Commands Reference](guide/cli-commands-guide.en.md)** — All 21 terminal commands: install, delegate, coordinate, wiki, hooks, overlay, collab
 - **[Spec System Guide](guide/spec-system-guide.md)** — Project specs with `<spec-entry>` format, keyword-based loading, validation hooks
 - **[Delegate Async Guide](guide/delegate-async-guide.md)** — Async task delegation: CLI & MCP usage, message injection, chaining
@@ -194,6 +196,7 @@ maestro/
 
 - **[GET SHIT DONE](https://github.com/gsd-build/get-shit-done)** by TACHES — The spec-driven development model and context engineering philosophy.
 - **[Claude-Code-Workflow](https://github.com/catlog22/Claude-Code-Workflow)** — The predecessor that pioneered multi-CLI orchestration and skill-based workflow routing.
+- **[Impeccable](https://github.com/pbakaus/impeccable)** by [@pbakaus](https://github.com/pbakaus) — The UI design skill integrated as `maestro-impeccable`. Live variant mode, critique storage, design parser, and CSP detection modules are derived from this project. Licensed under [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
 ## Contributors
 
@@ -208,6 +211,12 @@ maestro/
 Join the WeChat group for discussion and feedback:
 
 <img src="assets/wechat-group-qr.png" width="200" alt="WeChat Group: Claude Code Workflow交流群 2" />
+
+## Buy Me a Coffee
+
+If this project helps you, consider buying me a coffee:
+
+<img src="assets/wechat-reward-qr.png" width="200" alt="WeChat Reward QR" />
 
 ## Links
 

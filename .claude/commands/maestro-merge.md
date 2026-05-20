@@ -1,6 +1,6 @@
 ---
 name: maestro-merge
-description: Two-phase merge of milestone worktree branch back — git merge first, scratch artifact sync only on success
+description: Merge milestone worktree branch back to main
 argument-hint: "-m <milestone-number> [--force] [--dry-run] [--no-cleanup] [--continue]"
 allowed-tools:
   - Read
@@ -30,6 +30,9 @@ Flags (`-m`, `--force`, `--dry-run`, `--no-cleanup`, `--continue`), merge sequen
 
 <execution>
 Follow '~/.maestro/workflows/merge.md' completely.
+
+**Knowledge inquiry on completion:**
+After successful merge, ask user once: "Record milestone learnings?" If yes, persist via `Skill("spec-add", "learning \"<title>\" \"<insight>\" --keywords <kw1>,<kw2>")`.
 
 **Next-step routing on completion:**
 - View dashboard → Skill({ skill: "manage-status" })

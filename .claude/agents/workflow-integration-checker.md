@@ -40,6 +40,7 @@ N/A -- reads code artifacts, not task JSON.
 - Completed phase artifacts (code, configs, tests)
 - Phase/scratch definitions (resolved via state.json artifact registry)
 - Task summaries from `.summaries/`
+- **Codebase docs** (if `.workflow/codebase/` exists) — `ARCHITECTURE.md` for expected interface contracts and module boundaries across phases
 
 ## Output Location
 `.workflow/scratch/{milestone}/integration-audit.md`

@@ -180,7 +180,27 @@ Auto-generated from project analysis. Update manually as patterns evolve.
 {empty section for spec-add entries}
 ```
 
-#### 5c: debug-notes.md and review-standards.md
+#### 5c: ui-conventions.md (when frontend framework detected)
+
+Scan for frontend frameworks (React, Vue, Angular, Svelte, etc.) and UI libraries.
+
+Output: `.workflow/specs/ui-conventions.md`
+
+```markdown
+---
+title: "UI Conventions"
+category: ui
+---
+# UI Conventions
+
+Auto-generated from project analysis. Update manually as patterns evolve.
+
+## Entries
+
+{empty section for spec-add entries}
+```
+
+#### 5d: debug-notes.md and review-standards.md
 
 These are NOT created during setup. They are created on demand when `spec-add debug` or `spec-add review` is first used.
 

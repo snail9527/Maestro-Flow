@@ -24,6 +24,7 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
+  CLAUDE_MD_TARGET,
   KNOWN_SECTIONS,
   type OverlayFile,
   type OverlayMeta,
@@ -129,15 +130,19 @@ export function validateOverlayMeta(input: unknown): string[] {
   if (!Array.isArray(obj.patches) || obj.patches.length === 0) {
     errors.push('`patches` must be a non-empty array');
   } else {
+    // Skip KNOWN_SECTIONS check when the overlay targets _claude-md,
+    // because CLAUDE.md sections are arbitrary tag-injector section names.
+    const targets = Array.isArray(obj.targets) ? (obj.targets as string[]) : [];
+    const skipSectionCheck = targets.includes(CLAUDE_MD_TARGET);
     obj.patches.forEach((p, idx) => {
-      errors.push(...validatePatch(p, idx));
+      errors.push(...validatePatch(p, idx, skipSectionCheck));
     });
   }
 
   return errors;
 }
 
-function validatePatch(input: unknown, idx: number): string[] {
+function validatePatch(input: unknown, idx: number, skipSectionCheck = false): string[] {
   const errs: string[] = [];
   const prefix = `patches[${idx}]`;
   if (!input || typeof input !== 'object') {
@@ -157,8 +162,9 @@ function validatePatch(input: unknown, idx: number): string[] {
     if (p.afterSection !== undefined && typeof p.afterSection !== 'string') {
       errs.push(`${prefix}.afterSection must be a string if provided`);
     }
-  } else if (typeof p.section === 'string') {
+  } else if (typeof p.section === 'string' && !skipSectionCheck) {
     // For existing-section modes, the section should be a known tag.
+    // Skipped for _claude-md targets where sections are arbitrary tag-injector names.
     if (!(KNOWN_SECTIONS as readonly string[]).includes(p.section)) {
       errs.push(
         `${prefix}.section "${p.section}" is not a known section (${KNOWN_SECTIONS.join(', ')})`,

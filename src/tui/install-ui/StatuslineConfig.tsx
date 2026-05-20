@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import { t } from '../../i18n/index.js';
 import { THEME_NAMES } from '../../hooks/constants.js';
+import { C, SYM } from '../shared/index.js';
 
 // ---------------------------------------------------------------------------
 // StatuslineConfig — Statusline toggle + theme selection
@@ -46,18 +47,18 @@ export function StatuslineConfig({
 
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">{t.install.statuslineTitle}</Text>
+      <Text bold color={C.primary}>{t.install.statuslineTitle}</Text>
 
       {detected && (
         <Box marginTop={1} flexDirection="column">
-          <Text color="yellow">{t.install.statuslineCurrentLabel}</Text>
+          <Text color={C.warning}>{t.install.statuslineCurrentLabel}</Text>
           <Text dimColor>  {detected}</Text>
         </Box>
       )}
 
       <Box marginTop={1}>
         <Text>{t.install.statuslineInstallPrompt} </Text>
-        <Text color={enabled ? 'green' : 'yellow'} bold>
+        <Text color={enabled ? C.success : C.warning} bold>
           {enabled ? '[Yes]' : '[No]'}
         </Text>
         <Text dimColor> [y/n]</Text>
@@ -69,7 +70,7 @@ export function StatuslineConfig({
 
       {detected && enabled && (
         <Box marginTop={1}>
-          <Text color="yellow">{t.install.statuslineOverwriteWarn}</Text>
+          <Text color={C.warning}>{t.install.statuslineOverwriteWarn}</Text>
         </Box>
       )}
 
@@ -81,10 +82,10 @@ export function StatuslineConfig({
             const selected = theme === name;
             return (
               <Box key={name} marginLeft={1}>
-                <Text color={selected ? 'green' : 'gray'}>
-                  {selected ? '● ' : '○ '}
+                <Text color={selected ? C.success : C.neutral}>
+                  {selected ? `${SYM.radioOn} ` : `${SYM.radioOff} `}
                 </Text>
-                <Text color={selected ? 'green' : undefined} bold={selected}>
+                <Text color={selected ? C.success : undefined} bold={selected}>
                   [{i + 1}] {info.label}
                 </Text>
                 <Text dimColor>  {info.desc}</Text>

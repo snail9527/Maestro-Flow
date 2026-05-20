@@ -1,7 +1,7 @@
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths } from './paths.js';
-import type { MaestroConfig, HooksConfig } from '../types/index.js';
+import type { MaestroConfig, HooksConfig, SpecInjectionConfig, SpecAnalyticsConfig } from '../types/index.js';
 
 const DEFAULT_CONFIG: MaestroConfig = {
   version: '0.1.0',
@@ -34,6 +34,52 @@ export function saveConfig(config: MaestroConfig): void {
   paths.ensure(paths.home);
   writeFileSync(paths.config, JSON.stringify(config, null, 2));
 }
+
+// ---------------------------------------------------------------------------
+// Spec Injection Config — project-level (.workflow/config.json)
+// ---------------------------------------------------------------------------
+
+export function loadSpecInjectionConfig(projectPath: string): SpecInjectionConfig {
+  const configPath = join(projectPath, '.workflow', 'config.json');
+  if (!existsSync(configPath)) return {};
+  try {
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
+    return (raw.specInjection as SpecInjectionConfig) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveSpecInjectionConfig(projectPath: string, config: SpecInjectionConfig): void {
+  const configPath = join(projectPath, '.workflow', 'config.json');
+  let existing: Record<string, unknown> = {};
+  try {
+    existing = JSON.parse(readFileSync(configPath, 'utf-8'));
+  } catch {
+    // Start fresh
+  }
+  existing['specInjection'] = config;
+  writeFileSync(configPath, JSON.stringify(existing, null, 2), 'utf-8');
+}
+
+// ---------------------------------------------------------------------------
+// Spec Analytics Config — nested under specInjection.analytics
+// ---------------------------------------------------------------------------
+
+export function loadAnalyticsConfig(projectPath: string): SpecAnalyticsConfig {
+  const injConfig = loadSpecInjectionConfig(projectPath);
+  return injConfig.analytics ?? { enabled: true };
+}
+
+export function saveAnalyticsConfig(projectPath: string, config: SpecAnalyticsConfig): void {
+  const injConfig = loadSpecInjectionConfig(projectPath);
+  injConfig.analytics = config;
+  saveSpecInjectionConfig(projectPath, injConfig);
+}
+
+// ---------------------------------------------------------------------------
+// Hooks Config
+// ---------------------------------------------------------------------------
 
 const DEFAULT_HOOKS: HooksConfig = {
   toggles: {},

@@ -1,6 +1,6 @@
 ---
 name: spec-setup
-description: Initialize project specs by scanning codebase for conventions and tech stack
+description: Initialize specs from project structure
 argument-hint: ""
 allowed-tools: Read, Write, Bash, Glob, Grep
 ---

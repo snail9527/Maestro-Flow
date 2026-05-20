@@ -4,7 +4,7 @@ import { Breadcrumbs } from '@/client/components/navigation/index.js';
 import { inventoryData } from '@/client/routes/route-config.js';
 
 // ---------------------------------------------------------------------------
-// MainContent — warm minimal content area with centered max-width
+// MainContent — Gemini CLI style: clean content area
 // ---------------------------------------------------------------------------
 
 interface MainContentProps {
@@ -18,9 +18,8 @@ export function MainContent({ children, showBreadcrumbs = true }: MainContentPro
     <main
       role="main"
       aria-label={t('accessibility.main_content')}
-      className="ml-[var(--size-sidebar-width)] flex-1 overflow-y-auto bg-bg-primary"
+      className="lg:ml-[var(--size-sidebar-width)] flex-1 overflow-y-auto bg-bg-primary"
     >
-      {/* Skip to content link */}
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:px-4 focus:py-2 bg-bg-primary border border-border rounded-[var(--radius-default)] text-text-primary text-[length:var(--font-size-sm)]"
@@ -28,15 +27,12 @@ export function MainContent({ children, showBreadcrumbs = true }: MainContentPro
         {t('accessibility.skip_to_content')}
       </a>
 
-      <div id="main-content" className="max-w-[var(--size-content-max-width)] mx-auto px-[var(--spacing-10)] py-[var(--spacing-10)]">
-        {/* Breadcrumbs */}
+      <div id="main-content" className="max-w-[var(--size-content-max-width)] mx-auto px-[var(--spacing-6)] sm:px-[var(--spacing-8)] lg:px-[var(--spacing-10)] py-[var(--spacing-8)] lg:py-[var(--spacing-10)]">
         {showBreadcrumbs && (
           <div className="mb-[var(--spacing-6)]">
             <Breadcrumbs categories={inventoryData.categories} />
           </div>
         )}
-
-        {/* Content */}
         {children}
       </div>
     </main>

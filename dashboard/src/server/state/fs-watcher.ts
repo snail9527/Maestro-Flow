@@ -1,4 +1,5 @@
 import { watch, type FSWatcher as ChokidarWatcher } from 'chokidar';
+import { readFile } from 'node:fs/promises';
 
 import type { StateManager } from './state-manager.js';
 import type { DashboardEventBus } from './event-bus.js';
@@ -45,12 +46,15 @@ export class FSWatcher {
       `${this.workflowRoot}/phases/*/*.md`,
       `${this.workflowRoot}/memory/*.md`,
       `${this.workflowRoot}/issues/*.jsonl`,
-      `${this.workflowRoot}/learning/*.jsonl`,
+      `${this.workflowRoot}/knowhow/*.md`,
       // Collab — member profiles and activity log
       `${this.workflowRoot}/collab/members/*.json`,
       `${this.workflowRoot}/collab/activity.jsonl`,
       // CSV Wave — async delegate task execution tracking
       `${this.workflowRoot}/.csv-wave/**/*.csv`,
+      // Maestro Coordinate — session status.json and walker-state.json
+      `${this.workflowRoot}/.maestro/*/status.json`,
+      `${this.workflowRoot}/.maestro/*/walker-state.json`,
     ];
 
     this.watcher = watch(patterns, {
@@ -107,6 +111,9 @@ export class FSWatcher {
       if (isWikiPath(filePath)) {
         this.eventBus.emit('wiki:invalidated', { at: Date.now(), path: filePath });
       }
+      if (isMaestroSessionPath(filePath)) {
+        this.emitMaestroSessionUpdate(filePath);
+      }
       this.stateManager.applyFileChange(filePath).catch((err: unknown) => {
         console.error(`Failed to apply file change for ${filePath}:`, err);
         this.scheduleFullRebuild();
@@ -131,6 +138,49 @@ export class FSWatcher {
       });
     }, REBUILD_DELAY_MS);
   }
+
+  /** Parse a maestro session file and emit WS push event */
+  private async emitMaestroSessionUpdate(filePath: string): Promise<void> {
+    try {
+      const raw = await readFile(filePath, 'utf-8');
+      const data = JSON.parse(raw) as Record<string, unknown>;
+
+      // Extract dirName from path: .../.maestro/{dirName}/status.json
+      const normalized = filePath.replace(/\\/g, '/');
+      const maestroIdx = normalized.indexOf('/.maestro/');
+      if (maestroIdx < 0) return;
+      const afterMaestro = normalized.slice(maestroIdx + '/.maestro/'.length);
+      const dirName = afterMaestro.split('/')[0];
+      if (!dirName) return;
+
+      const steps = Array.isArray(data.steps) ? data.steps : [];
+      const currentStep = typeof data.current_step === 'number' ? data.current_step : 0;
+
+      // Detect source
+      let source: 'ralph' | 'maestro' | 'coordinate' = 'maestro';
+      if (data.source === 'ralph') source = 'ralph';
+      else if (dirName.startsWith('coord-')) source = 'coordinate';
+
+      this.eventBus.emit('maestro:session_updated', {
+        session: {
+          dirName,
+          source,
+          sessionId: (data.session_id as string) ?? dirName,
+          intent: (data.intent as string) ?? '',
+          status: (data.status as string) ?? 'unknown',
+          chainName: (data.chain_name as string) ?? (data.graph_id as string) ?? null,
+          lifecyclePosition: source === 'ralph' ? (data.lifecycle_position as string) : undefined,
+          phase: (data.phase as number) ?? null,
+          milestone: data.milestone as string | undefined,
+          currentStep,
+          totalSteps: steps.length,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    } catch {
+      // Silently ignore parse errors — file may be mid-write
+    }
+  }
 }
 
 /**
@@ -145,6 +195,18 @@ function isWikiPath(absPath: string): boolean {
   if (/\/phases\/[^/]+\/[^/]+\.md$/.test(p)) return true;
   if (/\/memory\/[^/]+\.md$/.test(p)) return true;
   if (/\/issues\/[^/]+\.jsonl$/.test(p)) return true;
-  if (/\/learning\/[^/]+\.jsonl$/.test(p)) return true;
+  if (/\/knowhow\/[^/]+\.md$/.test(p)) return true;
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Maestro session file detection and event emission
+// ---------------------------------------------------------------------------
+
+function isMaestroSessionPath(absPath: string): boolean {
+  const p = absPath.replace(/\\/g, '/');
+  return (
+    /\/\.maestro\/[^/]+\/status\.json$/.test(p) ||
+    /\/\.maestro\/[^/]+\/walker-state\.json$/.test(p)
+  );
 }

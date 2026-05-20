@@ -4,7 +4,7 @@ import { getCategoryIcon } from '@/client/utils/categoryIcons.js';
 import { Link } from 'react-router-dom';
 
 // ---------------------------------------------------------------------------
-// LandingPage — warm minimal home page with hero + card grid
+// LandingPage — Gemini CLI style home page
 // ---------------------------------------------------------------------------
 
 interface LandingPageProps {
@@ -17,18 +17,18 @@ export default function LandingPage({ categories }: LandingPageProps) {
   return (
     <div>
       {/* Hero section */}
-      <div className="mb-[var(--spacing-8)]">
-        <h1 className="text-[length:28px] font-[var(--font-weight-bold)] text-text-primary mb-[var(--spacing-2)] leading-[1.3]">
+      <div className="mb-[var(--spacing-10)]">
+        <h1 className="text-[42px] font-[var(--font-weight-medium)] text-text-primary mb-[var(--spacing-3)] leading-[1.2] tracking-[var(--letter-spacing-tight)]">
           {t('landing.title')}
         </h1>
-        <p className="text-[length:var(--font-size-md)] text-text-secondary leading-[var(--line-height-relaxed)] max-w-[520px]">
+        <p className="text-[length:var(--font-size-md)] text-text-secondary leading-[1.75] max-w-[560px]">
           {t('landing.description')}
         </p>
       </div>
 
       {/* Quick guide */}
-      <div className="mb-[var(--spacing-8)] p-[var(--spacing-5)] bg-bg-card border border-border rounded-[var(--radius-lg)]">
-        <h2 className="text-[length:var(--font-size-base)] font-[var(--font-weight-semibold)] text-text-primary mb-[var(--spacing-3)]">
+      <div className="mb-[var(--spacing-10)] p-[var(--spacing-6)] bg-bg-card border border-border rounded-[var(--radius-lg)]">
+        <h2 className="text-[18px] font-[var(--font-weight-medium)] text-text-primary mb-[var(--spacing-3)]">
           {t('landing.quick_guide_title')}
         </h2>
         <ol className="flex flex-col gap-[var(--spacing-2)] list-decimal list-inside text-[length:var(--font-size-sm)] text-text-secondary">
@@ -40,7 +40,7 @@ export default function LandingPage({ categories }: LandingPageProps) {
         </ol>
       </div>
 
-      {/* Category card grid — 2 columns */}
+      {/* Category card grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-[var(--spacing-3)]">
         {categories.map((category) => (
           <CategoryCard key={category.id} category={category} />
@@ -51,19 +51,17 @@ export default function LandingPage({ categories }: LandingPageProps) {
 }
 
 // ---------------------------------------------------------------------------
-// CategoryCard — warm minimal card with icon, hover lift effect
+// CategoryCard — Gemini CLI style: clean card with border
 // ---------------------------------------------------------------------------
 
 function CategoryCard({ category }: { category: Category }) {
   const { t } = useI18n();
 
-  // Resolve localized name and description via i18n, fall back to inventory data
   const name = t(`categories.${category.id}`) !== `categories.${category.id}`
     ? t(`categories.${category.id}`) : category.name;
   const description = t(`category_descriptions.${category.id}`) !== `category_descriptions.${category.id}`
     ? t(`category_descriptions.${category.id}`) : category.description;
 
-  // Tint color mapping
   const tintColors: Record<string, string> = {
     pipeline: 'bg-tint-green',
     spec: 'bg-tint-blue',
@@ -86,20 +84,15 @@ function CategoryCard({ category }: { category: Category }) {
   return (
     <Link
       to={`/${category.id}`}
-      className="block p-[var(--spacing-5)] bg-bg-card border border-border rounded-[var(--radius-lg)] no-underline transition-all duration-[180ms] ease-[var(--ease-bounce)] hover:border-text-placeholder hover:-translate-y-[2px] hover:shadow-[var(--shadow-md)]"
+      className="block p-[var(--spacing-5)] bg-bg-card border border-border rounded-[var(--radius-lg)] no-underline transition-all duration-[180ms] ease-[var(--ease-out)] hover:border-accent-blue/30 hover:shadow-[var(--shadow-sm)]"
     >
-      {/* Icon */}
       <div className={`w-8 h-8 rounded-[var(--radius-default)] flex items-center justify-center mb-[var(--spacing-3)] ${tint}`}>
         <span className="text-[length:18px]">{getCategoryIcon(category.id)}</span>
       </div>
-
-      {/* Title */}
       <h3 className="text-[length:var(--font-size-base)] font-[var(--font-weight-semibold)] text-text-primary mb-[var(--spacing-1)]">
         {name}
       </h3>
-
-      {/* Description */}
-      <p className="text-[length:12px] text-text-secondary leading-[var(--line-height-normal)] line-clamp-2">
+      <p className="text-[length:13px] text-text-secondary leading-[1.5] line-clamp-2">
         {description}
       </p>
     </Link>

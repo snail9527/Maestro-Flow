@@ -7,7 +7,7 @@ import { PipelineColumn } from './PipelineColumn.js';
 import { SummaryBar } from './SummaryBar.js';
 
 // ---------------------------------------------------------------------------
-// PipelineBoardView -- 6-column kanban grouped by pipeline status
+// PipelineBoardView -- 7-column kanban grouped by pipeline status
 // ---------------------------------------------------------------------------
 
 interface ColumnDef {
@@ -18,11 +18,11 @@ interface ColumnDef {
 }
 
 const COLUMNS: ColumnDef[] = [
-  { status: 'pending', label: 'Pending', match: ['not_started', 'pending'] },
-  { status: 'exploring', label: 'Exploring', match: ['exploring'] },
+  { status: 'not_started', label: 'Pending', match: ['not_started'] },
   { status: 'planning', label: 'Planning', match: ['planning'] },
   { status: 'executing', label: 'Executing', match: ['executing'] },
-  { status: 'verifying', label: 'Verifying', match: ['verifying', 'testing'] },
+  { status: 'verifying', label: 'Verifying', match: ['verifying'] },
+  { status: 'reviewing', label: 'Reviewing', match: ['reviewing'] },
   { status: 'completed', label: 'Complete', match: ['completed'] },
   { status: 'blocked', label: 'Blocked', match: ['blocked'] },
 ];
