@@ -89,14 +89,11 @@ The core project progression — each Phase goes through `Analyze → Plan → E
 Run quality verification after execution — three complementary test tracks:
 
 ```bash
-# PRD-Forward: Are business rules satisfied?
-/quality-business-test 1
+# Unified auto-test (smart routing: spec/gap/code)
+/quality-auto-test 1
 
-# Code-Backward: Does the code work?
+# Conversational UAT
 /quality-test 1
-
-# Coverage-Backward: Is coverage sufficient?
-/quality-test-gen 1
 
 # Code review
 /quality-review 1 --level standard
@@ -105,10 +102,10 @@ Run quality verification after execution — three complementary test tracks:
 ### Test Failure Fix Loop
 
 ```bash
-/quality-debug --from-business-test 1  # Diagnose failure
+/quality-debug --from-auto-test 1      # Diagnose failure
 /maestro-plan 1 --gaps                 # Generate fix plan
 /maestro-execute 1                     # Execute fix
-/quality-business-test 1 --re-run      # Re-run failed scenarios
+/quality-auto-test 1 --re-run          # Re-run failed scenarios
 ```
 
 ---
@@ -195,7 +192,8 @@ Project-level knowledge auto-injection — no manual context pasting when Agents
 
 ```bash
 # Initialize (scan codebase to generate spec files)
-/spec-setup
+/spec-setup                                    # Existing projects: scan codebase to populate specs
+# New projects can skip -- specs are progressively populated by analyze/plan/execute
 
 # Add specs
 /spec-add coding "All APIs use Hono framework"

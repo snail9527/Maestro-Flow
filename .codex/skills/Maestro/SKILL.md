@@ -110,20 +110,30 @@ After each barrier skill completes, read its artifacts and update `state.context
 ```json
 {
   "session_id": "maestro-{YYYYMMDD-HHMMSS}",
+  "source": "maestro",
   "created_at": "ISO",
+  "updated_at": "ISO",
   "intent": "...",
   "task_type": "...",
   "chain_name": "...",
   "phase": null,
+  "milestone": null,
   "auto_mode": false,
   "exec_mode": "auto",
   "cli_tool": "codex",
-  "gemini_session_id": null,
-  "step_analyses": [],
-  "context": { "plan_dir": null, "analysis_dir": null,
-               "brainstorm_dir": null, "spec_session_id": null, "gaps": null },
+  "lifecycle_position": null,
+  "target": null,
+  "context": {
+    "issue_id": null,
+    "milestone_num": null,
+    "spec_session_id": null,
+    "scratch_dir": null,
+    "plan_dir": null,
+    "analysis_dir": null,
+    "brainstorm_dir": null
+  },
   "waves": [],
-  "steps": [{ "index": 0, "skill": "...", "args": "", "engine": null, "status": "pending", "started_at": null, "completed_at": null, "wave_n": null }],
+  "steps": [{ "index": 0, "skill": "...", "args": "", "type": "skill", "status": "pending", "started_at": null, "completed_at": null, "error": null, "wave_n": null }],
   "current_step": 0,
   "status": "running"
 }
@@ -189,10 +199,10 @@ functions.update_plan({
 
 | Skill | Flag |
 |-------|------|
-| `maestro-analyze`, `maestro-brainstorm`, `maestro-ui-design`, `maestro-roadmap` | `-y` |
-| `maestro-plan` | `--auto` |
-| `quality-test` | `--auto-fix` |
-| `quality-retrospective` | `--auto-yes` |
+| `maestro-init`, `maestro-analyze`, `maestro-brainstorm`, `maestro-ui-design`, `maestro-roadmap` | `-y` |
+| `maestro-plan`, `maestro-execute`, `maestro-milestone-complete` | `-y` |
+| `quality-auto-test`, `quality-retrospective` | `-y` |
+| `quality-test` | `-y --auto-fix` |
 
 **`buildSkillCall(step, ctx)`**: Replace placeholders `{phase}`, `{description}`, `{issue_id}`, `{plan_dir}`, `{analysis_dir}`, `{brainstorm_dir}`, `{spec_session_id}` in `step.args` with corresponding `ctx` values. Append auto-yes flag if applicable. Return `$<skill> <args>`.
 

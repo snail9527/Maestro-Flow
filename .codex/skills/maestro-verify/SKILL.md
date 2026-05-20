@@ -215,7 +215,7 @@ Create session directory.
    - Wave 2: artifact/substance + wiring (need existence confirmation from wave 1)
    - Wave 3: antipattern + nyquist (need substance/wiring context from wave 2)
 
-7. **Specs loading**: `specs_content = maestro spec load --category validation`
+7. **Specs loading**: `specs_content = maestro spec load --category quality`
 
 8. **CSV generation**: One row per check task.
 
@@ -398,7 +398,7 @@ On user confirm, append `<spec-entry>` to matching category file.
 | All passed, no gaps | `$quality-review "{phase}"` for code review |
 | Critical gaps found | `$quality-debug` for investigation |
 | Minor gaps only | `$maestro-plan "{phase} --gaps"` -> `$maestro-execute` -> re-run `$maestro-verify` |
-| Low test coverage | `$quality-test-gen "{phase}"` to generate missing tests |
+| Low test coverage | `$quality-auto-test "{phase}"` to generate missing tests |
 | Human verification needed | `$quality-test "{phase}"` for interactive UAT |
 
 ### Shared Discovery Board Protocol
