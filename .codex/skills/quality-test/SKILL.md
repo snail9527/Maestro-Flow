@@ -183,10 +183,65 @@ On issue: auto-create in `.workflow/issues/issues.jsonl`:
 ### A_DIAGNOSE_GAPS
 
 1. Cluster gaps by component/module/feature
-2. Build diagnosis.csv: one row per gap with target_files, source_context
-3. `spawn_agents_on_csv` for parallel diagnosis
+2. Build diagnosis.csv with `status="pending"` per row, target_files, source_context
+3. Filter `status=="pending"` -> write diagnosis-wave.csv -> `spawn_agents_on_csv` for parallel diagnosis with the contract below
 4. **Diagnosis agent**: Find root cause (not symptom), suggest fix direction, list affected files. Do NOT modify files. Reference issue_id for traceability.
-5. Merge results: update uat.md gaps with root_cause, fix_direction, affected_files
+5. Merge results: map `result_status` → master `status`; copy `root_cause`, `fix_direction`, `affected_files`; update uat.md gaps
+
+**output_schema**:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":              { "type": "string" },
+    "result_status":   { "type": "string", "enum": ["completed", "failed", "blocked"] },
+    "root_cause":      { "type": "string", "maxLength": 500 },
+    "fix_direction":   { "type": "string" },
+    "affected_files":  { "type": "string", "description": "Semicolon-separated file:line refs" },
+    "findings":        { "type": "string", "maxLength": 500 },
+    "error":           { "type": "string" }
+  },
+  "required": ["id", "result_status", "root_cause", "findings"]
+}
+```
+
+**Diagnosis Worker Instruction** (embed in spawn instruction):
+```
+You are a UAT gap diagnostician. ONE gap row is assigned to you.
+
+INPUT: id, target_files, source_context, issue_id, gap description
+
+REQUIRED STEPS:
+  1. Read target_files + source_context (read-only)
+  2. Trace symptom backward through call chain to root cause
+  3. Identify fix direction (high-level — orchestrator hands off to maestro-plan)
+  4. List affected files with file:line refs
+  5. Call report_agent_job_result EXACTLY ONCE
+
+TERMINATION CONTRACT (mandatory):
+  - Success → result_status=completed with root_cause + fix_direction populated
+  - Failure → result_status=failed (cannot read files, parse error)
+  - Blocked → result_status=blocked (insufficient context to diagnose; orchestrator may re-cluster)
+  - Timeout → near max_runtime_seconds → result_status=blocked with error="timeout"
+  - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
+OUTPUT (must match output_schema):
+  {
+    "id": "<your row id>",
+    "result_status": "completed" | "failed" | "blocked",
+    "root_cause": "<concrete root cause with file:line, max 500 chars>",
+    "fix_direction": "<high-level fix strategy, NOT code>",
+    "affected_files": "<semicolon-separated file:line refs>",
+    "findings": "<one-sentence summary>",
+    "error": "<message if not completed>"
+  }
+
+CONSTRAINTS:
+  - Read-only. Do NOT modify source files.
+  - Do NOT write to uat.md, diagnosis.csv, issues.jsonl (orchestrator owns those).
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 ### A_GAP_FIX_LOOP
 

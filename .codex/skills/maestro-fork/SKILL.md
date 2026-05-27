@@ -12,6 +12,8 @@ the worktree. Since `.workflow/` is gitignored, this command explicitly copies p
 and milestone scratch artifacts into the worktree.
 
 Also supports `--sync` mode to pull latest main into an active worktree.
+
+Produces `.workflow/worktrees.json` registry in the main worktree and `.workflow/worktree-scope.json` marker in the worktree, and writes a scoped `state.json` inside the worktree containing only the forked milestone's artifacts.
 </purpose>
 
 <required_reading>

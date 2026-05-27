@@ -73,7 +73,7 @@ After write operations, verify:
 <error_codes>
 | Code | Severity | Description |
 |------|----------|-------------|
-| E001 | error | No stores found — run `Skill({ skill: "manage-knowhow-capture" })` or create MEMORY.md |
+| E001 | error | No stores found — for workflow store run `Skill({ skill: "manage-knowhow-capture" })`; for system store run `Skill({ skill: "manage-memory-capture" })` or create MEMORY.md |
 | E002 | error | Entry ID or filename not found |
 | E003 | error | Prune requires at least one filter flag |
 | E004 | error | Cannot delete MEMORY.md — use `edit` subcommand instead |

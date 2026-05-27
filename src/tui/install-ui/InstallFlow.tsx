@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import Gradient from 'ink-gradient';
 import BigText from 'ink-big-text';
@@ -15,7 +15,8 @@ import { InstallExecution, type InstallFlowResult } from './InstallExecution.js'
 import { InstallResult } from './InstallResult.js';
 import { scanComponents, countExistingTargetFiles, MCP_TOOLS, COMPONENT_DEFS, type ExtraMcpTargetId } from '../../commands/install-backend.js';
 import { detectStatusline, CODEX_HOOK_LEVEL_DESCRIPTIONS, type HookLevel } from '../../commands/hooks.js';
-import { getAllManifests } from '../../core/manifest.js';
+import { findManifest, type Manifest } from '../../core/manifest.js';
+import { paths } from '../../config/paths.js';
 import { t } from '../../i18n/index.js';
 
 // ---------------------------------------------------------------------------
@@ -34,6 +35,7 @@ type FlowStep =
   | 'mode' | 'hub'
   | 'components_config' | 'hooks_config' | 'mcp_config'
   | 'codex_hooks_config' | 'codex_mcp_config'
+  | 'agy_hooks_config'
   | 'extra_mcp_config'
   | 'statusline_config' | 'backup_config'
   | 'confirm' | 'executing' | 'complete';
@@ -60,23 +62,39 @@ export function InstallFlow({
   const [mode, setMode] = useState<'global' | 'project'>(initialMode ?? 'global');
   const [projectPath] = useState(process.cwd());
 
-  // Load most recent manifest for defaults
-  const lastManifest = useMemo(() => {
+  // Load manifest for the *current* scope+target so defaults reflect the
+  // installation users are about to overwrite. Falls back to null on first
+  // install in this scope (so toggles use fresh-install defaults).
+  const lastManifest = useMemo<Manifest | null>(() => {
     try {
-      const all = getAllManifests();
-      return all.length > 0 ? all[0] : null;
+      const targetPath = mode === 'global' ? paths.home : projectPath;
+      return findManifest(mode, targetPath);
     } catch { return null; }
-  }, []);
+  }, [mode, projectPath]);
+
+  // Derive "was previously enabled" flags from lastManifest records so the
+  // installer remembers user intent across runs. Each section knows whether
+  // it was installed last time by checking the relevant manifest field.
+  const prior = useMemo(() => ({
+    claudeHooks: !!(lastManifest?.hooks?.claude?.installed?.length),
+    codexHooks: !!(lastManifest?.hooks?.codex?.installed?.length),
+    agyHooks: !!(lastManifest?.hooks?.agy?.installed?.length),
+    claudeMcp: !!lastManifest?.mcp?.claude,
+    codexMcp: !!lastManifest?.mcp?.codex,
+    extraMcp: !!(lastManifest?.mcp?.extras?.length),
+    statusline: !!lastManifest?.statusline,
+  }), [lastManifest]);
 
   // Which categories are enabled
   const [enabledSteps, setEnabledSteps] = useState<Record<string, boolean>>({
     components: initialStepIds ? initialStepIds.includes('components') : true,
-    hooks: initialStepIds ? initialStepIds.includes('hooks') : true,
-    mcp: initialStepIds ? initialStepIds.includes('mcp') : true,
-    codexHooks: initialStepIds ? initialStepIds.includes('codexHooks') : false,
-    codexMcp: initialStepIds ? initialStepIds.includes('codexMcp') : false,
-    extraMcp: initialStepIds ? initialStepIds.includes('extraMcp') : false,
-    statusline: initialStepIds ? initialStepIds.includes('statusline') : false,
+    hooks: initialStepIds ? initialStepIds.includes('hooks') : (lastManifest ? prior.claudeHooks : true),
+    mcp: initialStepIds ? initialStepIds.includes('mcp') : (lastManifest ? prior.claudeMcp : true),
+    codexHooks: initialStepIds ? initialStepIds.includes('codexHooks') : prior.codexHooks,
+    codexMcp: initialStepIds ? initialStepIds.includes('codexMcp') : prior.codexMcp,
+    agyHooks: initialStepIds ? initialStepIds.includes('agyHooks') : prior.agyHooks,
+    extraMcp: initialStepIds ? initialStepIds.includes('extraMcp') : prior.extraMcp,
+    statusline: initialStepIds ? initialStepIds.includes('statusline') : prior.statusline,
     backup: initialStepIds ? initialStepIds.includes('backup') : true,
   });
 
@@ -88,25 +106,40 @@ export function InstallFlow({
       ? lastManifest.selectedComponentIds
       : COMPONENT_DEFS.filter((d) => d.defaultSelected !== false).map((d) => d.id),
   );
+  // Only consult `hooks.claude.level` — the legacy top-level `hookLevel`
+  // field is unreliable (it may have been written as 'none' when the user
+  // skipped Claude hooks last install, which would silently lock the next
+  // install's level back to 'none').
   const [hookLevel, setHookLevel] = useState<HookLevel>(
-    () => (lastManifest?.hookLevel as HookLevel) || 'standard',
+    () => (lastManifest?.hooks?.claude?.level as HookLevel) || 'standard',
   );
   const [mcpEnabled, setMcpEnabled] = useState(true);
   const [mcpTools, setMcpTools] = useState<string[]>([...MCP_TOOLS]);
   const [mcpProjectRoot, setMcpProjectRoot] = useState('');
 
-  // Codex config
-  const [codexHookLevel, setCodexHookLevel] = useState<HookLevel>('standard');
+  // Codex config — read level from lastManifest.hooks.codex if present
+  const [codexHookLevel, setCodexHookLevel] = useState<HookLevel>(
+    () => (lastManifest?.hooks?.codex?.level as HookLevel) || 'standard',
+  );
   const [codexMcpEnabled, setCodexMcpEnabled] = useState(true);
   const [codexMcpTools, setCodexMcpTools] = useState<string[]>([...MCP_TOOLS]);
   const [codexMcpProjectRoot, setCodexMcpProjectRoot] = useState('');
 
-  // Extra MCP targets (Cursor / Qoder / Trae / Kiro / Roo / VS Code Copilot / Gemini CLI) — default empty
-  const [extraMcpTargetIds, setExtraMcpTargetIds] = useState<ExtraMcpTargetId[]>([]);
+  // Agy (Antigravity) hook level — same pattern as codex
+  const [agyHookLevel, setAgyHookLevel] = useState<HookLevel>(
+    () => (lastManifest?.hooks?.agy?.level as HookLevel) || 'standard',
+  );
 
-  // Statusline — detect existing config + theme
-  const [installStatusline, setInstallStatusline] = useState(false);
-  const [statuslineTheme, setStatuslineTheme] = useState('notion');
+  // Extra MCP targets — restore last selection if previous install used any
+  const [extraMcpTargetIds, setExtraMcpTargetIds] = useState<ExtraMcpTargetId[]>(
+    () => (lastManifest?.mcp?.extras?.map((e) => e.targetId as ExtraMcpTargetId)) ?? [],
+  );
+
+  // Statusline — restore previous on/off + theme
+  const [installStatusline, setInstallStatusline] = useState(() => prior.statusline);
+  const [statuslineTheme, setStatuslineTheme] = useState(
+    () => lastManifest?.statusline?.theme || 'notion',
+  );
   const statuslineDetected = useMemo(
     () => detectStatusline({ project: mode === 'project' }),
     [mode],
@@ -117,6 +150,40 @@ export function InstallFlow({
   const [backupAll, setBackupAll] = useState(false);
 
   const [result, setResult] = useState<InstallFlowResult | null>(null);
+
+  // When user switches mode at the mode step, re-sync every "default-from-prior"
+  // state value to the new scope's manifest. Skipped on initial mount (the
+  // useState initializers already handled that) and for subcommand flows
+  // (where mode is fixed by the caller).
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    if (isSubcommand) return;
+    setEnabledSteps({
+      components: true,
+      hooks: lastManifest ? prior.claudeHooks : true,
+      mcp: lastManifest ? prior.claudeMcp : true,
+      codexHooks: prior.codexHooks,
+      codexMcp: prior.codexMcp,
+      agyHooks: prior.agyHooks,
+      extraMcp: prior.extraMcp,
+      statusline: prior.statusline,
+      backup: true,
+    });
+    setSelectedComponentIds(
+      lastManifest?.selectedComponentIds?.length
+        ? lastManifest.selectedComponentIds
+        : COMPONENT_DEFS.filter((d) => d.defaultSelected !== false).map((d) => d.id),
+    );
+    setHookLevel((lastManifest?.hooks?.claude?.level as HookLevel) || 'standard');
+    setCodexHookLevel((lastManifest?.hooks?.codex?.level as HookLevel) || 'standard');
+    setAgyHookLevel((lastManifest?.hooks?.agy?.level as HookLevel) || 'standard');
+    setExtraMcpTargetIds(
+      (lastManifest?.mcp?.extras?.map((e) => e.targetId as ExtraMcpTargetId)) ?? [],
+    );
+    setInstallStatusline(prior.statusline);
+    setStatuslineTheme(lastManifest?.statusline?.theme || 'notion');
+  }, [mode, lastManifest, prior, isSubcommand]);
 
   // Scanned components
   const scannedComponents = useMemo(
@@ -146,6 +213,8 @@ export function InstallFlow({
     installCodexMcp: enabledSteps.codexMcp && codexMcpEnabled,
     codexMcpTools,
     codexMcpProjectRoot,
+    installAgyHooks: enabledSteps.agyHooks,
+    agyHookLevel,
     installExtraMcp: enabledSteps.extraMcp && extraMcpTargetIds.length > 0,
     extraMcpTargetIds,
     installStatusline: enabledSteps.statusline && installStatusline,
@@ -162,12 +231,12 @@ export function InstallFlow({
   }), [mode, projectPath, enabledSteps, hookLevel, selectedComponents.length,
     fileCount, mcpTools, mcpEnabled, selectedComponentIds, mcpProjectRoot,
     codexHookLevel, codexMcpEnabled, codexMcpTools, codexMcpProjectRoot,
-    extraMcpTargetIds,
+    agyHookLevel, extraMcpTargetIds,
     installStatusline, statuslineTheme, backupClaudeMd, backupAll]);
 
   // Hub items with live summary
   const hubItems = useMemo(() => buildHubItems(
-    enabledSteps as { components: boolean; hooks: boolean; mcp: boolean; codexHooks: boolean; codexMcp: boolean; extraMcp: boolean; statusline: boolean; backup: boolean },
+    enabledSteps as { components: boolean; hooks: boolean; mcp: boolean; codexHooks: boolean; codexMcp: boolean; agyHooks: boolean; extraMcp: boolean; statusline: boolean; backup: boolean },
     {
       componentCount: selectedComponents.length,
       fileCount,
@@ -177,6 +246,7 @@ export function InstallFlow({
       codexHookLevel,
       codexMcpToolCount: codexMcpTools.length,
       codexMcpEnabled,
+      agyHookLevel,
       extraMcpTargetCount: extraMcpTargetIds.length,
       statuslineDetected,
       backupClaudeMd,
@@ -184,12 +254,23 @@ export function InstallFlow({
     },
   ), [enabledSteps, selectedComponents.length, fileCount, hookLevel, mcpTools.length,
     mcpEnabled, codexHookLevel, codexMcpTools.length, codexMcpEnabled,
-    extraMcpTargetIds.length,
+    agyHookLevel, extraMcpTargetIds.length,
     statuslineDetected, backupClaudeMd, backupAll]);
 
-  // Toggle category enabled/disabled
+  // Toggle category enabled/disabled. When turning a hook step from off→on,
+  // promote a stuck 'none' level to 'standard' so the install actually does
+  // something — otherwise a "checked but level=none" state silently installs
+  // nothing (the execution branch guards on `level !== 'none'`).
   const toggleStep = useCallback((id: string) => {
-    setEnabledSteps((prev) => ({ ...prev, [id]: !prev[id] }));
+    setEnabledSteps((prev) => {
+      const next = !prev[id];
+      if (next) {
+        if (id === 'hooks') setHookLevel((lvl) => (lvl === 'none' ? 'standard' : lvl));
+        else if (id === 'codexHooks') setCodexHookLevel((lvl) => (lvl === 'none' ? 'standard' : lvl));
+        else if (id === 'agyHooks') setAgyHookLevel((lvl) => (lvl === 'none' ? 'standard' : lvl));
+      }
+      return { ...prev, [id]: next };
+    });
   }, []);
 
   // Hub → enter config
@@ -200,6 +281,7 @@ export function InstallFlow({
       mcp: 'mcp_config',
       codexHooks: 'codex_hooks_config',
       codexMcp: 'codex_mcp_config',
+      agyHooks: 'agy_hooks_config',
       extraMcp: 'extra_mcp_config',
       statusline: 'statusline_config',
       backup: 'backup_config',
@@ -229,7 +311,7 @@ export function InstallFlow({
       if (key.escape) setStep(isSubcommand ? 'confirm' : 'hub');
       return;
     }
-    if (step === 'hooks_config' || step === 'mcp_config' || step === 'codex_hooks_config' || step === 'codex_mcp_config' || step === 'statusline_config' || step === 'backup_config') {
+    if (step === 'hooks_config' || step === 'mcp_config' || step === 'codex_hooks_config' || step === 'codex_mcp_config' || step === 'agy_hooks_config' || step === 'statusline_config' || step === 'backup_config') {
       if (key.return) returnFromConfig();
       else if (key.escape) setStep(isSubcommand ? 'confirm' : 'hub');
       return;
@@ -257,7 +339,7 @@ export function InstallFlow({
       ];
 
   // Map current step to progress key
-  const progressKey = ['components_config', 'hooks_config', 'mcp_config', 'codex_hooks_config', 'codex_mcp_config', 'statusline_config', 'backup_config'].includes(step)
+  const progressKey = ['components_config', 'hooks_config', 'mcp_config', 'codex_hooks_config', 'codex_mcp_config', 'agy_hooks_config', 'statusline_config', 'backup_config'].includes(step)
     ? (isSubcommand ? step.replace('_config', '') : 'hub')
     : step;
   const stepIndex = progressSteps.findIndex((s) => s.key === progressKey);
@@ -271,6 +353,7 @@ export function InstallFlow({
     mcp_config: t.install.footerMcp,
     codex_hooks_config: t.install.footerHooks,
     codex_mcp_config: t.install.footerMcp,
+    agy_hooks_config: t.install.footerHooks,
     statusline_config: t.install.footerStatusline,
     backup_config: t.install.footerBackup,
     confirm: t.install.footerConfirm,
@@ -373,7 +456,11 @@ export function InstallFlow({
         )}
 
         {step === 'codex_hooks_config' && (
-          <HooksConfig level={codexHookLevel} onLevelChange={setCodexHookLevel} />
+          <HooksConfig
+            level={codexHookLevel}
+            onLevelChange={setCodexHookLevel}
+            descriptions={t.install.codexHooksLevelDescriptions}
+          />
         )}
 
         {step === 'codex_mcp_config' && (
@@ -385,6 +472,14 @@ export function InstallFlow({
             onEnableChange={setCodexMcpEnabled}
             onToolsChange={setCodexMcpTools}
             onRootChange={setCodexMcpProjectRoot}
+          />
+        )}
+
+        {step === 'agy_hooks_config' && (
+          <HooksConfig
+            level={agyHookLevel}
+            onLevelChange={setAgyHookLevel}
+            descriptions={t.install.agyHooksLevelDescriptions}
           />
         )}
 

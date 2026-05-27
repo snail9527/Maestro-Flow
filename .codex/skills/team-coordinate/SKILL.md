@@ -303,18 +303,22 @@ Extract qualifying rows from master CSV. Add `prev_context` column.
 
 ```javascript
 spawn_agents_on_csv({
-  csv_path: `${sessionFolder}/wave-${N}.csv`,
+  csv_path: `${sessionFolder}/wave-${N}.csv`,    // only rows where wave==N AND status=="pending"
   id_column: "id",
-  instruction: /* see Instruction Builder section below */,
+  instruction: TEAM_COORDINATE_INSTRUCTION,       // see "Instruction Builder" section below
   max_concurrency: maxConcurrency,
   max_runtime_seconds: 3600,
   output_csv_path: `${sessionFolder}/wave-${N}-results.csv`,
   output_schema: {
-    id,              // mandatory: links to master CSV
-    result_status,   // mandatory: completed | failed | blocked
-    findings,        // key findings (max 500 chars)
-    files_modified,  // semicolon-separated paths
-    error            // error message if not completed
+    type: "object",
+    properties: {
+      id:             { type: "string" },
+      result_status:  { type: "string", enum: ["completed", "failed", "blocked"] },
+      findings:       { type: "string", maxLength: 500 },
+      files_modified: { type: "string", description: "Semicolon-separated paths" },
+      error:          { type: "string" }
+    },
+    required: ["id", "result_status", "findings"]
   }
 })
 ```
@@ -409,12 +413,25 @@ Append findings as NDJSON lines:
 {"ts":"<ISO>","worker":"<TASK-ID>","type":"<TYPE>","data":{...}}
 Types: code_pattern, integration_point, convention, blocker, key_finding, decision
 
+## Termination Contract (MANDATORY)
+You MUST call report_agent_job_result EXACTLY ONCE before exiting. NO exceptions.
+- Success path → result_status=completed after verification passes
+- Failure path → unrecoverable error (build fails, scope unclear, contract violation) → result_status=failed with error message
+- Blocked path → cannot proceed without upstream fix → result_status=blocked with error explaining what is needed
+- Timeout path → approaching max_runtime_seconds → revert partial unsafe work, report blocked with error="timeout"
+- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
 ## Output
-Return via output_schema:
-- result_status: completed | failed | blocked
+Return via output_schema (matches schema declared in spawn call):
+- id: your CSV row id (mandatory)
+- result_status: completed | failed | blocked (mandatory)
 - findings: key findings summary (max 500 chars, be specific and actionable)
-- files_modified: semicolon-separated paths of created/modified files
-- error: error message if result_status is not completed
+- files_modified: semicolon-separated paths of created/modified files (empty if none)
+- error: error message if result_status is not completed (empty otherwise)
+
+## Hard Constraints
+- Do NOT write to tasks.csv, wave-*.csv, results.csv (orchestrator owns those).
+- Do NOT call spawn_agents_on_csv (no recursion).
 ```
 
 </actions>

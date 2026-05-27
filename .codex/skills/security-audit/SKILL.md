@@ -9,6 +9,10 @@ Systematic security audit covering OWASP Top 10, dependency supply chain, secret
 CI/CD pipeline review, and optional STRIDE threat modeling. Three tiers control depth vs speed.
 </purpose>
 
+<required_reading>
+@~/.maestro/workflows/review.md
+</required_reading>
+
 <context>
 $ARGUMENTS -- Parse tier and scope:
 - Tier: `quick` (default) | `standard` | `deep`
@@ -54,6 +58,38 @@ Use `Grep` for pattern matching (e.g., `eval(`, `exec(`, `innerHTML`, `dangerous
 
 For `standard` and `deep` tiers, use `spawn_agents_on_csv` to parallelize OWASP category scans
 across multiple agents, one agent per 2-3 categories.
+
+**spawn_agents_on_csv contract** (OWASP scan):
+- CSV columns: `id, title, owasp_categories, scope_glob, deps, wave, status` (initial `status="pending"`); filter `wave==1 AND status=="pending"` before writing wave-1.csv.
+- `output_schema`:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":              { "type": "string" },
+    "result_status":   { "type": "string", "enum": ["completed", "failed"] },
+    "findings":        { "type": "string", "maxLength": 500 },
+    "severity_counts": { "type": "string", "description": "JSON: {critical, high, medium, low}" },
+    "top_issues":      { "type": "string", "description": "JSON array: [{title, severity, file:line, cwe}]" },
+    "error":           { "type": "string" }
+  },
+  "required": ["id", "result_status", "findings"]
+}
+```
+
+- Merge: `result_status` → master `status`; copy `findings`, `severity_counts`, `top_issues`, `error`.
+- **Termination contract** (embed in instruction):
+  ```
+  You MUST call report_agent_job_result EXACTLY ONCE before exiting.
+  - Success → result_status=completed (severity_counts may be zero if clean)
+  - Failure → result_status=failed with error message
+  - Timeout → near max_runtime_seconds → result_status=completed with partial top_issues (do not fail the wave for timeout)
+  - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+  - Every issue MUST include file:line and CWE reference. No speculation.
+  - Read-only. Do NOT modify source.
+  Do NOT write to tasks.csv, wave-*.csv, results.csv. Do NOT call spawn_agents_on_csv (no recursion).
+  ```
 
 **Phase 3: Dependency Audit** (all tiers)
 
@@ -103,6 +139,12 @@ For each critical module identified in Phase 1:
 For `deep` tier, use `spawn_agents_on_csv` to parallelize STRIDE analysis across critical modules,
 one agent per module. Use `request_user_input` to confirm critical module list before spawning.
 
+**STRIDE spawn contract**:
+- CSV columns: `id, module_path, threats_to_assess, deps, wave, status` (initial `status="pending"`); filter `wave==2 AND status=="pending"`.
+- Same `output_schema` as the OWASP spawn above, but `top_issues` JSON items use shape `{stride_category, threat, severity, file:line, mitigation}`.
+- Same termination contract as the OWASP spawn above (mandatory `report_agent_job_result`, read-only, no recursion, timeout → partial findings, etc.).
+- Merge: `result_status` → master `status`; copy `findings`, `severity_counts`, `top_issues`, `error`.
+
 **Phase 7: Git History Archaeology** (deep only)
 
 ```bash
@@ -142,6 +184,26 @@ CONCERNS: {count} critical findings require immediate action
 NEXT: $quality-review
 --- END STATUS ---
 ```
+
+**Register artifact on completion** (so retrospective/harvest can trace this audit):
+```
+Append to state.json.artifacts[]:
+{
+  id: nextArtifactId(artifacts, "review"),  // RVW-NNN (security-audit reuses review type)
+  type: "review",
+  subtype: "security-audit",
+  milestone: current_milestone || null,
+  phase: target_phase || null,
+  scope: target_phase ? "phase" : "standalone",
+  path: "scratch/{YYYYMMDD}-security-audit-{tier}-{slug}",
+  status: critical_count == 0 ? "completed" : "completed_with_concerns",
+  tier: tier,                              // quick|standard|deep
+  harvested: false,
+  created_at: start_time,
+  completed_at: now()
+}
+```
+Write findings report to the same `path` (severity matrix, file:line refs, remediation).
 </execution>
 
 <success_criteria>

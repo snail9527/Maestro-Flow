@@ -445,8 +445,8 @@
       "error_card": "规范",
       "error_desc": "无法加载规范目录",
       "empty_card": "规范文档",
-      "empty_desc": "在 .workflow/.spec/ 中未找到规范文档",
-      "empty_hint": "运行 spec-generate 管道创建规范文档。",
+      "empty_desc": "在 .workflow/blueprint/ 中未找到规范文档",
+      "empty_hint": "运行 maestro-blueprint 创建规范文档。",
       "created": "创建时间"
     },
     "linear": {

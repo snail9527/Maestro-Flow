@@ -37,15 +37,15 @@ After installation, `/maestro-*` slash commands and `maestro` terminal commands 
 
 ```bash
 /maestro-brainstorm "Online education platform"  # Multi-role brainstorming
-/maestro-init --from-brainstorm ANL-xxx          # Initialize from brainstorm
+/maestro-init --from brainstorm:ANL-xxx          # Initialize from brainstorm
 /maestro-roadmap "Create roadmap" -y
 ```
 
-### Full Specification Chain (Large Projects)
+### Full Specification Blueprint (Large Projects)
 
 ```bash
 /maestro-init
-/maestro-spec-generate                 # 7-stage full spec generation (PRD + architecture + roadmap)
+/maestro-blueprint                     # 6-stage spec blueprint (Product Brief + PRD + Architecture + Epics)
 ```
 
 ---
@@ -61,10 +61,13 @@ The core project progression — each Phase goes through `Analyze → Plan → E
 /maestro-execute                       # Execute
 /maestro-verify                        # Verify
 
-# Per-phase mode
-/maestro-analyze 1                     # Analyze Phase 1 only
+# Per-phase mode (micro layer: Phase-level deep analysis)
+/maestro-analyze 1                     # Analyze Phase 1 only (6-dimension scoring)
 /maestro-plan 1                        # Plan Phase 1 only
 /maestro-execute 1                     # Execute Phase 1 only
+
+# Macro exploration (macro layer: use before roadmap)
+/maestro-analyze "Implement multi-tenancy"  # Requirement impact exploration → scope_verdict routing
 ```
 
 ### One-Click Full Auto

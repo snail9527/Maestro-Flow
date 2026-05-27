@@ -1,66 +1,68 @@
 ---
 name: maestro-roadmap
-description: Generate roadmap from requirements (light or full mode)
-argument-hint: "\"<requirements>\" [--mode light|full] [-y|--yes] [-c] [--phases N] [--skip-research] [--from-brainstorm SESSION-ID] [--revise [instructions]] [--review]"
+description: Generate milestone/phase roadmap from requirements or upstream context
+argument-hint: "\"<requirements>\" [-m progressive|direct|auto] [-y|--yes] [-c] [--phases N] [--skip-research] [--from <source>] [--from-brainstorm SESSION-ID] [--revise [instructions]] [--review]"
 allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
-Unified 2-wave roadmap generation using `spawn_agents_on_csv` with dual modes:
+Generate a milestone/phase roadmap using `spawn_agents_on_csv` with 2-wave analysis:
 
-- **Light** (default): Wave 1 parallel analysis (scope, risk, dependency). Wave 2 assembly -> roadmap.md.
-- **Full** (`--mode full`): Wave 1 parallel research (domain, competitive, tech stack). Wave 2 synthesis -> 7-phase spec chain + roadmap.md.
+Wave 1: parallel analysis (scope, risk, dependency). Wave 2: assembly -> roadmap.md with Milestone > Phase hierarchy.
 
 Additional: `--revise` (modify existing roadmap), `--review` (read-only health check).
+
+For formal specification documents (Product Brief, PRD, Architecture, Epics), use `maestro-blueprint` instead.
 </purpose>
 
 <context>
 $ARGUMENTS -- requirement/idea text or @file reference, plus optional flags.
 
 **Flags**:
-- `--mode light|full`: Execution mode (default: light)
 - `-y, --yes`: Skip all confirmations
-- `-m progressive|direct|auto`: Decomposition strategy (default: auto, light only)
-- `--phases N`: Target phase count (light only)
-- `--revise [instructions]`: Revise existing roadmap preserving completed phases (light only)
-- `--review`: Read-only roadmap health assessment (light only)
-- `--skip-research`: Skip Wave 1, jump to doc generation (full only)
-- `--from-brainstorm SESSION-ID`: Import guidance-specification.md as seed
+- `-m progressive|direct|auto`: Decomposition strategy (default: auto)
+- `--phases N`: Target phase count
+- `--revise [instructions]`: Revise existing roadmap preserving completed phases
+- `--review`: Read-only roadmap health assessment
+- `--from <source>`: Load upstream context package (brainstorm:ID, blueprint:BLP-xxx, analyze:ANL-xxx, @file, or path)
+- `--from-brainstorm SESSION-ID`: (backward compat alias for `--from brainstorm:ID`)
 
-**Session**: `.workflow/.csv-wave/{YYYYMMDD}-roadmap[-full]-{slug}/`
+**Session**: `.workflow/.csv-wave/{YYYYMMDD}-roadmap-{slug}/`
 **Output**: tasks.csv, results.csv, discoveries.ndjson, context.md, `.workflow/roadmap.md`
-**Full mode additional**: Spec package in `.workflow/.spec/SPEC-{slug}-{date}/`
 </context>
+
+<interview_protocol>
+Interview the user relentlessly until shared understanding is reached. Active only in interactive mode; skip when `-y/--yes`, `--revise`, `--review`, `-c`, or input is already specific (clear requirement + mode).
+
+- One decision per turn via request_user_input with 2–4 options + a (Recommended) default. The user controls termination — keep interviewing until convergence; they can interrupt naturally at any time.
+- Search-first when uncertain: before asking, resolve via `state.json`, existing `roadmap.md`, `project.md`, `maestro spec load`, `maestro wiki search`, Glob/Grep/Read, or — for open-ended multi-file scans — `maestro delegate ... --role explore`. Never ask what code or memory can verify; never bounce your own ambiguity back to the user — search first, then ask only what truly needs human judgment.
+- Writeback cadence: each settled decision is immediately appended/updated in the `Roadmap Decisions` section at the top of `.workflow/roadmap.md` (create the section if absent). Do NOT batch writeback to the end — partial decisions must already be on disk before the next question.
+- Walk the decision dependency tree strictly: mode → requirement scope → decomposition strategy → phase dependencies/order. Do not open the next branch until the current one is settled.
+- Scope guard: only decide the shape of the roadmap. Do not pre-resolve intra-phase task breakdown — that belongs to `plan`.
+
+Decision points: scope (MVP / complete / phased) → strategy (progressive / direct / auto) → milestone boundaries → phase dependencies and order.
+
+Exit: on consensus or explicit user signal to proceed, finalize the `Roadmap Decisions` section (rows already populated incrementally). Schema:
+`| # | Decision | Choice | Source (user / code / default) |`
+</interview_protocol>
 
 <csv_schema>
 
-### tasks.csv -- Light Mode
+### tasks.csv
 
 ```csv
 id,title,description,analysis_focus,deps,context_from,wave,status,findings,error
 "1","Scope Analysis","Identify features, MVP boundaries, must-have vs nice-to-have, size estimates.","scope","","","1","","",""
 "2","Risk Analysis","Technical/project risks, unknowns, feasibility, risk levels, mitigations.","risk","","","1","","",""
 "3","Dependency Analysis","Feature dependencies, ordering constraints, parallel-safe groups, external deps.","dependency","","","1","","",""
-"4","Roadmap Assembly","Synthesize findings into roadmap.md: phases, milestones, success criteria.","","1;2;3","1;2;3","2","","",""
+"4","Roadmap Assembly","Synthesize findings into roadmap.md: Milestone > Phase hierarchy, success criteria.","","1;2;3","1;2;3","2","","",""
 ```
 
-### tasks.csv -- Full Mode
-
-```csv
-id,title,description,research_focus,doc_phase,deps,context_from,wave,status,findings,output_file,error
-"1","Domain Research","Target users, market needs, existing solutions, terminology.","domain","","","","1","","","",""
-"2","Competitive Analysis","Feature comparison, UX patterns, gaps, opportunities.","competitive","","","","1","","","",""
-"3","Tech Stack Analysis","Languages, frameworks, databases, constraints, scalability.","tech_stack","","","","1","","","",""
-"4","Document Chain","7-phase spec: Product Brief, PRD (REQ-*/NFR-*), Architecture (ADR-*), Data Model, API, UI Wireframes, Epic-to-Roadmap (EPIC-*). + glossary.json.","","1-7","1;2;3","1;2;3","2","","","",""
-```
-
-**Shared column semantics**:
-- Input: id (unique string), title, description (detailed instructions), deps (semicolon-sep IDs), context_from (IDs whose findings needed), wave (1=analysis/research, 2=assembly/synthesis)
+**Column semantics**:
+- Input: id (unique string), title, description (detailed instructions), analysis_focus (scope/risk/dependency), deps (semicolon-sep IDs), context_from (IDs whose findings needed), wave (1=analysis, 2=assembly)
 - Output: status (pending->completed/failed/skipped), findings (max 500 chars), error
-- Light-only: analysis_focus (scope/risk/dependency)
-- Full-only: research_focus (domain/competitive/tech_stack), doc_phase (1-7), output_file
 
-Wave 1: 3 analysis/research rows (parallel). Wave 2: 1 assembly/synthesis row.
+Wave 1: 3 analysis rows (parallel). Wave 2: 1 assembly row.
 </csv_schema>
 
 <invariants>
@@ -74,12 +76,11 @@ Wave 1: 3 analysis/research rows (parallel). Wave 2: 1 assembly/synthesis row.
 <state_machine>
 
 <states>
-S_PARSE      -- 解析参数、检测 mode/operation              PERSIST: --
-S_INPUT      -- 解析输入（text/@file/brainstorm）          PERSIST: --
+S_PARSE      -- 解析参数、检测 operation                    PERSIST: --
+S_INPUT      -- 解析输入（text/@file/upstream context）     PERSIST: --
 S_CSV_GEN    -- 生成 tasks.csv                              PERSIST: tasks.csv
-S_WAVE_1     -- Analysis/Research (parallel spawn)           PERSIST: findings + tasks.csv
-S_WAVE_2     -- Assembly/Synthesis (single agent spawn)      PERSIST: roadmap.md [+ spec package]
-S_SPEC_GEN   -- Spec package generation (full mode only)     PERSIST: .workflow/.spec/SPEC-*/
+S_WAVE_1     -- Analysis (parallel spawn)                    PERSIST: findings + tasks.csv
+S_WAVE_2     -- Assembly (single agent spawn)                PERSIST: roadmap.md
 S_AGGREGATE  -- 精炼、评估、输出                            PERSIST: context.md + .workflow/roadmap.md
 </states>
 
@@ -91,21 +92,16 @@ S_PARSE:
   -> REVIEW_FLOW    WHEN: --review (read-only health assessment)
 
 S_INPUT:
-  -> S_CSV_GEN      DO: parse requirement (text/@file), import brainstorm if --from-brainstorm, codebase detection, load specs
+  -> S_CSV_GEN      DO: parse requirement (text/@file), load context-package.json if --from, codebase detection, load specs
 
 S_CSV_GEN:
-  -> S_WAVE_1       WHEN: normal pipeline     DO: generate mode-specific CSV
-  -> S_WAVE_2       WHEN: --skip-research     DO: generate wave 2 only
+  -> S_WAVE_1       DO: generate analysis CSV
 
 S_WAVE_1:
   -> S_WAVE_2       DO: A_SPAWN_WAVE_1
 
 S_WAVE_2:
-  -> S_SPEC_GEN     WHEN: full mode           DO: A_SPAWN_WAVE_2
-  -> S_AGGREGATE    WHEN: light mode           DO: A_SPAWN_WAVE_2
-
-S_SPEC_GEN:
-  -> S_AGGREGATE    DO: generate 7-phase spec package per spec-generate.md
+  -> S_AGGREGATE    DO: A_SPAWN_WAVE_2
 
 S_AGGREGATE:
   -> END            DO: A_AGGREGATE_RESULTS
@@ -114,20 +110,50 @@ S_AGGREGATE:
 
 <actions>
 
+### Shared Spawn Contract (W1 and W2)
+
+Every `spawn_agents_on_csv` call MUST filter `wave==N AND status=="pending"` and use this strict JSON Schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":            { "type": "string" },
+    "result_status": { "type": "string", "enum": ["completed", "failed", "blocked"] },
+    "findings":      { "type": "string", "maxLength": 500 },
+    "output_path":   { "type": "string", "description": "W2 only: absolute path of roadmap.md (empty for W1 agents that just return findings)" },
+    "error":         { "type": "string" }
+  },
+  "required": ["id", "result_status", "findings"]
+}
+```
+
+Merge: `result_status` → master `status`; copy `findings`, `output_path`, `error`.
+
+**Shared termination contract** (embed in every instruction):
+```
+You MUST call report_agent_job_result EXACTLY ONCE before exiting.
+- Success → result_status=completed (W2: roadmap.md MUST exist on disk)
+- Failure → result_status=failed with error message
+- Blocked → upstream context insufficient → result_status=blocked
+- Timeout → near max_runtime_seconds → result_status=blocked, error="timeout"
+- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+Do NOT write to tasks.csv, wave-*.csv, results.csv. Do NOT call spawn_agents_on_csv (no recursion).
+```
+
 ### A_SPAWN_WAVE_1
 
-Filter wave==1 -> write wave-1.csv -> `spawn_agents_on_csv`.
+Filter `wave==1 AND status=="pending"` -> write wave-1.csv -> spawn.
 
-**Light mode agents**: scope analysis (feature inventory + priority), risk analysis (unknowns + mitigations), dependency analysis (dependency graph + critical path).
-**Full mode agents**: domain research (users, market, solutions), competitive analysis (feature matrix, gaps), tech stack analysis (feasibility, constraints).
+**Agents**: scope analysis (feature inventory + priority), risk analysis (unknowns + mitigations), dependency analysis (dependency graph + critical path). Read-only.
 
 Merge results -> master tasks.csv.
 
 ### A_SPAWN_WAVE_2
 
-Build prev_context from wave 1. Inject strategy + --phases constraint (light mode). Spawn.
+Filter `wave==2 AND status=="pending"`. Build prev_context from wave 1. Inject strategy + `--phases` constraint. Spawn.
 
-**Light mode**: Assembly agent produces roadmap.md with phases (goal, depends-on, requirements, success criteria), milestones, scope decisions.
+Assembly agent produces roadmap.md with Milestone > Phase hierarchy (goal, depends-on, requirements, success criteria), scope decisions. Verifies roadmap.md on disk before reporting completed.
 
 **Strategy selection** via uncertainty assessment (5 factors):
 | Factor | Low | Medium | High |
@@ -139,26 +165,15 @@ Build prev_context from wave 1. Inject strategy + --phases constraint (light mod
 | Requirement stability | locked | some flux | evolving |
 
 >=3 high -> progressive, >=3 low -> direct, else -> ask (or auto if -y).
-**Full mode**: Document chain agent produces 7-phase spec package + glossary.json.
 
 ### A_AGGREGATE_RESULTS
 
 1. Export results.csv
 2. Interactive refinement (max 3 rounds, skip if -y): Approve / Refine / Regenerate
-3. **Full mode readiness** (4 dimensions, 25% each): Completeness, Consistency, Traceability, Depth. Gate: >=80% pass, 60-79% review with caveats, <60% auto-fix attempt
-4. Generate context.md (light: summary + analysis findings + roadmap stats; full: research findings + doc chain status + readiness scores)
-5. Write .workflow/roadmap.md (both modes)
-6. Write spec package to .workflow/.spec/SPEC-{slug}-{date}/ (full mode):
-   ```
-   SPEC-{slug}-{date}/
-   +-- spec-config.json, product-brief.md, glossary.json, spec-summary.md
-   +-- requirements/ (_index.md, REQ-NNN-{slug}.md, NFR-{type}-NNN-{slug}.md)
-   +-- architecture/ (_index.md, ADR-NNN-{slug}.md)
-   +-- epics/ (_index.md, EPIC-NNN-{slug}.md)
-   +-- readiness-report.md
-   ```
-7. Update state.json milestones + current_milestone
-8. Next-step routing: need analysis -> maestro-analyze; ready to plan -> maestro-plan; UI first -> maestro-impeccable build; full mode setup -> maestro-init
+3. Generate context.md (summary + analysis findings + roadmap stats)
+4. Write .workflow/roadmap.md with Milestone > Phase hierarchy
+5. Update state.json milestones + current_milestone
+6. Next-step routing: need analysis -> maestro-analyze; ready to plan -> maestro-plan; UI first -> maestro-impeccable build; need formal specs -> maestro-blueprint
 
 </actions>
 
@@ -182,20 +197,20 @@ Protocol: read before analysis, append-only, dedup by type+key.
 | Condition | Recovery |
 |-----------|----------|
 | No requirement text provided | Abort: "Requirement text or @file required" |
-| Brainstorm session not found | Abort with available sessions list |
+| Context source not found (--from / --from-brainstorm) | Abort with available sessions/sources list |
 | roadmap.md not found (--revise/--review) | Run maestro-roadmap first |
 | All Wave 1 agents failed | Wave 2 in degraded mode (seed only) |
-| Wave 2 agent failed (light) | Abort: "Roadmap generation failed" |
-| Wave 2 agent failed (full) | Export partial output, log issues |
-| Readiness < 60% (full) | Log issues, proceed with available output |
+| Wave 2 agent failed | Abort: "Roadmap generation failed" |
+| Readiness < 60% | Log issues, proceed with available output |
 </error_codes>
 
 <success_criteria>
+- [ ] Interactive mode: interview decision table appended to `.workflow/roadmap.md` "Roadmap Decisions" section
 - [ ] Wave 1 agents completed (analysis or research)
-- [ ] Wave 2 produced output (roadmap.md + optional spec package)
-- [ ] .workflow/roadmap.md written, state.json updated
+- [ ] Wave 2 produced output (roadmap.md)
+- [ ] .workflow/roadmap.md written with Milestone > Phase hierarchy, state.json updated
 - [ ] context.md generated
-- [ ] Light: uncertainty assessed, strategy selected, phases with milestones + success criteria
-- [ ] Full: spec package in .workflow/.spec/, readiness scored on 4 dimensions
+- [ ] Uncertainty assessed, strategy selected, milestones with phases + success criteria
+- [ ] Artifact registered in state.json with milestone entries
 </success_criteria>
 </output>

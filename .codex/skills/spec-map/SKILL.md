@@ -61,10 +61,10 @@ $spec-map --continue "20260318-map-auth"
 
 ```csv
 id,title,description,focus_area,output_file,deps,context_from,wave,status,findings,error
-"1","Tech Stack Analysis","Analyze languages, frameworks, dependencies, build system, package managers, runtime configuration. Scan package.json, build configs, CI/CD files.","full","tech-stack.md","","","1","","",""
-"2","Architecture Analysis","Analyze project structure, module boundaries, layer architecture, data flow patterns, entry points, API surface. Map directory tree and import graph.","full","architecture.md","","","1","","",""
-"3","Features Analysis","Inventory user-facing capabilities, API endpoints, CLI commands, UI components, background jobs, integrations. Map to source locations.","full","features.md","","","1","","",""
-"4","Cross-cutting Concerns","Analyze error handling patterns, logging strategy, authentication/authorization, configuration management, testing approach, observability.","full","concerns.md","","","1","","",""
+"1","Tech Stack Analysis","Analyze languages, frameworks, dependencies, build system, package managers, runtime configuration. Scan package.json, build configs, CI/CD files.","full","tech-stack.md","","","1","pending","",""
+"2","Architecture Analysis","Analyze project structure, module boundaries, layer architecture, data flow patterns, entry points, API surface. Map directory tree and import graph.","full","architecture.md","","","1","pending","",""
+"3","Features Analysis","Inventory user-facing capabilities, API endpoints, CLI commands, UI components, background jobs, integrations. Map to source locations.","full","features.md","","","1","pending","",""
+"4","Cross-cutting Concerns","Analyze error handling patterns, logging strategy, authentication/authorization, configuration management, testing approach, observability.","full","concerns.md","","","1","pending","",""
 ```
 
 **Columns**:
@@ -79,9 +79,11 @@ id,title,description,focus_area,output_file,deps,context_from,wave,status,findin
 | `deps` | Input | Empty (all independent) |
 | `context_from` | Input | Empty (no cross-task context) |
 | `wave` | Computed | Always 1 (single wave) |
-| `status` | Output | pending/completed/failed/skipped |
-| `findings` | Output | Analysis summary (max 500 chars) |
-| `error` | Output | Error if failed |
+| `status` | Lifecycle | `pending` (initial) → `completed`/`failed`/`skipped` (set by merge step from worker's `result_status`) |
+| `findings` | Lifecycle | Analysis summary (max 500 chars; merged from worker output) |
+| `error` | Lifecycle | Error if failed (merged) |
+
+**Column separation rule**: Wave CSV (input to `spawn_agents_on_csv`) contains Input columns only. Workers return Output columns exclusively via `output_schema` using `result_status` (NOT `status`). Merge maps `result_status` → master `status`.
 
 </csv_schema>
 
@@ -106,7 +108,62 @@ Generate 4 mapper rows. If focus area specified, scope descriptions to that area
 
 ### Phase 2: Wave Execution
 
-Single wave -- all 4 mappers via `spawn_agents_on_csv` (max_concurrency: 4, 3600s timeout). Each agent returns: id, status (completed/failed), findings, error.
+Single wave -- all 4 mappers via `spawn_agents_on_csv`:
+
+```javascript
+spawn_agents_on_csv({
+  csv_path: `${sessionFolder}/wave-1.csv`,       // only rows where status == "pending"
+  id_column: "id",
+  instruction: MAPPER_INSTRUCTION,                // see "Mapper Worker Contract" below
+  max_concurrency: 4,
+  max_runtime_seconds: 3600,
+  output_csv_path: `${sessionFolder}/wave-1-results.csv`,
+  output_schema: {
+    type: "object",
+    properties: {
+      id:            { type: "string" },
+      result_status: { type: "string", enum: ["completed", "failed"] },
+      findings:      { type: "string", maxLength: 500 },
+      error:         { type: "string" }
+    },
+    required: ["id", "result_status", "findings"]
+  }
+})
+```
+
+Merge: write `master.status = result_status`, copy `findings` and `error`. Delete `wave-1.csv` and `wave-1-results.csv`.
+
+#### Mapper Worker Contract (MAPPER_INSTRUCTION)
+
+```
+You are a codebase mapper for ONE dimension. Your assigned focus_area, description, and output_file come from your CSV row.
+
+REQUIRED STEPS:
+  1. Read shared discoveries: {sessionFolder}/discoveries.ndjson (may be empty)
+  2. Scan codebase using Read/Grep/Glob within your focus_area
+  3. Synthesize findings into the analysis sections required by your description
+  4. Append reusable discoveries (tech_stack / code_pattern / integration_point / convention) to discoveries.ndjson
+  5. Call report_agent_job_result EXACTLY ONCE
+
+TERMINATION CONTRACT (mandatory — NO worker may end without calling report_agent_job_result):
+  - Success path → result_status = completed
+  - Timeout path → if approaching max_runtime_seconds, STOP and report failed with error="timeout (partial findings)"
+  - Failure path → on unrecoverable error, report failed with error message
+  - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
+OUTPUT (return via report_agent_job_result; must match output_schema):
+  {
+    "id": "<your row id>",
+    "result_status": "completed" | "failed",
+    "findings": "<analysis summary, max 500 chars — orchestrator uses this to write {output_file}>",
+    "error": "<message if failed, else empty>"
+  }
+
+CONSTRAINTS:
+  - Read-only. Do NOT write to .workflow/codebase/ — orchestrator writes output files from your findings in Phase 3.
+  - Do NOT write to tasks.csv, wave-*.csv, or results.csv.
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 ### Phase 3: Write Output Files
 

@@ -1,4 +1,9 @@
-# Workflow: specs-setup
+---
+name: spec-setup
+alias: spec-setup
+---
+
+# Workflow: spec-setup
 
 System specs initialization -- scan project structure, detect tech stack, generate convention files.
 

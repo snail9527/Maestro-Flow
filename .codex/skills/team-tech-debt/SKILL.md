@@ -187,9 +187,52 @@ Session: {sessionFolder}
 Discovery board: {sessionFolder}/discoveries.ndjson
 Previous context: 'prev_context' column
 
-## Output
-result_status, findings, files_modified, debt_count, regression_detected (TDVAL), error
+## Termination Contract (MANDATORY)
+You MUST call report_agent_job_result EXACTLY ONCE before exiting. NO exceptions.
+- Success → result_status=completed after verification
+- Failure → result_status=failed with error message
+- Blocked → cannot proceed without upstream fix → result_status=blocked
+- Timeout → near max_runtime_seconds → revert partial unsafe work → result_status=blocked, error="timeout"
+- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
+## Output (must match output_schema)
+Return JSON:
+{
+  "id": "<your CSV row id>",
+  "result_status": "completed" | "failed" | "blocked",
+  "findings": "<key findings, max 500 chars>",
+  "files_modified": "<semicolon-separated paths or empty>",
+  "debt_count": <integer or empty>,
+  "regression_detected": "true" | "false" | "" (TDVAL only),
+  "error": "<message if not completed>"
+}
+
+## Hard Constraints
+- Do NOT write to tasks.csv, wave-*.csv, results.csv (orchestrator owns those).
+- Do NOT call spawn_agents_on_csv (no recursion).
 ```
+
+### Spawn output_schema
+
+When the coordinator dispatches a wave via `spawn_agents_on_csv`, it MUST use the strict JSON Schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":                  { "type": "string" },
+    "result_status":       { "type": "string", "enum": ["completed", "failed", "blocked"] },
+    "findings":            { "type": "string", "maxLength": 500 },
+    "files_modified":      { "type": "string" },
+    "debt_count":          { "type": "string" },
+    "regression_detected": { "type": "string", "enum": ["true", "false", ""] },
+    "error":               { "type": "string" }
+  },
+  "required": ["id", "result_status", "findings"]
+}
+```
+
+Merge maps `result_status` → master `status`.
 
 </actions>
 </state_machine>

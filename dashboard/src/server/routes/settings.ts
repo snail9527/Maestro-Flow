@@ -14,7 +14,7 @@ function getConfigPaths(workflowRoot: string) {
     cliTools: resolve(homedir(), '.maestro', 'cli-tools.json'),
     searchTool: resolve(homedir(), '.maestro', 'templates', 'search-tool.json'),
     dashboardConfig: resolve(workflowRoot, 'config.json'),
-    specDir: resolve(workflowRoot, '.spec'),
+    specDir: resolve(workflowRoot, 'blueprint'),
   };
 }
 
@@ -321,7 +321,7 @@ export function createSettingsRoutes(workflowRoot: string | (() => string)): Hon
   });
 
   // -----------------------------------------------------------------------
-  // GET /api/settings/specs — list .workflow/.spec/ directories
+  // GET /api/settings/specs — list .workflow/blueprint/ directories
   // -----------------------------------------------------------------------
   app.get('/api/settings/specs', async (c) => {
     try {
@@ -341,7 +341,7 @@ export function createSettingsRoutes(workflowRoot: string | (() => string)): Hon
           }
           specs.push({
             name: entry.name,
-            path: `.workflow/.spec/${entry.name}`,
+            path: `.workflow/blueprint/${entry.name}`,
             createdAt,
           });
         }

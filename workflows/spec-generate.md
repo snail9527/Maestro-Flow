@@ -11,6 +11,8 @@ brainstorm (optional) → init (REQUIRED) → spec-generate → plan → execute
 Alternative light path: init → roadmap (light mode) → plan (skip spec-generate)
 ```
 
+> **Relation to blueprint**: `spec-generate` is the full-pipeline superset of `blueprint` (adds P7 roadmap stage on top of P0–P6 spec chain). Use `blueprint` when only specs are needed; use `spec-generate` when downstream `roadmap → plan` execution is intended.
+
 ## Architecture
 
 ```
@@ -22,12 +24,12 @@ P6 gate: Pass (>=80%) → P7 | Review (60-79%) → P7 w/caveats | Fail (<60%) �
 ## Arguments
 
 ```
-$ARGUMENTS: "<idea or @file> [-y] [-c] [--from-brainstorm SESSION-ID]"
+$ARGUMENTS: "<idea or @file> [-y] [-c] [--from <source>]"
 
 <idea>              -- Idea text or @file reference
 -y / --yes          -- Auto mode, skip interactive questions
 -c / --continue     -- Resume from last checkpoint
---from-brainstorm   -- Import brainstorm session as enriched seed
+--from <source>     -- Load upstream context package (brainstorm:ID, @file, or path) as enriched seed. Alias: --from-brainstorm
 ```
 
 ## Output Structure
@@ -80,12 +82,23 @@ Additional full-mode rules:
 Parse input, analyze the seed idea, optionally explore codebase, establish session.
 
 **Step 2.1: Input Parsing**
-- Parse $ARGUMENTS: extract idea/topic, flags (-y, -c, --from-brainstorm)
+- Parse $ARGUMENTS: extract idea/topic, flags (-y, -c, --from)
 - If `-c`: read spec-config.json, resume from first incomplete phase
-- If `--from-brainstorm SESSION-ID`:
-  - Locate brainstorm session directory
-  - Read `guidance-specification.md` as enriched seed
-  - Set `input_type: "brainstorm"` — skip Phase 1.5
+- If `--from <source>` (or `--from-brainstorm SESSION-ID` alias):
+  - Resolve source to `context-package.json`:
+    - `brainstorm:ID` → `state.json.artifacts[type=brainstorm, id=ID].context_package`
+    - `@file` → create import session → delegate extraction → context-package.json
+    - `path/` → load `path/context-package.json`
+    - `--from-brainstorm SESSION-ID` → alias for `--from brainstorm:{resolve(SESSION-ID)}`
+  - Load context-package.json as enriched seed:
+    - `requirements[]` → Phase 3 PRD seed requirements (skip Phase 1.5)
+    - `constraints[]` → Phase 4 Architecture ADR seed
+    - `domain.terminology[]` → Phase 2 Glossary seed
+    - `domain.problem_statement` → Phase 2 Product Brief context
+    - `non_goals[]` → Phase 2 Product Brief exclusions
+    - `insights[]` → Phase 4 Architecture decisions context
+    - `references[]` → available for deep-read when needed
+  - Set `input_type: "context-package"` — skip Phase 1.5
 - If `@file`: read file content as seed
 - If text: use directly as seed
 - Missing input → error E001
@@ -99,7 +112,7 @@ Output dir: .workflow/.spec/{session_id}/
 **Step 2.3: Seed Analysis via CLI**
 - Spawn CLI analysis to extract: problem_statement, target_users, domain, constraints, dimensions (3-5)
 - Assess complexity: simple (1-2 components) / moderate (3-5) / complex (6+)
-- For brainstorm input: enrich with feature decomposition data
+- For context-package input: enrich with feature decomposition data
 
 **Step 2.4: Codebase Exploration** — follow roadmap-common.md
 - Output: `discovery-context.json` with relevant_files, patterns, tech_stack
@@ -125,7 +138,7 @@ Output dir: .workflow/.spec/{session_id}/
 
 ### Step 3: Requirement Expansion & Clarification (Phase 1.5)
 
-Skip if `--from-brainstorm` (requirements already in guidance-specification.md).
+Skip if `--from` (requirements already in context-package.json).
 
 **Step 3.1: CLI Gap Analysis**
 - Analyze seed for completeness (score 1-10), identify missing dimensions
@@ -151,7 +164,7 @@ Generate product brief through multi-perspective CLI analysis.
 **Step 4.1: Load Context**
 - Read refined-requirements.json (preferred) or seed_analysis fallback
 - Read discovery-context.json (if codebase detected)
-- For brainstorm input: read guidance-specification.md sections
+- For context-package input: read context-package.json domain and requirements sections
 
 **Step 4.2: Multi-CLI Parallel Analysis (3 perspectives)**
 
@@ -163,7 +176,7 @@ Generate product brief through multi-perspective CLI analysis.
 
 **Step 4.3: Synthesis**
 - Extract convergent themes (all agree), conflicts (need resolution), unique insights
-- For brainstorm input: cross-reference with guidance-specification decisions
+- For context-package input: cross-reference with context-package insights and constraints
 - If `apiResearchContext` is set: inject API details into technical feasibility assessment
 
 **Step 4.4: Interactive Refinement**
@@ -388,7 +401,7 @@ Next: maestro-init (setup) | maestro-plan 1 (plan first phase)
 6. **Spec Type Specialization**: Templates adapt to service/api/library/platform via profiles
 7. **Terminology Consistency**: glossary.json from Phase 2 injected into all subsequent phases
 8. **Iterative Quality**: Phase 6.5 auto-fix loop (max 2 iterations)
-9. **Brainstorm Integration**: `--from-brainstorm` imports guidance-specification.md as seed
+9. **Context Package Integration**: `--from` loads upstream context-package.json as seed (brainstorm:ID, @file, or path). `--from-brainstorm` retained as backward-compatible alias
 
 ## State Management
 
@@ -397,7 +410,7 @@ Next: maestro-init (setup) | maestro-plan 1 (plan first phase)
 {
   "session_id": "SPEC-xxx-2026-03-15",
   "seed_input": "User input text",
-  "input_type": "text|file|brainstorm",
+  "input_type": "text|file|context-package",
   "timestamp": "ISO8601",
   "mode": "interactive|auto",
   "complexity": "simple|moderate|complex",

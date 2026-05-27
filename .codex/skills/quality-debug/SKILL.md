@@ -91,12 +91,12 @@ When `--yes` or `-y`: Auto-confirm hypothesis selection, skip interactive sympto
 ### tasks.csv (Master State)
 
 ```csv
-id,title,description,hypothesis,deps,context_from,wave
-"H1","Null pointer in login handler","Investigate whether login handler crashes due to null user object after failed DB lookup","User object is null when DB returns empty result; login.ts:42 dereferences without null check","","","1"
-"H2","Missing error boundary","Investigate whether unhandled promise rejection in auth middleware propagates to 500","Auth middleware catches DB errors but not validation errors; middleware.ts:78 has no catch block","","","1"
-"H3","Stale session token","Investigate whether expired session tokens bypass refresh logic","Session refresh only triggers on 403 but server returns 401 for expired tokens; session.ts:15","","","1"
-"FIX-H1","Fix null pointer in login","Apply null check before user object dereference in login handler","","H1","H1","2"
-"FIX-H3","Fix session token refresh","Update refresh trigger to also handle 401 status codes","","H3","H3","2"
+id,title,description,hypothesis,deps,context_from,wave,status,findings,evidence_for,evidence_against,fix_applied,verified,error
+"H1","Null pointer in login handler","Investigate whether login handler crashes due to null user object after failed DB lookup","User object is null when DB returns empty result; login.ts:42 dereferences without null check","","","1","pending","","","","","",""
+"H2","Missing error boundary","Investigate whether unhandled promise rejection in auth middleware propagates to 500","Auth middleware catches DB errors but not validation errors; middleware.ts:78 has no catch block","","","1","pending","","","","","",""
+"H3","Stale session token","Investigate whether expired session tokens bypass refresh logic","Session refresh only triggers on 403 but server returns 401 for expired tokens; session.ts:15","","","1","pending","","","","","",""
+"FIX-H1","Fix null pointer in login","Apply null check before user object dereference in login handler","","H1","H1","2","pending","","","","","",""
+"FIX-H3","Fix session token refresh","Update refresh trigger to also handle 401 status codes","","H3","H3","2","pending","","","","","",""
 ```
 
 **Columns**:
@@ -110,15 +110,17 @@ id,title,description,hypothesis,deps,context_from,wave
 | `deps` | Input | Semicolon-separated dependency task IDs (wave 2 depends on wave 1) |
 | `context_from` | Input | Semicolon-separated task IDs whose findings this task needs |
 | `wave` | Input | Wave number (1 = investigation, 2 = fix attempt) |
-| `result_status` | Output | `confirmed` / `refuted` / `inconclusive` / `fixed` / `fix_failed` / `failed` |
-| `findings` | Output | Key findings summary (max 500 chars) |
-| `evidence_for` | Output | Evidence supporting the hypothesis (wave 1) |
-| `evidence_against` | Output | Evidence refuting the hypothesis (wave 1) |
-| `fix_applied` | Output | Description of fix applied (wave 2 only) |
-| `verified` | Output | `true` / `false` -- whether fix was verified to work (wave 2 only) |
-| `error` | Output | Error message if failed |
+| `status` | Lifecycle | `pending` (initial) → `confirmed`/`refuted`/`inconclusive`/`fixed`/`fix_failed`/`failed`/`skipped` (set by merge step from worker's `result_status`) |
+| `findings` | Lifecycle | Key findings summary (max 500 chars; merged from worker output) |
+| `evidence_for` | Lifecycle | Evidence supporting the hypothesis (wave 1; merged) |
+| `evidence_against` | Lifecycle | Evidence refuting the hypothesis (wave 1; merged) |
+| `fix_applied` | Lifecycle | Description of fix applied (wave 2 only; merged) |
+| `verified` | Lifecycle | `true` / `false` — whether fix was verified to work (wave 2 only; merged) |
+| `error` | Lifecycle | Error message if failed (merged) |
 
-**Column separation rule**: Input columns and Output columns MUST NOT share names. Wave CSV only contains Input columns + `prev_context`. Output columns are returned exclusively via `output_schema`.
+**Column separation rule**: Wave CSV (input to `spawn_agents_on_csv`) contains Input columns + `prev_context` only. Lifecycle columns are NEVER passed to workers. Workers return Output columns exclusively via `output_schema` — those output column names MUST NOT collide with Input column names. During merge: `result_status` → master `status`; other output columns copied as-is into matching lifecycle columns.
+
+**Initial state**: All rows are written with `status="pending"` and empty lifecycle columns. Each wave selects rows where `wave == N AND status == "pending"` from the master CSV.
 
 ### Per-Wave CSV (Temporary)
 
@@ -234,41 +236,150 @@ mkdir -p {sessionFolder}
 
 #### Wave 1: Hypothesis Investigation (Parallel)
 
-1. Extract wave 1 pending rows from master `tasks.csv` into `wave-1.csv` (no prev_context needed)
-2. Execute:
+1. **Extract wave-1 input**: filter master `tasks.csv` rows where `wave == 1 AND status == "pending"` → write `wave-1.csv` containing ONLY input columns (id, title, description, hypothesis, deps, context_from, wave). No lifecycle columns, no prev_context (wave 1 has no upstream).
+2. **Execute**:
 
 ```javascript
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-1.csv`,
   id_column: "id",
-  instruction: buildInvestigationInstruction(sessionFolder),  // agent: ~/.codex/agents/workflow-debugger.toml
-  max_concurrency: maxConcurrency, max_runtime_seconds: 3600,
+  instruction: WAVE1_INVESTIGATION_INSTRUCTION,  // see "Wave 1 Worker Contract" below
+  max_concurrency: maxConcurrency,
+  max_runtime_seconds: 3600,
   output_csv_path: `${sessionFolder}/wave-1-results.csv`,
-  output_schema: { id, result_status: [confirmed|refuted|inconclusive|failed], findings, evidence_for, evidence_against, error }
+  output_schema: {
+    type: "object",
+    properties: {
+      id:               { type: "string" },
+      result_status:    { type: "string", enum: ["confirmed", "refuted", "inconclusive", "failed"] },
+      findings:         { type: "string", maxLength: 500 },
+      evidence_for:     { type: "string" },
+      evidence_against: { type: "string" },
+      error:            { type: "string" }
+    },
+    required: ["id", "result_status", "findings"]
+  }
 })
 ```
 
-3. Merge `wave-1-results.csv` into master `tasks.csv` (map `result_status` → master `status` column), delete `wave-1.csv` and `wave-1-results.csv`
-4. **Filter for wave 2**: Mark fix tasks as `skipped` if their hypothesis `result_status` was `refuted` or `inconclusive`
+3. **Merge**: for each row in `wave-1-results.csv`, look up master row by `id` and write `master.status = result_status`, then copy `findings`, `evidence_for`, `evidence_against`, `error`. Delete `wave-1.csv` and `wave-1-results.csv`.
+4. **Wave 2 gating** (read from MASTER `tasks.csv` after merge, NOT from wave-1-results.csv):
+   - For each `FIX-H{N}` row: read its `context_from` hypothesis ID (e.g., `H{N}`) from master; if master `H{N}.status != "confirmed"`, set `FIX-H{N}.status = "skipped"` (with findings = "upstream {H{N}.status}").
+   - Only rows where `status == "pending"` proceed to wave 2.
+
+#### Wave 1 Worker Contract (WAVE1_INVESTIGATION_INSTRUCTION)
+
+The literal `instruction` string passed to `spawn_agents_on_csv` MUST include the following contract (substitute `{sessionFolder}` at build time):
+
+```
+You are a hypothesis investigation worker. ONE hypothesis row from wave-1.csv is assigned to you.
+
+INPUT (from your CSV row):
+  - id, title, hypothesis, description
+
+REQUIRED STEPS:
+  1. Read shared discoveries: {sessionFolder}/discoveries.ndjson (may be empty)
+  2. Scan codebase for evidence using Read/Grep/Glob (read-only investigation)
+  3. Classify the hypothesis based on evidence collected:
+     - confirmed   → strong evidence supports the hypothesis (file:line proof)
+     - refuted     → strong evidence contradicts the hypothesis
+     - inconclusive → insufficient evidence within time budget; do NOT guess
+     - failed      → tool error / cannot read files / blocked by environment
+  4. Append discoveries to {sessionFolder}/discoveries.ndjson if reusable (root_cause / hypothesis_evidence types)
+  5. Call report_agent_job_result EXACTLY ONCE with the verdict
+
+TERMINATION CONTRACT (mandatory — NO worker may end without calling report_agent_job_result):
+  - Success path  → result_status = confirmed | refuted, with evidence
+  - Timeout path  → if approaching {max_runtime_seconds}, STOP investigation and report inconclusive
+  - Failure path  → on any unrecoverable error, report failed with error message
+  - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
+OUTPUT (return via report_agent_job_result; must match output_schema):
+  {
+    "id": "<your row id>",
+    "result_status": "confirmed" | "refuted" | "inconclusive" | "failed",
+    "findings": "<one-sentence summary, max 500 chars>",
+    "evidence_for": "<bullet list of file:line refs supporting, or empty>",
+    "evidence_against": "<bullet list of file:line refs refuting, or empty>",
+    "error": "<message if failed, else empty>"
+  }
+
+CONSTRAINTS:
+  - Do NOT modify source code. This is investigation only.
+  - Do NOT write to tasks.csv, wave-*.csv, or results.csv (orchestrator owns those).
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 #### Wave 2: Fix Attempts (Parallel, Confirmed Only)
 
-1. If no confirmed hypotheses remain, skip wave 2 entirely
-2. Extract wave 2 pending rows, build `prev_context` from confirmed wave 1 findings
-3. Write `wave-2.csv`, then execute:
+1. If no master rows have `wave == 2 AND status == "pending"` after gating, skip wave 2 entirely.
+2. **Extract wave-2 input**: filter master `tasks.csv` where `wave == 2 AND status == "pending"`. For each row, build `prev_context` by concatenating findings/evidence_for from each ID in `context_from` (read from master). Write `wave-2.csv` with input columns + `prev_context`.
+3. **Execute**:
 
 ```javascript
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-2.csv`,
   id_column: "id",
-  instruction: buildFixInstruction(sessionFolder),  // agent: ~/.codex/agents/workflow-debugger.toml
-  max_concurrency: maxConcurrency, max_runtime_seconds: 3600,
+  instruction: WAVE2_FIX_INSTRUCTION,  // see "Wave 2 Worker Contract" below
+  max_concurrency: maxConcurrency,
+  max_runtime_seconds: 3600,
   output_csv_path: `${sessionFolder}/wave-2-results.csv`,
-  output_schema: { id, result_status: [fixed|fix_failed|failed], findings, fix_applied, verified, error }
+  output_schema: {
+    type: "object",
+    properties: {
+      id:            { type: "string" },
+      result_status: { type: "string", enum: ["fixed", "fix_failed", "failed"] },
+      findings:      { type: "string", maxLength: 500 },
+      fix_applied:   { type: "string" },
+      verified:      { type: "string", enum: ["true", "false"] },
+      error:         { type: "string" }
+    },
+    required: ["id", "result_status", "findings", "verified"]
+  }
 })
 ```
 
-4. Merge `wave-2-results.csv` into master `tasks.csv` (map `result_status` → master `status` column), delete `wave-2.csv` and `wave-2-results.csv`
+4. **Merge**: write `master.status = result_status`, copy `findings`, `fix_applied`, `verified`, `error`. Delete `wave-2.csv` and `wave-2-results.csv`.
+
+#### Wave 2 Worker Contract (WAVE2_FIX_INSTRUCTION)
+
+```
+You are a fix worker. ONE confirmed hypothesis row is assigned to you.
+
+INPUT (from your CSV row):
+  - id (FIX-H{N}), title, description, prev_context (confirmed evidence from H{N})
+
+REQUIRED STEPS:
+  1. Read prev_context — the confirmed root cause evidence
+  2. Apply the minimal fix using Edit / Write
+  3. Run verification:
+     - If project has tests: run the relevant test suite via Bash
+     - If no tests: re-read the modified file and confirm the fix matches the planned change
+  4. Append discoveries (type=fix_applied) to {sessionFolder}/discoveries.ndjson if reusable
+  5. Call report_agent_job_result EXACTLY ONCE
+
+TERMINATION CONTRACT (mandatory):
+  - Success path → fix applied AND verified → result_status=fixed, verified="true"
+  - Partial path → fix applied but verification failed → result_status=fix_failed, verified="false"
+  - Timeout path → approaching {max_runtime_seconds} with no fix applied → result_status=fix_failed with error="timeout"
+  - Failure path → cannot apply fix (file missing, parse error, etc.) → result_status=failed
+  - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
+OUTPUT (return via report_agent_job_result; must match output_schema):
+  {
+    "id": "<your row id>",
+    "result_status": "fixed" | "fix_failed" | "failed",
+    "findings": "<one-sentence summary of what was changed, max 500 chars>",
+    "fix_applied": "<file:line description of the change>",
+    "verified": "true" | "false",
+    "error": "<message if failed, else empty>"
+  }
+
+CONSTRAINTS:
+  - Modify ONLY files implicated by prev_context evidence. No drive-by refactors.
+  - Do NOT write to tasks.csv, wave-*.csv, or results.csv.
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 ### Phase 3: Results Aggregation
 

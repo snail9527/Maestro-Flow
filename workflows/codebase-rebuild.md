@@ -72,7 +72,7 @@ Used in Step 2-4 to produce architecture-aware documentation.
 
 ```
 Group components into features by:
-  directory proximity, naming patterns, import relationships, .spec/ mapping.
+  directory proximity, naming patterns, import relationships, blueprint/ mapping.
 
 For each feature group: derive name, collect component IDs, map requirements and phase.
 Build feature entry:
@@ -91,7 +91,7 @@ Back-fill component.feature_ids with assigned feature IDs.
 ### Step 4: Map Requirements (if .spec exist)
 
 ```
-If .workflow/.spec/ exist: parse each SPEC-*/requirements/REQ-*.md,
+If .workflow/blueprint/ exist: parse each SPEC-*/requirements/REQ-*.md,
 match to features by keyword analysis. Build requirement entry:
   {
     "id": "REQ-{NNN}",
@@ -102,13 +102,13 @@ match to features by keyword analysis. Build requirement entry:
     "acceptance_criteria": ["{criteria}"]
   }
 
-If no .spec: requirements = [] (populated later by spec-generate).
+If no blueprint: requirements = [] (populated later by maestro-blueprint).
 ```
 
 ### Step 5: Record Architecture Decisions (if ADRs exist)
 
 ```
-If .workflow/.spec/*/architecture/ADR-*.md exist: parse each ADR,
+If .workflow/blueprint/*/architecture/ADR-*.md exist: parse each ADR,
 map to components by keyword analysis. Build ADR entry:
   {
     "id": "ADR-{NNN}",

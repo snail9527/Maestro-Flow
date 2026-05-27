@@ -6,7 +6,7 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
 <purpose>
-Pure file-operation CRUD skill for the workflow knowhow library. No agent spawning, no CLI calls, no LLM inference — just parse-infer-append-confirm. Complements `quality-retrospective`: where retrospective extracts insights in bulk from completed phases, `manage-learn` captures one timeless insight at a time during active work. Both write to the same `specs/learnings.md` store, disambiguated by `source` and `lens` fields.
+Pure file-operation CRUD skill for the workflow knowhow library. No agent spawning, no CLI calls, no LLM inference — just parse-infer-append-confirm. Complements `quality-retrospective`: where retrospective extracts insights in bulk from completed phases, `manage-learn` captures one timeless insight at a time during active work. Both write to the same `.workflow/specs/learnings.md` store, disambiguated by `source` and `lens` fields.
 
 ```
 Parse Mode  →  Bootstrap Store  →  Execute Mode  →  Confirm
@@ -94,7 +94,7 @@ Verify `.workflow/` exists (E001 if not). If `.workflow/specs/learnings.md` miss
 2. **Auto-link phase** from `state.json` artifact registry. `--phase 0` forces null.
 3. **Generate INS-id**: `INS-{8 hex}` from `hash(insightText + timestamp)`.
 4. **Build row** with fields: id, title (first 80 chars), summary, source="manual", lens=null, category, tags (includes "manual"), phase, phase_slug, confidence, routed_to=null, created_at.
-5. **Append** entry to `specs/learnings.md` (append-only, never rewrite).
+5. **Append** entry to `.workflow/specs/learnings.md` (append-only, never rewrite).
 6. WikiIndexer auto-indexes the new entry (no manual index update needed).
 
 #### List Mode
@@ -129,7 +129,7 @@ Capture mode: display ID, category, phase, confidence, tags, and next-step comma
 - [ ] Mode parsed correctly (capture, list, search, show)
 - [ ] Learning store bootstrapped on first use
 - [ ] Capture: category inferred from keywords, phase auto-linked, INS-id generated
-- [ ] Capture: entry appended to specs/learnings.md (append-only)
+- [ ] Capture: entry appended to .workflow/specs/learnings.md (append-only)
 - [ ] List: filters applied, newest-first, respects --limit
 - [ ] Search: grep with weighted ranking across title/tags/summary
 - [ ] Show: full record displayed for valid INS-id

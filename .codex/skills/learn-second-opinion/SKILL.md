@@ -11,7 +11,7 @@ Structured second-opinion for code, decisions, or plans. Three modes:
 - **challenge**: single adversarial agent via spawn_agents_on_csv (1 worker)
 - **consult**: interactive Q&A (no CSV wave — direct orchestration)
 
-Findings persist to `specs/learnings.md`. Decoupled from phase lifecycle.
+Findings persist to `.workflow/specs/learnings.md`. Decoupled from phase lifecycle.
 </purpose>
 
 <context>
@@ -47,12 +47,42 @@ Resolve target to content. Load specs, wiki search, prior lessons for context br
 | 3 | strategist | Scalability, extensibility, architecture alignment | coupling, cohesion |
 | 4 | synthesis | Merge verdicts → agreements, disagreements, top 3 recommendations | combined verdict |
 
-Wave 1: 3 persona agents in parallel. Wave 2: synthesis agent with wave 1 findings as prev_context.
+Wave 1: 3 persona agents in parallel (filter `wave==1 AND status=="pending"`). Wave 2: synthesis agent with wave 1 findings as prev_context.
 
-Each persona returns: `{ persona, verdict: approve|concern|reject, confidence, findings: [{severity, description, location, suggestion}], summary }`
+**output_schema** (both waves):
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":            { "type": "string" },
+    "result_status": { "type": "string", "enum": ["completed", "failed"] },
+    "persona":       { "type": "string" },
+    "verdict":       { "type": "string", "enum": ["approve", "concern", "reject", ""] },
+    "confidence":    { "type": "string", "description": "0-100" },
+    "findings":      { "type": "string", "description": "JSON array of {severity, description, location, suggestion}, max 500 chars summary" },
+    "summary":       { "type": "string", "maxLength": 500 },
+    "error":         { "type": "string" }
+  },
+  "required": ["id", "result_status", "summary"]
+}
+```
+
+Merge: `result_status` → master `status`; copy `persona`, `verdict`, `confidence`, `findings`, `summary`, `error`.
+
+**Shared termination contract** (embed in every instruction):
+```
+You MUST call report_agent_job_result EXACTLY ONCE before exiting.
+- Success → result_status=completed with concrete verdict
+- Failure → result_status=failed with error message
+- Timeout → near max_runtime_seconds → result_status=failed, error="timeout (partial)"
+- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+- Read-only analysis. Do NOT modify source files.
+Do NOT write to tasks.csv, wave-*.csv, results.csv. Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 #### Challenge Mode
-Single agent via spawn_agents_on_csv (1 worker). Adversarial analysis with forcing questions:
+Single agent via spawn_agents_on_csv (max_concurrency: 1) with the same `output_schema` + termination contract above. Adversarial analysis with forcing questions:
 - "What assumption would invalidate this entire approach?"
 - "What's the simplest thing that breaks this?"
 - "What's the implicit contract that isn't enforced?"
@@ -62,7 +92,7 @@ Interactive loop via AskUserQuestion. Agent studies target, answers questions wi
 
 ### Phase 3: Persist
 1. Write `KNW-opinion-{slug}-{date}.md` with per-persona findings + synthesis
-2. Append non-trivial findings to `specs/learnings.md` (source: "second-opinion")
+2. Append non-trivial findings to `.workflow/specs/learnings.md` (source: "second-opinion")
 3. Display summary with verdict and next steps
 
 **Next steps:** `/manage-issue create`, `/learn-decompose <path>`, `/learn-follow <path>`
@@ -82,5 +112,5 @@ Interactive loop via AskUserQuestion. Agent studies target, answers questions wi
 - [ ] Mode executed: review (3 parallel agents), challenge (adversarial), or consult (interactive)
 - [ ] Synthesis produced with agreements, disagreements, verdict
 - [ ] Report written to `KNW-opinion-{slug}-{date}.md`
-- [ ] Non-trivial findings appended to `specs/learnings.md`
+- [ ] Non-trivial findings appended to `.workflow/specs/learnings.md`
 </success_criteria>

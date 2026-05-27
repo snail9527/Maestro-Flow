@@ -20,6 +20,8 @@ export interface InstallFlowConfig {
   installCodexMcp: boolean;
   codexMcpTools: string[];
   codexMcpProjectRoot: string;
+  installAgyHooks: boolean;
+  agyHookLevel: HookLevel;
   installExtraMcp: boolean;
   extraMcpTargetIds: ExtraMcpTargetId[];
   installStatusline: boolean;
@@ -116,6 +118,16 @@ export function InstallConfirm({ config, onConfirm, onBack }: InstallConfirmProp
           />
         ) : (
           <Row label={t.install.confirmLabelCodexMcp} value={t.install.confirmSkipped} valueColor={C.neutral} />
+        )}
+
+        {config.installAgyHooks ? (
+          <Row
+            label={t.install.confirmLabelAgyHooks}
+            value={`${config.agyHookLevel} — ${t.install.agyHooksLevelDescriptions[config.agyHookLevel]}`}
+            valueColor={C.success}
+          />
+        ) : (
+          <Row label={t.install.confirmLabelAgyHooks} value={t.install.confirmSkipped} valueColor={C.neutral} />
         )}
 
         {config.installExtraMcp ? (

@@ -81,12 +81,14 @@ When `--yes` or `-y`: Auto-confirm rebuild (implies --force), skip all prompts.
 
 ```csv
 id,title,description,doc_dimension,output_path,deps,context_from,wave
-"1","Component Scanner","Scan all source directories for components: models, services, controllers, utils, types, config, middleware, core modules. For each component extract exported symbols, determine type, record code locations. Output JSON array of component entries with id (TC-NNN), name, type, code_locations, symbols.","components",".workflow/codebase/doc-index.json#components","","","1"
-"2","Feature Mapper","Group discovered components by domain/functional area using directory proximity, naming patterns, and import relationships. Map features to requirements if .workflow/.spec/ exists. Output JSON array of feature entries with id (FT-NNN), name, status, component_ids, requirement_ids, phase.","features",".workflow/codebase/doc-index.json#features","","","1"
-"3","Requirement Linker","If .workflow/.spec/ exists, scan SPEC-*/requirements/REQ-*.md files. Parse requirement metadata (title, priority, acceptance_criteria). Match requirements to features by keyword analysis. Also scan for ADR-*.md architecture decisions. Output JSON arrays for requirements and architecture_decisions.","requirements",".workflow/codebase/doc-index.json#requirements","","","1"
-"4","Tech Registry Writer","For each component discovered, generate a markdown documentation file in .workflow/codebase/tech-registry/{slug}.md with: ID, type, features, code locations, exported symbols, dependencies. Generate _index.md with component table. Output file count and paths.","tech-registry",".workflow/codebase/tech-registry/","","","1"
-"5","Feature Map Writer","For each feature discovered, generate a markdown documentation file in .workflow/codebase/feature-maps/{slug}.md with: ID, status, phase, requirements, component table. Generate _index.md with feature table. Output file count and paths.","feature-maps",".workflow/codebase/feature-maps/","","","1"
+"1","Component Scanner","Scan all source directories for components: models, services, controllers, utils, types, config, middleware, core modules. For each component extract exported symbols, determine type, record code locations. Return JSON array of component entries with id (TC-NNN), name, type, code_locations, symbols via output_schema. Do NOT write files — orchestrator assembles doc-index.json in Phase 3.","components","<ABS_WORKFLOW>/codebase/doc-index.json#components","","","1"
+"2","Feature Mapper","Group discovered components by domain/functional area using directory proximity, naming patterns, and import relationships. Map features to requirements if <ABS_WORKFLOW>/blueprint/ exists. Return JSON array of feature entries with id (FT-NNN), name, status, component_ids, requirement_ids, phase via output_schema. Do NOT write files.","features","<ABS_WORKFLOW>/codebase/doc-index.json#features","","","1"
+"3","Requirement Linker","If <ABS_WORKFLOW>/blueprint/ exists, scan BLP-*/requirements/REQ-*.md files. Parse requirement metadata (title, priority, acceptance_criteria). Match requirements to features by keyword analysis. Also scan for ADR-*.md architecture decisions. Return JSON arrays for requirements and architecture_decisions via output_schema. Do NOT write files.","requirements","<ABS_WORKFLOW>/codebase/doc-index.json#requirements","","","1"
+"4","Tech Registry Writer","For each component discovered, use the Write tool to create a markdown documentation file at <ABS_WORKFLOW>/codebase/tech-registry/{slug}.md with: ID, type, features, code locations, exported symbols, dependencies. Also write <ABS_WORKFLOW>/codebase/tech-registry/_index.md with the component table. After all writes, verify every intended file exists with Glob and return file count + absolute paths via output_schema. MUST use the Write tool — files on disk are the deliverable, do NOT return file content as text.","tech-registry","<ABS_WORKFLOW>/codebase/tech-registry/","","","1"
+"5","Feature Map Writer","For each feature discovered, use the Write tool to create a markdown documentation file at <ABS_WORKFLOW>/codebase/feature-maps/{slug}.md with: ID, status, phase, requirements, component table. Also write <ABS_WORKFLOW>/codebase/feature-maps/_index.md with the feature table. After all writes, verify every intended file exists with Glob and return file count + absolute paths via output_schema. MUST use the Write tool — files on disk are the deliverable, do NOT return file content as text.","feature-maps","<ABS_WORKFLOW>/codebase/feature-maps/","","","1"
 ```
+
+**Path resolution (orchestrator MUST do BEFORE writing tasks.csv)**: substitute `<ABS_WORKFLOW>` with the absolute path to the project's `.workflow/` directory (e.g. `D:/maestro2/.workflow`). Agent Write tool requires absolute paths — passing relative `.workflow/...` literals will fail.
 
 **Columns**:
 
@@ -125,6 +127,8 @@ Single wave generates `wave-1.csv`. No `prev_context` needed (all tasks independ
 6. **Single Wave**: All generators are independent, no wave ordering needed
 7. **Cleanup Temp Files**: Remove wave-1.csv after results are merged
 8. **DO NOT STOP**: Execute until all generators complete or fail
+9. **Absolute Paths Only**: All paths in `description` and `output_path` MUST be absolute before tasks.csv is written. Orchestrator substitutes `<ABS_WORKFLOW>` placeholder; never let it leak into a spawned agent's prompt.
+10. **Writer vs Returner Split**: Tasks 1-3 return data via `output_schema` (no file writes). Tasks 4-5 MUST write files via Write tool + verify with Glob. Mixing the two contracts (e.g., returning markdown content as text from tasks 4-5) is a contract violation.
 </invariants>
 
 <execution>
@@ -206,17 +210,17 @@ Filter master `tasks.csv` for `wave == 1 AND status == pending` → write `wave-
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-1.csv`,
   id_column: "id",
-  instruction: buildRebuildInstruction(sessionFolder, sourceDirs),  // agent: ~/.codex/agents/workflow-codebase-mapper.toml
+  instruction: REBUILD_INSTRUCTION,                // see "Rebuild Worker Contract" below
   max_concurrency: maxConcurrency,
   max_runtime_seconds: 3600,
   output_csv_path: `${sessionFolder}/wave-1-results.csv`,
   output_schema: {
     type: "object",
     properties: {
-      id: { type: "string" },
-      result_status: { type: "string", enum: ["completed", "failed"] },
-      result_findings: { type: "string" },
-      error: { type: "string" }
+      id:              { type: "string" },
+      result_status:   { type: "string", enum: ["completed", "failed"] },
+      result_findings: { type: "string", description: "For task 1-3: JSON payload to merge into doc-index.json. For task 4-5: list of files written" },
+      error:           { type: "string" }
     },
     required: ["id", "result_status", "result_findings"]
   }
@@ -224,6 +228,53 @@ spawn_agents_on_csv({
 ```
 
 Merge `wave-1-results.csv` into master `tasks.csv`: map `result_status` -> master `status`, `result_findings` -> master `findings`, copy `error` as-is. After merge, delete temporary files (`wave-1.csv` and `wave-1-results.csv`).
+
+#### Rebuild Worker Contract (REBUILD_INSTRUCTION)
+
+```
+You are a codebase doc generator for ONE task (Component Scanner / Feature Mapper / Requirement Linker / Tech Registry Writer / Feature Map Writer). Your contract depends on your task id — read description carefully.
+
+DUAL CONTRACT (per task id):
+  Tasks 1-3 (Scanner/Mapper/Linker) → RETURN data via result_findings (JSON payload). Do NOT write files.
+  Tasks 4-5 (Writers) → MUST WRITE files via the Write tool. Verify each via Glob. Return file count + absolute paths via result_findings.
+
+REQUIRED STEPS:
+  1. Scan codebase per description and focus_area
+  2. For tasks 1-3: assemble JSON payload matching the documented section schema (components / features / requirements)
+  3. For tasks 4-5: render markdown documents and write them to disk; verify every intended file exists via Glob; if any file missing → result_status=failed
+  4. Append discoveries to {sessionFolder}/discoveries.ndjson if reusable
+  5. Call report_agent_job_result EXACTLY ONCE
+
+TERMINATION CONTRACT (mandatory — NO worker may end without calling report_agent_job_result):
+  - Success → result_status=completed
+  - Failure → unrecoverable error / write verification fails → result_status=failed
+  - Timeout → near max_runtime_seconds, finish current write/scan if safe, then report failed with error="timeout (partial)"
+  - NEVER skip report_agent_job_result.
+
+CONTRACT VIOLATION GUARD:
+  - Tasks 4-5 returning markdown content in result_findings instead of writing files → MUST self-report failed (orchestrator cannot assemble docs from text).
+  - Tasks 1-3 writing files to .workflow/codebase/ → MUST self-report failed (orchestrator owns assembly).
+
+OUTPUT (must match output_schema):
+  Tasks 1-3:
+  {
+    "id": "<your row id>",
+    "result_status": "completed" | "failed",
+    "result_findings": "<JSON payload to merge into doc-index.json section>",
+    "error": "<message if failed, else empty>"
+  }
+  Tasks 4-5:
+  {
+    "id": "<your row id>",
+    "result_status": "completed" | "failed",
+    "result_findings": "<count + semicolon-separated absolute paths of files written>",
+    "error": "<message if failed, else empty>"
+  }
+
+CONSTRAINTS:
+  - Do NOT write to tasks.csv, wave-*.csv, results.csv, doc-index.json (orchestrator assembles in Phase 3).
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 ### Phase 3: Results -> .workflow/codebase/
 

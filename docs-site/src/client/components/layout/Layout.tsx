@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { SidebarProvider } from './SidebarContext.js';
 import { TopBar } from './TopBar.js';
 import { Sidebar } from './Sidebar.js';
@@ -26,13 +27,13 @@ export function Layout({ children }: { children?: ReactNode }) {
 function AnnouncementBanner() {
   return (
     <div className="fixed top-0 left-0 right-0 z-[101] bg-[#2E7D32] text-white text-[length:14px] text-center py-[8px] px-[var(--spacing-4)] leading-[1.4]">
-      Maestro v0.4.10 已发布 — 支持 Ralph 自适应生命周期引擎。详见{' '}
-      <a
-        href="/guides/maestro-ralph"
+      Maestro v0.4.19 已发布 — team-swarm 蚁群智能技能 + 安装器支持 Agy hooks 配置。详见{' '}
+      <Link
+        to="/changelog"
         className="text-white font-[var(--font-weight-semibold)] underline hover:no-underline"
       >
-        Maestro Ralph 指南
-      </a>
+        更新日志
+      </Link>
     </div>
   );
 }

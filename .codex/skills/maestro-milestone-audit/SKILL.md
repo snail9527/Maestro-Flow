@@ -28,9 +28,9 @@ $maestro-milestone-audit "M1"
 ### tasks.csv (Master State)
 
 ```csv
-id,title,description,scope,check_targets,deps,wave
-"integ-1","Interface & dependency chains","Verify shared interfaces are consistent across phases: re-exports match, dependency chains unbroken, no circular imports between phase outputs","cross-phase imports, shared types, re-exports","grep for shared type names across phase output dirs; verify export/import consistency","","1"
-"integ-2","Data contracts & API consistency","Verify request/response schemas match across phases: API signatures consistent, error codes aligned, no contract drift","request/response schemas, API signatures, error codes","diff API type definitions across phases; check error code enum consistency","","1"
+id,title,description,scope,check_targets,deps,wave,status,findings,gaps_found,severity,error
+"integ-1","Interface & dependency chains","Verify shared interfaces are consistent across phases: re-exports match, dependency chains unbroken, no circular imports between phase outputs","cross-phase imports, shared types, re-exports","grep for shared type names across phase output dirs; verify export/import consistency","","1","pending","","","",""
+"integ-2","Data contracts & API consistency","Verify request/response schemas match across phases: API signatures consistent, error codes aligned, no contract drift","request/response schemas, API signatures, error codes","diff API type definitions across phases; check error code enum consistency","","1","pending","","","",""
 ```
 
 **Columns**:
@@ -44,13 +44,13 @@ id,title,description,scope,check_targets,deps,wave
 | `check_targets` | Input | Specific verification commands/grep patterns |
 | `deps` | Input | Dependencies (empty — all wave 1) |
 | `wave` | Computed | Wave number (always 1 — single parallel wave) |
-| `result_status` | Output | `pass` / `fail` / `warning` |
-| `findings` | Output | Detailed findings per dimension (max 500 chars) |
-| `gaps_found` | Output | Semicolon-separated list of integration gaps |
-| `severity` | Output | `critical` / `warning` / `info` per gap |
-| `error` | Output | Error message if check failed |
+| `status` | Lifecycle | `pending` (initial) → `pass`/`fail`/`warning`/`failed` (set by merge step from worker's `result_status`) |
+| `findings` | Lifecycle | Detailed findings per dimension (max 500 chars; merged) |
+| `gaps_found` | Lifecycle | Semicolon-separated list of integration gaps (merged) |
+| `severity` | Lifecycle | `critical` / `warning` / `info` per gap (merged) |
+| `error` | Lifecycle | Error message if check failed (merged) |
 
-**Column separation rule**: Input columns and Output columns MUST NOT share names. Wave CSV only contains Input columns. Output columns are returned exclusively via output_schema.
+**Column separation rule**: Wave CSV (input to `spawn_agents_on_csv`) contains Input columns only. Workers return Output columns exclusively via `output_schema` using `result_status` (NOT `status`). Merge maps `result_status` → master `status`.
 
 ### Session Structure
 
@@ -95,16 +95,67 @@ Verify all adhoc-scoped artifacts completed. For each execute artifact, verify a
 
 ```javascript
 spawn_agents_on_csv({
-  csv_path: `${sessionFolder}/wave-1.csv`,
+  csv_path: `${sessionFolder}/wave-1.csv`,     // rows where wave==1 AND status=="pending"
   id_column: "id",
-  instruction: `You are an integration checker for milestone ${milestone}. For each row, examine the scope and check_targets. Search the codebase for inconsistencies, contract drift, and broken dependencies across phase outputs. Report findings with file:line references. Set result_status to pass/fail/warning. List specific gaps in gaps_found (semicolon-separated).`,
-  max_concurrency: 2, max_runtime_seconds: 600,
+  instruction: AUDIT_INTEGRATION_INSTRUCTION,   // see "Integration Checker Worker Contract" below
+  max_concurrency: 2,
+  max_runtime_seconds: 600,
   output_csv_path: `${sessionFolder}/wave-1-results.csv`,
-  output_schema: { id, result_status: [pass|fail|warning], findings, gaps_found, severity, error }
+  output_schema: {
+    type: "object",
+    properties: {
+      id:            { type: "string" },
+      result_status: { type: "string", enum: ["pass", "fail", "warning", "failed"] },
+      findings:      { type: "string", maxLength: 500 },
+      gaps_found:    { type: "string", description: "Semicolon-separated list of gaps" },
+      severity:      { type: "string", enum: ["critical", "warning", "info", ""] },
+      error:         { type: "string" }
+    },
+    required: ["id", "result_status", "findings", "severity"]
+  }
 })
 ```
 
 4. Merge results into master `tasks.csv`: map `result_status` → master `status` column, copy `findings`, `gaps_found`, `severity`, `error`. Delete temporary files (`wave-1.csv`, `wave-1-results.csv`) after merge.
+
+#### Integration Checker Worker Contract (AUDIT_INTEGRATION_INSTRUCTION)
+
+```
+You are an integration checker for milestone {milestone}. ONE integration dimension row is assigned to you.
+
+INPUT (from your CSV row):
+  - id (integ-N), title, description, scope, check_targets
+
+REQUIRED STEPS:
+  1. Examine scope and check_targets fields
+  2. Run check_targets — grep / read phase output dirs / diff API definitions
+  3. Identify inconsistencies, contract drift, broken dependencies across phase outputs
+  4. Record findings with file:line references for every gap
+  5. Call report_agent_job_result EXACTLY ONCE
+
+TERMINATION CONTRACT (mandatory — NO worker may end without calling report_agent_job_result):
+  - Pass path  → no gaps found → result_status=pass, severity="info"
+  - Warning path → minor gaps → result_status=warning, severity="warning"
+  - Fail path → critical contract drift or broken dependencies → result_status=fail, severity="critical"
+  - Failure path → cannot read scope, tool error → result_status=failed with error message
+  - Timeout path → near 600s, finalize current findings → report with what was collected
+  - NEVER skip report_agent_job_result.
+
+OUTPUT (must match output_schema):
+  {
+    "id": "<your row id>",
+    "result_status": "pass" | "warning" | "fail" | "failed",
+    "findings": "<one-sentence summary, max 500 chars>",
+    "gaps_found": "<semicolon-separated list of gaps, each with file:line; empty if pass>",
+    "severity": "critical" | "warning" | "info" | "",
+    "error": "<message if failed, else empty>"
+  }
+
+CONSTRAINTS:
+  - Read-only inspection. Do NOT modify phase outputs.
+  - Do NOT write to tasks.csv, wave-*.csv, audit-report.md (orchestrator owns those).
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 5. Parse `gaps_found` from all workers — aggregate into `.workflow/milestones/{milestone}/audit-report.md`
 6. Any worker with `result_status == fail` and `severity == critical` → milestone verdict = FAIL
 

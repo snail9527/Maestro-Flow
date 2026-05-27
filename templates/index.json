@@ -13,7 +13,7 @@
   "goal": "{{GOAL}}",
   "success_criteria": [],
   "requirements": [],
-  "spec_ref": null,
+  "blueprint_ref": null,
 
   "session_id": null,
   "recommendation": null,

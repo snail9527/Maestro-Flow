@@ -18,6 +18,10 @@ Systematic security audit covering OWASP Top 10, dependency supply chain, secret
 CI/CD pipeline review, and optional STRIDE threat modeling. Three tiers control depth vs speed.
 </purpose>
 
+<required_reading>
+@~/.maestro/workflows/review.md
+</required_reading>
+
 <context>
 $ARGUMENTS — Parse tier and scope:
 - Tier: `quick` (default) | `standard` | `deep`
@@ -145,6 +149,26 @@ CONCERNS: {count} critical findings require immediate action
 NEXT: /quality-review
 --- END STATUS ---
 ```
+
+**Register artifact on completion** (so retrospective/harvest can trace this audit):
+```
+Append to state.json.artifacts[]:
+{
+  id: nextArtifactId(artifacts, "review"),  // RVW-NNN (security-audit reuses review type)
+  type: "review",
+  subtype: "security-audit",
+  milestone: current_milestone || null,
+  phase: target_phase || null,
+  scope: target_phase ? "phase" : "standalone",
+  path: "scratch/{YYYYMMDD}-security-audit-{tier}-{slug}",
+  status: critical_count == 0 ? "completed" : "completed_with_concerns",
+  tier: tier,                              // quick|standard|deep
+  harvested: false,
+  created_at: start_time,
+  completed_at: now()
+}
+```
+Write findings report to the same `path` (severity matrix, file:line refs, remediation).
 </execution>
 
 <success_criteria>

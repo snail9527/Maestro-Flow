@@ -443,8 +443,8 @@
       "error_card": "Specs",
       "error_desc": "Could not load spec directory",
       "empty_card": "Specifications",
-      "empty_desc": "No specifications found in .workflow/.spec/",
-      "empty_hint": "Run the spec-generate pipeline to create specifications.",
+      "empty_desc": "No specifications found in .workflow/blueprint/",
+      "empty_hint": "Run the maestro-blueprint pipeline to create specifications.",
       "created": "Created"
     },
     "linear": {

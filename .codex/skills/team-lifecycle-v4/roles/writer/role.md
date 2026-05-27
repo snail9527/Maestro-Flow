@@ -50,7 +50,7 @@ Template-driven document generation with progressive dependency loading.
 
 ### Inputs
 - Template from routing table
-- spec-config.json from <session>/spec/
+- blueprint-config.json from <session>/spec/
 - discovery-context.json from <session>/spec/
 - Prior decisions from context_accumulator (inner loop)
 - Discussion feedback from <session>/discussions/ (if exists)

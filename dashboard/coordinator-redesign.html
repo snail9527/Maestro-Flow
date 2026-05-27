@@ -387,7 +387,7 @@
             <div class="tl-dot-outer" style="background:var(--tint-green);"><div class="tl-dot" style="background:var(--green);"></div></div>
             <div style="flex:1;">
               <div class="tl-text" style="font-weight:600;">maestro-spec-generate</div>
-              <div class="tl-sub">--from-brainstorm</div>
+              <div class="tl-sub">--from &lt;source&gt;</div>
               <div style="display:flex;align-items:center;gap:8px;margin-top:3px;">
                 <span class="tl-time">3m 24s</span>
                 <span class="tag" style="background:var(--tint-green);color:var(--green);">85</span>
@@ -533,7 +533,7 @@
     { cmd: 'maestro-init', args: '--auto', status: 'completed', quality: 92, duration: '12s',
       summary: 'Project initialized with auto-detected state. Created project.md, state.json, config.json, and specs/ directory structure.',
       analysis: 'Detected existing codebase with package.json (Node.js/TypeScript).\nAuto-configured:\n  - Project type: web-api\n  - Language: TypeScript (strict)\n  - Framework: Express.js\n  - Test runner: vitest\n  - Package manager: npm' },
-    { cmd: 'maestro-spec-generate', args: '--from-brainstorm', status: 'completed', quality: 85, duration: '3m 24s',
+    { cmd: 'maestro-spec-generate', args: '--from brainstorm:ID', status: 'completed', quality: 85, duration: '3m 24s',
       summary: 'Generated 6 specification documents from brainstorm artifacts. Product brief, PRD, architecture doc, component specs, API specs, and data model.',
       analysis: 'Spec Generation Pipeline:\n  Phase 1: Product Brief .............. done (12s)\n  Phase 2: PRD ....................... done (28s)\n  Phase 3: Architecture .............. done (45s)\n  Phase 4: Component Specs ........... done (32s)\n  Phase 5: API Specs ................. done (24s)\n  Phase 6: Data Model ................ done (18s)\n  Phase 7: Epic → Roadmap ............ done (45s)\n\nRoadmap created with 3 phases, 8 epics, 24 stories.' },
     { cmd: 'maestro-plan', args: '--phase 1', status: 'running', quality: null, duration: '1m 45s...',

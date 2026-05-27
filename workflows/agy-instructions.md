@@ -108,6 +108,8 @@ For point-to-point delivery, use `send_message` directly.
 
 ### Search — Query Before Acting
 
+**Before planning or implementing any task, search wiki and spec first** — the knowledge base contains reusable methods, tools, and hard-won experience. Load the right knowledge at the right time: search before you plan, load relevant entries before you implement, and revisit when you hit unfamiliar territory mid-task.
+
 When tackling unfamiliar domains or cross-cutting concerns, search existing knowledge first:
 - `maestro spec load --category <cat>` — load rules by category (coding/arch/debug/test/review/learning)
 - `maestro spec load --keyword <kw>` — cross-category keyword match

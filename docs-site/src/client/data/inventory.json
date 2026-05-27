@@ -64,7 +64,7 @@
       "file": ".claude/commands/maestro-init.md",
       "category": "maestro",
       "description": "Initialize project with auto state detection (empty/code/existing) — creates .workflow/ directory structure",
-      "argumentHint": "[--auto] [--from-brainstorm SESSION-ID]",
+      "argumentHint": "[--auto] [--from <source>]",
       "allowedTools": ["Read", "Write", "Bash", "Glob", "Grep", "Agent", "AskUserQuestion"]
     },
     {
@@ -111,8 +111,8 @@
       "name": "maestro-analyze",
       "file": ".claude/commands/maestro-analyze.md",
       "category": "maestro",
-      "description": "Multi-dimensional analysis with CLI exploration, decision extraction, and intent tracking",
-      "argumentHint": "[phase|topic] [-y] [-c] [-q] [--gaps [ISS-ID]]",
+      "description": "Dual-layer analysis: macro (text) for requirement exploration with scope_verdict, micro (number) for phase-level 6-dimension deep analysis",
+      "argumentHint": "[phase|topic] [-y] [-c] [-q] [--gaps [ISS-ID]] [--from <source>]",
       "allowedTools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent", "AskUserQuestion"]
     },
     {
@@ -127,8 +127,8 @@
       "name": "maestro-roadmap",
       "file": ".claude/commands/maestro-roadmap.md",
       "category": "maestro",
-      "description": "Interactive roadmap creation with iterative refinement — lightweight alternative to spec-generate",
-      "argumentHint": "<requirement> [-y] [-c] [-m progressive|direct|auto] [--from-brainstorm SESSION-ID] [--revise [instructions]] [--review]",
+      "description": "Interactive roadmap creation with iterative refinement",
+      "argumentHint": "<requirement> [-y] [-c] [-m progressive|direct|auto] [--from <source>] [--revise [instructions]] [--review]",
       "allowedTools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent", "AskUserQuestion"]
     },
     {

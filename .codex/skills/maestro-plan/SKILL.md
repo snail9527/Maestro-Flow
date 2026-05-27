@@ -1,7 +1,7 @@
 ---
 name: maestro-plan
 description: Use when creating, revising, or verifying an execution plan for a phase or task
-argument-hint: "[-y|--yes] [-c|--concurrency N] [--continue] \"<phase> [--dir <path>] [--gaps] [--spec SPEC-xxx] [--collab]\""
+argument-hint: "[-y|--yes] [-c|--concurrency N] [--continue] \"<phase> [--dir <path>] [--from <source>] [--gaps] [--spec SPEC-xxx] [--collab]\""
 allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
@@ -65,14 +65,30 @@ All mean: **follow the cycle anyway**.
 <context>
 $ARGUMENTS — phase number/text and optional flags.
 
-**Flags**: `-y` (auto), `-c N` (concurrency, default 4), `--continue` (resume), `--dir <path>`, `--gaps` (issue-linked), `--spec SPEC-xxx`, `--collab`, `--revise`, `--check`, `--tdd` (RED-GREEN-REFACTOR task chains)
+**Flags**: `-y` (auto), `-c N` (concurrency, default 4), `--continue` (resume), `--dir <path>`, `--from <source>` (load upstream context directly: analyze:ANL-xxx, blueprint:BLP-xxx, brainstorm:ID, @file, path), `--gaps` (issue-linked), `--spec SPEC-xxx`, `--collab`, `--revise`, `--check`, `--tdd` (RED-GREEN-REFACTOR task chains)
 
-**Scope routing** (priority): --dir → from parent artifact; no args → milestone; digit → phase; text → adhoc/standalone.
+**Scope routing** (priority, per redesign §5.2):
+1. `--from analyze:ANL-xxx` → CONTEXT_DIR = ANL artifact path; scope=`standalone`
+2. `--from blueprint:BLP-xxx` → CONTEXT_DIR = BLP path; scope=`standalone`
+3. `--dir <path>` → CONTEXT_DIR = path; scope=`standalone`
+4. Numeric arg + roadmap → scope=`phase`; D-007 reverse-lookup milestone via `state.json.milestones[].phase_slugs`
+5. No args + roadmap → scope=`milestone` (plans all pending phases in current milestone)
+6. No args + no roadmap → search `state.json.artifacts[]` for latest `type=="analyze"` (DESC by created_at). Found → scope=`standalone`, CONTEXT_DIR = artifact.path. None → ERROR E001.
+7. Text arg + no upstream → scope=`adhoc/standalone`
+
+**D-007 milestone reverse lookup** (numeric scope only):
+```
+resolve_milestone(phase_number):
+  for ms in state.json.milestones[]:
+    if str(phase_number) in ms.phase_slugs: return ms.id
+  return state.json.current_milestone   # fallback
+```
+Write resolved milestone into PLN artifact registration and `plan.json.milestone`; NEVER read `current_milestone` directly for phase-scoped runs.
 
 **Session**: `.workflow/.csv-wave/{YYYYMMDD}-plan-P{N}-{slug}/`
 **Scratch**: `.workflow/scratch/{YYYYMMDD}-plan-P{N}-{slug}/` (.task/ subdir)
 
-**Pre-load** (optional): context.md (prior analyze), conclusions.json, codebase ARCHITECTURE.md, `maestro wiki search`, `maestro spec load --category arch`, team preflight `maestro collab preflight`.
+**Pre-load** (optional): context-package.json (via `--from`, takes precedence), context.md (prior analyze), conclusions.json, codebase ARCHITECTURE.md, `maestro wiki search`, `maestro spec load --category arch`, team preflight `maestro collab preflight`.
 </context>
 
 <csv_schema>
@@ -110,14 +126,15 @@ S_REGISTER    — 注册 PLN artifact、更新 index.json           PERSIST: sta
 
 <transitions>
 S_PARSE → S_RESUME     WHEN: --continue
-S_PARSE → S_CONTEXT    WHEN: phase/dir resolved
-S_PARSE → ERROR        WHEN: no args and no roadmap
+S_PARSE → S_CONTEXT    WHEN: phase/dir/--from resolved (D-007 reverse lookup for numeric)
+S_PARSE → S_CONTEXT    WHEN: no args + no roadmap AND latest analyze artifact found in state.json (scope=standalone)
+S_PARSE → ERROR        WHEN: no args + no roadmap + no analyze artifact
 
 S_RESUME → S_WAVE_1    WHEN: W1 incomplete    DO: load session, resume
 S_RESUME → S_WAVE_2    WHEN: W1 done, W2 pending
 S_RESUME → S_CHECK     WHEN: W2 done, check pending
 
-S_CONTEXT → S_CSV_GEN  DO: load context.md, conclusions.json, specs, wiki, codebase docs
+S_CONTEXT → S_CSV_GEN  DO: if --from: resolve context-package.json (precedence over context.md); load context.md, conclusions.json, specs, wiki, codebase docs
 
 S_CSV_GEN → S_WAVE_1   DO: pre-flight (`maestro collab preflight --phase N`; exit 1 → warn + ask), determine exploration angles, generate tasks.csv, user validates (skip -y)
 
@@ -137,14 +154,49 @@ S_REGISTER → END       DO: A_REGISTER
 
 <actions>
 
+### Shared Spawn Contract (W1 and W2)
+
+Every `spawn_agents_on_csv` call MUST filter `wave==N AND status=="pending"` rows from master tasks.csv, use the strict JSON Schema below, and embed the termination contract.
+
+**Output Schema**:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":            { "type": "string" },
+    "result_status": { "type": "string", "enum": ["completed", "failed", "blocked"] },
+    "findings":      { "type": "string", "maxLength": 500 },
+    "files_modified":{ "type": "string", "description": "Semicolon-separated paths (W2 writes plan.json + .task/*)" },
+    "error":         { "type": "string" }
+  },
+  "required": ["id", "result_status", "findings"]
+}
+```
+
+Merge: `result_status` → master `status`; copy `findings`, `files_modified`, `error`.
+
+**Termination contract** (embed in every instruction):
+```
+You MUST call report_agent_job_result EXACTLY ONCE before exiting.
+- Success → result_status=completed (W2: plan.json AND .task/* MUST exist on disk before reporting completed)
+- Failure → result_status=failed with error message
+- Blocked → upstream context insufficient → result_status=blocked
+- Timeout → near max_runtime_seconds → result_status=blocked, error="timeout"
+- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+Do NOT write to tasks.csv, wave-*.csv, results.csv, state.json. Do NOT call spawn_agents_on_csv (no recursion).
+```
+
 ### Exploration agent responsibilities (W1)
-Each explores one angle: architecture (module boundaries, deps), patterns (similar implementations), tests (framework, conventions), risks (complexity, blockers). Reads files, maps dependencies, shares via discoveries.ndjson.
+Each explores one angle: architecture (module boundaries, deps), patterns (similar implementations), tests (framework, conventions), risks (complexity, blockers). Reads files, maps dependencies, shares via discoveries.ndjson. Read-only — does NOT write plan.json.
 
 ### Planning agent responsibilities (W2)
 Consumes all exploration findings + context.md + specs. Produces:
 - `plan.json`: summary, approach, task_ids, waves (with phase labels), confidence section
 - `.task/TASK-*.json`: each with read_first[], convergence.criteria[] (grep-verifiable), concrete action/implementation
 - Deep Work Rules: every task has read_first with file being modified + source of truth files
+
+Verifies plan.json and every .task/*.json exists on disk before reporting completed; else report blocked.
 
 ### A_PLAN_CHECK
 Run plan-checker: coverage, dependency validity, criteria quality, pressure pass on highest-complexity task.
@@ -173,7 +225,7 @@ Collision detection against same-milestone plans.
 <error_codes>
 | Condition | Recovery |
 |-----------|----------|
-| No args and no roadmap | Provide phase number or topic |
+| No args and no roadmap and no analyze artifact in state.json | Provide phase number, topic, or run analyze first |
 | --gaps but no gap source | Run maestro-verify first |
 | Planning agent fails | Retry once with simplified context |
 | Plan-checker exceeds 3 rounds | Accept with warnings |
@@ -190,6 +242,7 @@ Collision detection against same-milestone plans.
 - [ ] Pressure pass completed on highest-complexity task
 - [ ] Collision detection against same-milestone plans (non-blocking)
 - [ ] Plan-checker passed (or minor issues acknowledged, max 3 iterations)
-- [ ] PLN artifact registered in state.json
+- [ ] PLN artifact registered in state.json (numeric scope: milestone resolved via D-007 `phase_slugs` reverse lookup, NOT direct `current_milestone` read)
+- [ ] No-args fallback honored: latest analyze artifact auto-discovered when roadmap absent (§5.2 priority 6)
 - [ ] If --gaps: issues linked bidirectionally (task_refs[], task_plan_dir in issues.jsonl)
 </success_criteria>

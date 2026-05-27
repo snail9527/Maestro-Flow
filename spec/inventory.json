@@ -42,7 +42,7 @@
       "name": "maestro-init",
       "description": "Initialize project with auto state detection (empty/code/existing)",
       "category": "maestro",
-      "parameters": "[--auto] [--from-brainstorm SESSION-ID]"
+      "parameters": "[--auto] [--from <source>]"
     },
     {
       "name": "maestro-plan",
@@ -81,10 +81,10 @@
       "parameters": "[description] [--full] [--discuss]"
     },
     {
-      "name": "maestro-spec-generate",
-      "description": "Generate specification package from idea/requirements through 7-phase document chain",
+      "name": "maestro-blueprint",
+      "description": "Generate formal specification package (Product Brief, PRD, Architecture, Epics) through 6-phase document chain",
       "category": "maestro",
-      "parameters": "<idea or @file> [-y] [-c] [--count N]"
+      "parameters": "<idea or @file> [-y] [-c] [--from <source>]"
     },
     {
       "name": "maestro-phase-add",
@@ -100,9 +100,9 @@
     },
     {
       "name": "maestro-roadmap",
-      "description": "Interactive roadmap creation with iterative refinement — lightweight alternative to spec-generate",
+      "description": "Generate milestone/phase roadmap from requirements or upstream context",
       "category": "maestro",
-      "parameters": "<requirement> [-y] [-c] [-m progressive|direct|auto] [--from-brainstorm SESSION-ID]"
+      "parameters": "<requirement> [-y] [-c] [-m progressive|direct|auto] [--from <source>]"
     },
     {
       "name": "maestro-milestone-complete",

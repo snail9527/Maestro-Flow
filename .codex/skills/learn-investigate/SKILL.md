@@ -29,7 +29,7 @@ $ARGUMENTS — question text and optional flags.
 ### Stage 1: Frame the Question
 - Parse question, generate slug, create investigation directory
 - Load debug specs: `maestro spec load --category debug` for known issues and patterns
-- Search prior knowledge: `maestro wiki list --category debug`, wiki search, grep specs/learnings.md
+- Search prior knowledge: `maestro wiki list --category debug`, wiki search, grep .workflow/specs/learnings.md
 - Write initial `understanding.md`
 
 ### Stage 2: Evidence Collection
@@ -55,7 +55,7 @@ If all hypotheses fail: broaden scope, search wiki with alt keywords, or mark IN
 
 ### Stage 5: Synthesize + Persist
 1. Write `report.md` with answer, evidence trail, hypothesis results
-2. Append to `specs/learnings.md`:
+2. Append to `.workflow/specs/learnings.md`:
    - Confirmed → category: "technique" / "pattern"
    - Disproved → category: "gotcha"
 3. Display summary with next-step routing
@@ -79,6 +79,6 @@ If all hypotheses fail: broaden scope, search wiki with alt keywords, or mark IN
 - [ ] At least 1 hypothesis formed and tested
 - [ ] understanding.md tracks evolving understanding
 - [ ] report.md written with answer and evidence trail
-- [ ] Findings appended to specs/learnings.md with stable INS-ids
+- [ ] Findings appended to .workflow/specs/learnings.md with stable INS-ids
 - [ ] 3-strike escalation triggered if all hypotheses fail
 </success_criteria>

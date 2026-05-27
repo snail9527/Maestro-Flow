@@ -169,23 +169,73 @@ For each wave N in ascending order:
 
 ```javascript
 spawn_agents_on_csv({
-  csv_path: `${sessionFolder}/wave-${N}.csv`,
+  csv_path: `${sessionFolder}/wave-${N}.csv`,    // only rows where wave==N AND status=="pending"
   id_column: "id",
-  instruction: `You are a refactoring executor. For each task:
-1. Read files listed in read_first to understand context
-2. Apply refactoring described in description targeting scope files
-3. Verify convergence_criteria via grep (all criteria must pass)
-4. Run verification_cmd and report test result
-5. If tests fail: revert ALL changes for this task, set result_status=failed
-6. Append discoveries to ${sessionFolder}/discoveries.ndjson
-Report: files_modified (semicolon-separated), tests_passed (true/false), findings (what was changed and why)`,
-  max_concurrency: 1, max_runtime_seconds: 1800,
+  instruction: REFACTOR_INSTRUCTION,              // see "Refactor Worker Contract" below
+  max_concurrency: 1,
+  max_runtime_seconds: 1800,
   output_csv_path: `${sessionFolder}/wave-${N}-results.csv`,
-  output_schema: { id, result_status: [completed|failed|blocked], findings, files_modified, tests_passed, error }
+  output_schema: {
+    type: "object",
+    properties: {
+      id:             { type: "string" },
+      result_status:  { type: "string", enum: ["completed", "failed", "blocked"] },
+      findings:       { type: "string", maxLength: 500 },
+      files_modified: { type: "string", description: "Semicolon-separated paths (empty if reverted)" },
+      tests_passed:   { type: "string", enum: ["true", "false"] },
+      error:          { type: "string" }
+    },
+    required: ["id", "result_status", "findings", "tests_passed"]
+  }
 })
 ```
 
 4. Merge results into master `tasks.csv`: map `result_status` -> master `status` column, copy `findings`, `files_modified`, `tests_passed`, `error` into master. Delete temporary `wave-{N}.csv` and `wave-{N}-results.csv`.
+
+#### Refactor Worker Contract (REFACTOR_INSTRUCTION)
+
+```
+You are a refactoring executor. ONE task row is assigned to you.
+
+INPUT (from your CSV row):
+  - id, title, description (refactoring plan)
+  - read_first (semicolon-separated paths to read for context)
+  - scope (files in refactor scope)
+  - convergence_criteria (grep patterns that must pass after refactor)
+  - verification_cmd (test command to run)
+  - prev_context (findings from upstream tasks)
+
+REQUIRED STEPS:
+  1. Read all files in read_first to understand context
+  2. Apply refactoring per description, modifying only files in scope
+  3. Verify EVERY convergence_criterion via grep (ALL must pass; ANY miss → failure)
+  4. Run verification_cmd via Bash; capture pass/fail
+  5. If tests fail OR convergence fails → revert ALL changes for this task using git (or Edit reverse), set files_modified=""
+  6. Append discoveries (type=implementation_note / pattern) to {sessionFolder}/discoveries.ndjson
+  7. Call report_agent_job_result EXACTLY ONCE
+
+TERMINATION CONTRACT (mandatory — NO worker may end without calling report_agent_job_result):
+  - Success path → tests pass AND convergence passes → result_status=completed, tests_passed="true"
+  - Failed path → tests fail OR convergence fails → REVERT, result_status=failed, tests_passed="false"
+  - Blocked path → cannot apply (file missing, parse error, unclear scope) → result_status=blocked
+  - Timeout path → approaching max_runtime_seconds → REVERT partial changes, result_status=failed with error="timeout"
+  - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
+OUTPUT (return via report_agent_job_result; must match output_schema):
+  {
+    "id": "<your row id>",
+    "result_status": "completed" | "failed" | "blocked",
+    "findings": "<what was changed and why, max 500 chars>",
+    "files_modified": "<semicolon-separated paths or empty if reverted>",
+    "tests_passed": "true" | "false",
+    "error": "<message if not completed, else empty>"
+  }
+
+CONSTRAINTS:
+  - Modify ONLY files in scope. Never drive-by edit unrelated files.
+  - Do NOT write to tasks.csv, wave-*.csv, results.csv, reflection-log.md (orchestrator owns those).
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 **5b. Reflect per wave:**
 
@@ -223,9 +273,9 @@ Display report: scope, tasks completed/blocked, reflection rounds, strategy adju
 | Result | Next Step |
 |--------|-----------|
 | All tests pass, refactoring complete | `$quality-sync` (update codebase docs) |
-| Test failures remain after refactor | `$quality-debug "{scope}"` |
+| Test failures remain after refactor | `$quality-debug "test failures in {scope} after refactor"` (debug expects bug description, not raw scope) |
 | No test suite available for scope | `$quality-auto-test "{phase}"` |
-| Partial completion (some blocked) | `$quality-debug "{scope}"` for blocked tasks |
+| Partial completion (some blocked) | `$quality-debug "blocked refactor tasks in {scope}: <task titles>"` |
 </execution>
 
 <error_codes>

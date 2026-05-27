@@ -141,6 +141,28 @@ For each layer L1->L3 (sequential, respecting --layer filter):
 6. Record per-scenario pass/fail
 7. Fail-fast: any critical-priority failed -> stop layer progression
 
+**Test Writer Spawn output_schema** (strict JSON Schema, used for both writer + diagnosis spawns):
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":             { "type": "string" },
+    "result_status":  { "type": "string", "enum": ["completed", "failed", "blocked"] },
+    "red_result":     { "type": "string", "enum": ["expected_fail", "pass", "unexpected_fail", ""] },
+    "classification": { "type": "string", "enum": ["test_defect", "code_defect", "env_issue", ""] },
+    "fix_code":       { "type": "string" },
+    "evidence":       { "type": "string" },
+    "findings":       { "type": "string", "maxLength": 500 },
+    "files_modified": { "type": "string" },
+    "error":          { "type": "string" }
+  },
+  "required": ["id", "result_status", "findings"]
+}
+```
+
+Merge: `result_status` → master `status`; copy `red_result` / `classification` / `fix_code` / `evidence` / `findings` / `files_modified` / `error`.
+
 **Test Writer Agent Instruction** (injected into spawn_agents_on_csv):
 ```
 You are a test writer. Write ONE test file for the given scenario.
@@ -154,16 +176,33 @@ You are a test writer. Write ONE test file for the given scenario.
 - Run test file once after writing
 
 ## RED-GREEN Rules
-- Test PASSES immediately: note "pass" — may need strengthening
-- Test FAILS as expected (tests real behavior): note "expected_fail" — good
-- Test FAILS unexpectedly (setup/import error): fix test setup, note "unexpected_fail"
+- Test PASSES immediately: red_result="pass" — may need strengthening
+- Test FAILS as expected (tests real behavior): red_result="expected_fail" — good
+- Test FAILS unexpectedly (setup/import error): fix test setup, red_result="unexpected_fail"
 - NEVER modify source code — only write/fix test files
 
-## Output
-- status: "written" if created, "failed" if unable
-- red_result: the RED phase outcome
-- findings: patterns discovered, notes for dependent scenarios (max 500 chars)
-- error: only if status == "failed"
+## Termination Contract (MANDATORY)
+You MUST call report_agent_job_result EXACTLY ONCE before exiting.
+- Success → result_status=completed (test file written + run executed; red_result populated)
+- Failure → result_status=failed (cannot write test file, parse error, missing target)
+- Blocked → result_status=blocked (test framework unavailable)
+- Timeout → near max_runtime_seconds → result_status=failed with error="timeout"
+- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
+## Output (must match output_schema)
+{
+  "id": "<row id>",
+  "result_status": "completed" | "failed" | "blocked",
+  "red_result": "expected_fail" | "pass" | "unexpected_fail" | "",
+  "findings": "<patterns discovered, notes for dependent scenarios, max 500 chars>",
+  "files_modified": "<test file path>",
+  "error": "<message if not completed, else empty>"
+}
+
+## Hard Constraints
+- Do NOT modify source code under test (only test files).
+- Do NOT write to scenarios.csv, layer-L*.csv, results.csv (orchestrator owns those).
+- Do NOT call spawn_agents_on_csv (no recursion).
 
 ## Context
 - prev_context: {prev_context} (findings from prior layer)
@@ -181,7 +220,7 @@ OUTER LOOP (max_iter iterations):
       3. Diagnosis agent (see instruction below). test_defect -> provide fix. code_defect -> document evidence.
       4. Apply test_defect fixes, re-run layer
 
-**Diagnosis Agent Instruction** (injected into spawn_agents_on_csv):
+**Diagnosis Agent Instruction** (injected into spawn_agents_on_csv; uses same output_schema as Test Writer):
 ```
 You are a test failure diagnostician. Classify ONE test failure.
 
@@ -193,16 +232,31 @@ You are a test failure diagnostician. Classify ONE test failure.
   - code_defect: Source violates business rule (actual != expected requirement)
   - env_issue: Environment problem (service down, config missing, timeout)
 
-## Output
-- classification: test_defect / code_defect / env_issue
-- fix_code: If test_defect: "old_line → new_line" or full replacement. Empty for others.
-- evidence: file:line references supporting classification
-- error: only if cannot determine
+## Termination Contract (MANDATORY)
+You MUST call report_agent_job_result EXACTLY ONCE before exiting.
+- Success → result_status=completed with concrete classification
+- Failure → result_status=failed if you cannot read test_file or target_file
+- Blocked → result_status=blocked when env_issue prevents diagnosis
+- Timeout → near max_runtime_seconds → result_status=failed with error="timeout"
+- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
 
-## Rules
+## Output (must match output_schema)
+{
+  "id": "<row id>",
+  "result_status": "completed" | "failed" | "blocked",
+  "classification": "test_defect" | "code_defect" | "env_issue",
+  "fix_code": "<old_line → new_line or full replacement (test_defect only); empty otherwise>",
+  "evidence": "<file:line refs supporting classification>",
+  "findings": "<one-sentence diagnosis summary, max 500 chars>",
+  "error": "<message if not completed>"
+}
+
+## Hard Constraints
 - NEVER suggest source code changes — only test fixes for test_defect
 - Test correctly catching a real bug = code_defect, not test_defect
 - When uncertain: prefer code_defect (conservative)
+- Do NOT write to scenarios.csv, layer-L*.csv, results.csv (orchestrator owns those).
+- Do NOT call spawn_agents_on_csv (no recursion).
 ```
       5. If no test_defects remain: break inner
   REFLECT: analyze trends, log strategy, test confidence scoring (5 dims: scenario_coverage, test_quality, diagnostic_accuracy, strategy_effectiveness, infrastructure_fitness)

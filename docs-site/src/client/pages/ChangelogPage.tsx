@@ -17,6 +17,95 @@ interface ChangelogEntry {
 
 const changelog: ChangelogEntry[] = [
   {
+    version: '0.4.19',
+    date: '2026-05',
+    changes: [
+      { type: 'feat', text_en: 'skills: new team-swarm — ACO-driven swarm intelligence with pheromone optimizer (4 roles + Python controller + 5 specs)', text_zh: 'skills: 新增 team-swarm 蚁群智能技能 — ACO 驱动 + 信息素优化器（4 角色 + Python 控制器 + 5 份 spec）' },
+      { type: 'feat', text_en: 'install: TUI supports Agy (Antigravity) hooks configuration alongside Claude/Codex', text_zh: 'install: 安装器 TUI 支持 Agy (Antigravity) hooks 配置，与 Claude/Codex hooks 独立' },
+      { type: 'refactor', text_en: 'install: load manifest defaults by scope+target via findManifest, avoiding cross-scope contamination', text_zh: 'install: 改用 findManifest 按 scope+target 加载 manifest 默认值，避免跨 scope 污染' },
+      { type: 'refactor', text_en: 'install: hookLevel default reads hooks.claude.level only — drops unreliable legacy top-level field', text_zh: 'install: hookLevel 默认源仅读 hooks.claude.level，去除不可靠的 legacy 顶层字段' },
+      { type: 'chore', text_en: 'maestro-next: rewrite command body to align with new skill topology', text_zh: 'maestro-next: 重写命令体以贴合新技能拓扑' },
+    ],
+  },
+  {
+    version: '0.4.18',
+    date: '2026-05',
+    changes: [
+      { type: 'feat', text_en: 'wiki: unified knowledge retrieval — codebase/session virtual nodes + finish-work workflow', text_zh: 'wiki: 统一知识检索 — codebase/session 虚拟节点 + finish-work 工作流' },
+      { type: 'feat', text_en: 'commands: new maestro-next single-chain recommendation command', text_zh: 'commands: 新增 maestro-next 单链推荐命令' },
+      { type: 'fix', text_en: 'ralph: CLI recognizes both maestro-* and ralph-* sessions', text_zh: 'ralph: CLI 识别 maestro-* 与 ralph-* 两类 session' },
+      { type: 'refactor', text_en: 'codex/skills: unified spawn_agents_on_csv contract — mandatory worker termination + strict output_schema', text_zh: 'codex/skills: 统一 spawn_agents_on_csv 契约 — 强制 worker 终止 + 严格 output_schema' },
+      { type: 'docs', text_en: 'changelog and announcement banner updated for v0.4.17', text_zh: '更新 v0.4.17 changelog 与公告栏' },
+    ],
+  },
+  {
+    version: '0.4.17',
+    date: '2026-05',
+    changes: [
+      { type: 'feat', text_en: 'ralph: dual-platform (claude/codex) skill discovery with --platform filter; merged loop-runner maestro-ralph-beta endpoint', text_zh: 'ralph: 双平台 (claude/codex) skill 识别 + --platform 过滤；合并版 maestro-ralph-beta 端点' },
+      { type: 'feat', text_en: 'ralph: codex maestro-ralph / maestro-ralph-execute synced to latest claude version, using $skill direct-invoke style', text_zh: 'ralph: codex maestro-ralph / maestro-ralph-execute 同步最新 claude 版本，采用 $skill 直调形式' },
+      { type: 'feat', text_en: 'ralph: ralph next now injects skill config defaults', text_zh: 'ralph: ralph next 注入 skill config defaults' },
+      { type: 'fix', text_en: 'install: fixed codex MCP duplicate key — improved duplicate block detection', text_zh: 'install: 修复 codex MCP 重复 key — 改进重复块识别' },
+      { type: 'refactor', text_en: 'config: aligned .workflow/config.json schema', text_zh: 'config: 对齐 .workflow/config.json schema' },
+    ],
+  },
+  {
+    version: '0.4.16',
+    date: '2026-05',
+    changes: [
+      { type: 'feat', text_en: 'ralph: new maestro ralph CLI sub-commands (session/skills/next/check/complete) with scripted step loading', text_zh: 'ralph: 新增 maestro ralph CLI 子命令族（session/skills/next/check/complete）+ step 加载脚本化' },
+      { type: 'feat', text_en: 'knowledge-audit: new manage-knowledge-audit command as symmetric eviction entry for spec / wiki / knowhow tri-store', text_zh: 'knowledge-audit: 新增 manage-knowledge-audit 命令 — spec / wiki / knowhow 三存储淘汰对称入口' },
+      { type: 'fix', text_en: 'ralph: path expansion fix and emit format redesign', text_zh: 'ralph: 路径展开 + emit 格式重设计' },
+      { type: 'fix', text_en: 'statusline: simplified line 2 chain rendering with 48h expiry and legacy schema compat', text_zh: 'statusline: 简化 line 2 链式渲染 + 48h 过期 + 兼容旧 schema' },
+      { type: 'fix', text_en: 'install: manifest now records hook level; TUI defaults restored from last install', text_zh: 'install: manifest 记录 hook level + TUI 默认值从上次安装恢复' },
+      { type: 'docs', text_en: 'maestro / ralph-execute description trimmed: A_EXEC_STEP reduced to pure directives, aligned with new emit format', text_zh: 'maestro / ralph-execute 描述精简：A_EXEC_STEP 改为纯指令、对齐新 emit 格式' },
+    ],
+  },
+  {
+    version: '0.4.15',
+    date: '2026-05',
+    changes: [
+      { type: 'fix', text_en: 'install: fix statusline being installed when unchecked; manifest v2 now tracks hooks/statusline/MCP entries for precise uninstall', text_zh: 'install: 修复 statusline 未勾选仍被安装；manifest v2 统一跟踪 hooks/statusline/MCP 全量条目实现精确卸载' },
+      { type: 'fix', text_en: 'uninstall: hooks removal upgraded from marker-scan to name-based precise deletion (claude/codex/agy); third-party MCP targets (Cursor/Qoder/etc.) now support precise uninstall', text_zh: '卸载: hooks 卸载由全扫 marker 升级为按名精确删除（claude/codex/agy）；第三方 MCP 目标（Cursor/Qoder 等）支持精确卸载' },
+      { type: 'refactor', text_en: 'maestro: -y flag only propagated when user explicitly specifies; Goal Prompt no longer blocks, user can input /goal anytime during execution', text_zh: 'maestro: -y 仅在用户显式指定时透传；Goal Prompt 输出后不再 STOP，可在执行中随时输入 /goal' },
+      { type: 'refactor', text_en: 'maestro: streamlined command parameters and node type descriptions, unified execution step handling', text_zh: 'maestro: 精简命令参数和节点类型描述，统一执行步骤处理' },
+    ],
+  },
+  {
+    version: '0.4.14',
+    date: '2026-05',
+    changes: [
+      { type: 'fix', text_en: 'ralph: internal step loading now honors required_reading / deferred_reading contract', text_zh: 'ralph: 内部 step 加载时遵循 required_reading / deferred_reading 契约' },
+      { type: 'refactor', text_en: 'maestro-ralph: clarified goal prompt handling in session creation and decision evaluation', text_zh: 'maestro-ralph: 更新文档以明确会话创建和决策评估中的目标提示处理' },
+      { type: 'refactor', text_en: 'ralph: streamlined Goal Prompt and recalibrated execution entry to ralph-execute', text_zh: 'ralph: 精简 Goal Prompt + 校准推进入口为 ralph-execute' },
+      { type: 'refactor', text_en: 'Unified scratch session directory naming to {YYYYMMDD}-{type}-{slug}/', text_zh: '统一 scratch session 目录命名为 {YYYYMMDD}-{type}-{slug}/' },
+    ],
+  },
+  {
+    version: '0.4.13',
+    date: '2026-05',
+    changes: [
+      { type: 'feat', text_en: 'Added knowledge management system docs, defining the relationship between constraints and accumulation', text_zh: '添加知识沉淀管理系统文档，定义约束与积累的关系' },
+      { type: 'feat', text_en: 'Unified Mac-terminal code blocks on guide pages with bilingual support', text_zh: 'guide 页面统一 Mac-terminal 代码框，完善中英文双语支持' },
+      { type: 'fix', text_en: 'Fixed logic issues and contract conflicts in commands/skills/workflows', text_zh: '修复 commands/skills/workflows 逻辑问题与契约矛盾' },
+      { type: 'fix', text_en: 'Fixed parallel agent persistence issue and contract conflicts in brainstorm', text_zh: '修复 brainstorm 并行 agent 不落盘问题与契约冲突' },
+      { type: 'fix', text_en: 'Notification bar links now use React Router Link, fixed basename prefix', text_zh: '通知栏链接改用 React Router Link，修复 basename 前缀缺失' },
+      { type: 'refactor', text_en: 'Updated interview protocol with enhanced user control and decision write-back', text_zh: '更新访谈协议，增强用户控制与决策写回机制' },
+    ],
+  },
+  {
+    version: '0.4.12',
+    date: '2026-05',
+    changes: [
+      { type: 'feat', text_en: 'Workflow topology refactor — blueprint as standalone command, Milestone hierarchy, dual-layer analyze, global .spec→blueprint migration', text_zh: '工作流拓扑重构 — blueprint 独立命令、Milestone 层级重排、双层 analyze、全局 .spec→blueprint 迁移' },
+      { type: 'feat', text_en: 'New maestro-amend skill for generating workflow command overlays', text_zh: '新增 maestro-amend skill：生成工作流命令 overlay' },
+      { type: 'feat', text_en: 'Unified context-package system with harvest --prune for state.json management', text_zh: '统一 context-package 体系，新增 harvest --prune 支持 state.json 管理' },
+      { type: 'feat', text_en: 'analyze/brainstorm/roadmap commands now include interview_protocol block', text_zh: 'analyze/brainstorm/roadmap 三命令新增 interview_protocol 块' },
+      { type: 'fix', text_en: 'Unified spec seed templates as single source of truth with YAML frontmatter', text_zh: '统一 seed 模板单一来源，保证 spec 文件带 YAML frontmatter' },
+      { type: 'refactor', text_en: 'Code structure improvements for readability and maintainability', text_zh: '代码结构重构提升可读性和可维护性' },
+    ],
+  },
+  {
     version: '0.4.11',
     date: '2026-05',
     changes: [

@@ -77,7 +77,7 @@ After codebase exploration, scan results for context-aware trigger signals (base
 
 ## Phase 4: Context Packaging
 
-1. Write spec-config.json → <session>/spec/
+1. Write blueprint-config.json → <session>/spec/
 2. Write discovery-context.json → <session>/spec/
 3. Inline Discuss (DISCUSS-001):
    - Artifact: <session>/spec/discovery-context.json

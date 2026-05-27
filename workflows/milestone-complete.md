@@ -9,13 +9,15 @@ Archive completed milestone, move artifacts to history, and prepare for next.
 1. Read `.workflow/state.json`:
    - Determine target milestone (from $ARGUMENTS or current_milestone)
    - If no milestone: ERROR E001
+   - Resolve milestone object from `milestones[]` by id
+   - Determine milestone type: `milestone_obj.type` (default `"standard"` if field missing)
 
 2. Check milestone audit status:
    - Read `.workflow/milestones/{milestone}/audit-report.md` if exists
    - If no audit report:
-     - WARN: "No audit report found. Run `/maestro-milestone-audit` first."
-     - Ask user: "Complete without audit?"
-     - If NO → exit
+     - ERROR E004: "No audit report found. Audit is a required hard contract — cannot complete without it."
+     - Guidance: "Run `/maestro-milestone-audit` first, then re-run this command."
+     - Exit (skipping audit is not permitted)
    - If verdict is FAIL: ERROR E002
 
 3. Verify all milestone artifacts have status "completed" → ERROR E003 if any incomplete (list ids and statuses)
@@ -30,11 +32,32 @@ Archive completed milestone, move artifacts to history, and prepare for next.
    ```
 
 2. Snapshot roadmap:
-   ```
-   cp .workflow/roadmap.md .workflow/milestones/{milestone}/roadmap-snapshot.md
-   ```
+   - **Standard milestone**: `cp .workflow/roadmap.md .workflow/milestones/{milestone}/roadmap-snapshot.md`
+   - **Adhoc milestone**: Skip roadmap snapshot (roadmap may not exist)
 
-3. Archive scratch directories: copy each milestone artifact's `.workflow/{artifact.path}` to `.workflow/milestones/{milestone}/artifacts/{basename}/`
+3. Archive scratch directories: copy each milestone artifact's `.workflow/{artifact.path}` to `.workflow/milestones/{milestone}/artifacts/{basename}/`. After each copy:
+
+   a. If the destination contains `archive.json` with `lifecycle.status == "sealed"`:
+      - Set `lifecycle.status = "archived"`
+      - Set `lifecycle.archived_at = now`
+      - Set `lifecycle.linked_milestone = {milestone}` if currently null
+
+   b. If the destination contains `context-package.json`, prune it (scheme C — non-destructive):
+      - Read full content as `orig`
+      - Compute `pruned` = {
+          `open_questions`: items without `answer` and without `resolved_in`,
+          `constraints`: items where `status == "open"`,
+          `insights`: items beyond index 20 (keep top 20 by source order),
+          `references`: items whose `path` does not exist on disk (relative to session dir)
+        }
+      - If any `pruned.*` is non-empty:
+        - Write `{session_dir}/context-package.pruned.json` containing the dropped items
+        - Rewrite `context-package.json` keeping only:
+          `open_questions` answered/resolved, `constraints` status=locked, `insights[0..20]`, `references` whose paths exist; all other top-level fields unchanged
+        - Update `archive.json.pruned = { "at": now, "counts": { open_questions, constraints, insights, references }, "ref": "context-package.pruned.json" }`
+      - Otherwise leave both files untouched and set `archive.json.pruned = { "at": now, "counts": {...zeros}, "ref": null }`
+
+   c. If the session dir lacks `archive.json` (legacy session prior to lifecycle convention), skip (a) and (b) silently — legacy sessions are not indexed.
 
 ---
 
@@ -91,7 +114,9 @@ Check existing entries to avoid duplicates when appending in Step 3.
 
 2. Clear artifacts array: remove all entries where `milestone == target_milestone`
 
-3. Advance to next milestone: activate first pending milestone → set as `current_milestone`. If none pending → set `current_milestone = null`, `status = "completed"`
+3. Advance to next milestone:
+   - **Standard milestone**: activate first pending milestone → set as `current_milestone`. If none pending → set `current_milestone = null`, `status = "completed"`
+   - **Adhoc milestone**: Do NOT search for next milestone. Set `current_milestone = null`, `status = "idle"` (adhoc milestones are self-contained, no successor)
 
 4. Write state.json (atomic)
 
@@ -135,10 +160,12 @@ Artifacts: {count} archived
 Learnings: {learnings_count} extracted
 
 Archive: .workflow/milestones/{milestone}/
-Next:    {next_milestone or "Project complete"}
+Next:    {next_milestone or "Project complete" or "Ad-hoc task complete"}
 
 Next steps:
   /maestro-milestone-release    -- Cut a release
-  /maestro-analyze              -- Start next milestone
+  /maestro-analyze              -- Start next milestone (standard only)
   /manage-status                -- View project state
 ```
+
+**Adhoc milestone note:** When completing an adhoc milestone, the "Next steps" section omits "Start next milestone" since adhoc milestones have no successor in a roadmap chain.

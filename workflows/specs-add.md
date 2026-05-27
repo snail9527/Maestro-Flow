@@ -1,4 +1,9 @@
-# Workflow: specs-add
+---
+name: spec-add
+alias: spec-add
+---
+
+# Workflow: spec-add
 
 Add a `<spec-entry>` closed-tag entry to a single target spec file by category.
 

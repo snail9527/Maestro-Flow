@@ -96,12 +96,16 @@ export interface LocaleStrings {
     confirmLabelBackup: string;
     confirmLabelCodexHooks: string;
     confirmLabelCodexMcp: string;
+    confirmLabelAgyHooks: string;
     confirmSkipped: string;
 
     // Codex Hooks
     codexHooksLevelDescriptions: Record<string, string>;
     codexHooksWinWarning: string;
     codexHooksFeatureFlagHint: string;
+
+    // Agy Hooks (Antigravity)
+    agyHooksLevelDescriptions: Record<string, string>;
 
     // Execution
     execPreparing: string;
@@ -112,6 +116,7 @@ export interface LocaleStrings {
     execWritingVersion: string;
     execInstallingHooks: string; // "Installing {level} hooks..."
     execInstallingCodexHooks: string; // "Installing Codex {level} hooks..."
+    execInstallingAgyHooks: string; // "Installing Agy {level} hooks..."
     execInstallingStatusline: string;
     execRegisteringMcp: string;
     execRegisteringCodexMcp: string;

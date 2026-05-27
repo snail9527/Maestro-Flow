@@ -216,33 +216,69 @@ Filter master `tasks.csv` for `wave == 1 AND status == pending` → write `wave-
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-1.csv`,
   id_column: "id",
-  instruction: buildReviewInstruction(sessionFolder),  // agent: ~/.codex/agents/workflow-reviewer.toml
+  instruction: REVIEW_DIMENSION_INSTRUCTION,    // see "Dimension Worker Contract" below
   max_concurrency: maxConcurrency,
   max_runtime_seconds: 3600,
   output_csv_path: `${sessionFolder}/wave-1-results.csv`,
   output_schema: {
     type: "object",
     properties: {
-      id: { type: "string" },
-      result_status: { type: "string", enum: ["completed", "failed"] },
-      findings: { type: "string" },
-      severity_counts: { type: "string" },
-      top_issues: { type: "string" },
-      error: { type: "string" }
+      id:              { type: "string" },
+      result_status:   { type: "string", enum: ["completed", "failed"] },
+      findings:        { type: "string", maxLength: 500 },
+      severity_counts: { type: "string", description: "JSON object string {critical, high, medium, low}" },
+      top_issues:      { type: "string", description: "JSON array string of top issues with file:line" },
+      error:           { type: "string" }
     },
     required: ["id", "result_status", "findings"]
   }
 })
 ```
 
-Merge `wave-1-results.csv` into master `tasks.csv` (map `result_status` → master `status` column), then delete both `wave-1.csv` and `wave-1-results.csv`.
+Merge `wave-1-results.csv` into master `tasks.csv` (map `result_status` → master `status` column; copy `findings`, `severity_counts`, `top_issues`, `error`), then delete both `wave-1.csv` and `wave-1-results.csv`.
+
+#### Dimension Worker Contract (REVIEW_DIMENSION_INSTRUCTION)
+
+```
+You are a code reviewer for ONE dimension (correctness/security/performance/maintainability/...). Your dimension, scope, and standards come from your CSV row.
+
+REQUIRED STEPS:
+  1. Read shared discoveries: {sessionFolder}/discoveries.ndjson
+  2. Read specs loaded by orchestrator (review category) for severity calibration
+  3. Scan code in scope using Read/Grep/Glob (read-only)
+  4. Classify each issue: critical / high / medium / low with file:line refs
+  5. Append cross-cutting patterns to discoveries.ndjson
+  6. Call report_agent_job_result EXACTLY ONCE
+
+TERMINATION CONTRACT (mandatory — NO worker may end without calling report_agent_job_result):
+  - Success → result_status=completed (severity_counts may be all-zero if clean)
+  - Timeout → near max_runtime_seconds, STOP and report completed with partial findings
+  - Failure → unrecoverable read/parse error → result_status=failed
+  - NEVER skip report_agent_job_result.
+
+OUTPUT (must match output_schema):
+  {
+    "id": "<your row id>",
+    "result_status": "completed" | "failed",
+    "findings": "<one-sentence dimension summary, max 500 chars>",
+    "severity_counts": "<JSON object string: {critical:N, high:N, medium:N, low:N}>",
+    "top_issues": "<JSON array string: [{title, severity, location, recommendation}...]>",
+    "error": "<message if failed, else empty>"
+  }
+
+CONSTRAINTS:
+  - Every issue MUST have a concrete file:line reference. No speculation.
+  - Do NOT modify source. This is review only.
+  - Do NOT write to tasks.csv, wave-*.csv, results.csv, review.json (orchestrator owns those).
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 #### Wave 2: Aggregation + Deep-Dive
 
 Filter master `tasks.csv` for `wave == 2 AND status == pending`. If all wave 1 tasks failed, skip aggregation.
 
 Build `prev_context` from wave 1 findings (format: `[Task N: Title] summary...` per task).
-Write `wave-2.csv` with `prev_context` column → execute `spawn_agents_on_csv` → merge results into master `tasks.csv` (map `result_status` → master `status` column) → delete both `wave-2.csv` and `wave-2-results.csv`.
+Write `wave-2.csv` with `prev_context` column → execute `spawn_agents_on_csv` with `REVIEW_AGGREGATION_INSTRUCTION` (same termination contract; output_schema returns `result_status` enum [completed|failed], findings, plus `verdict` enum [PASS|WARN|BLOCK]) → merge results into master `tasks.csv` (map `result_status` → master `status` column) → delete both `wave-2.csv` and `wave-2-results.csv`.
 
 ### Phase 3: Results Aggregation
 

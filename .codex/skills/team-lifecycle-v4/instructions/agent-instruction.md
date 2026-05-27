@@ -811,6 +811,24 @@ All roles read/write `{session}/discoveries.ndjson`:
 
 ---
 
+## Termination Contract (MANDATORY for ALL roles)
+
+Every spawned worker — regardless of role — MUST call `report_agent_job_result` EXACTLY ONCE before exiting. NO exceptions:
+
+| Path | Action |
+|------|--------|
+| Success | `status=completed` after verification passes |
+| Failure | `status=failed` with error message (unrecoverable error) |
+| Blocked | `status=failed` (no separate "blocked" enum here — use error message to explain blockage) |
+| Timeout | Approaching `max_runtime_seconds` → revert partial unsafe work → `status=failed` with error="timeout" |
+
+Rules:
+- NEVER continue indefinitely.
+- NEVER exit silently.
+- NEVER omit `report_agent_job_result`.
+- Do NOT write to tasks.csv, wave-*.csv, results.csv — orchestrator owns those.
+- Do NOT call `spawn_agents_on_csv` (no recursion).
+
 ## Output Format
 
 All roles use `report_agent_job_result` with this schema:
@@ -825,3 +843,5 @@ All roles use `report_agent_job_result` with this schema:
   "error": ""
 }
 ```
+
+Note: spawn output_schema in SKILL.md uses `result_status` (not `status`). The orchestrator's merge step maps `result_status` → master `status`. Workers report via `report_agent_job_result` which the harness converts to the CSV result row — the field key here (`status`) is the worker-facing field name documented for this skill family.

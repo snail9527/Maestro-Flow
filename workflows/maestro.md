@@ -357,6 +357,7 @@ const chainMap = {
   'spec-driven':          [{ cmd: 'maestro-init' }, { cmd: 'maestro-roadmap', args: '--mode full "{description}"' }, { cmd: 'maestro-plan', args: '{phase}' }, { cmd: 'maestro-execute', args: '{phase}' }, { cmd: 'maestro-verify', args: '{phase}' }],
   'roadmap-driven':       [{ cmd: 'maestro-init' }, { cmd: 'maestro-roadmap', args: '"{description}"' }, { cmd: 'maestro-plan', args: '{phase}' }, { cmd: 'maestro-execute', args: '{phase}' }, { cmd: 'maestro-verify', args: '{phase}' }],
   'brainstorm-driven':    [{ cmd: 'maestro-brainstorm', args: '"{description}"' }, { cmd: 'maestro-plan', args: '{phase}' }, { cmd: 'maestro-execute', args: '{phase}' }, { cmd: 'maestro-verify', args: '{phase}' }],
+  'brainstorm_visualize': [{ cmd: 'brainstorm-visualize', args: '"{description}"' }],
   'impeccable-build':       [{ cmd: 'maestro-impeccable', args: '"{description}" --chain build' }, { cmd: 'maestro-plan', args: '{phase}' }, { cmd: 'maestro-execute', args: '{phase}' }, { cmd: 'maestro-verify', args: '{phase}' }],
   'impeccable-driven':      [{ cmd: 'maestro-impeccable', args: '"{description}" --chain build' }, { cmd: 'maestro-verify', args: '{phase}' }],
   'analyze-plan-execute': [{ cmd: 'maestro-analyze', args: '"{description}" -q' }, { cmd: 'maestro-plan', args: '--dir {scratch_dir}' }, { cmd: 'maestro-execute', args: '--dir {scratch_dir}' }],
@@ -424,7 +425,7 @@ detectNextAction(state):
 | Chain | Steps | Use Case |
 |-------|-------|----------|
 | `full-lifecycle` | plan → execute → verify → review → test → audit | Full milestone completion |
-| `spec-driven` | init → spec-generate → plan → execute → verify | From idea/requirements (heavy) |
+| `blueprint-driven` | init → blueprint → plan → execute → verify | From idea/requirements (heavy) |
 | `roadmap-driven` | init → roadmap → plan → execute → verify | From requirements (light) |
 | `brainstorm-driven` | brainstorm → plan → execute → verify | From exploration |
 | `impeccable-build` | impeccable --chain build → plan → execute → verify | From design system generation |

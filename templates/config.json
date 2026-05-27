@@ -1,60 +1,48 @@
 {
-  "mode": "interactive",
-  "granularity": "standard",
-  "model_profile": "balanced",
-
   "workflow": {
     "research": true,
-    "plan_check": true,
-    "verify_after_execute": true,
-    "nyquist_validation": true,
-    "auto_sync": true,
-    "reflection": true,
-    "decision_protocol": true,
-    "auto_advance": false
+    "reflection": true
   },
 
   "execution": {
-    "method": "agent",
-    "parallel": true,
-    "max_concurrent": 3,
+    "method": "auto",
     "auto_commit": true,
-    "lazy_loading": true
+    "default_executor": ""
   },
 
   "git": {
-    "branching": "none",
     "commit_docs": true
   },
 
   "gates": {
-    "confirm_project": true,
     "confirm_roadmap": true,
-    "confirm_plan": true,
-    "confirm_execute": true,
-    "confirm_transition": true
-  },
-
-  "safety": {
-    "always_confirm_destructive": true,
-    "always_confirm_external_services": true
-  },
-
-  "specs": {
-    "auto_setup_on_init": true,
-    "extract_learnings_on_complete": true
+    "confirm_plan": true
   },
 
   "codebase": {
-    "doc_index": true,
-    "auto_sync_after_execute": true,
-    "action_log": true
+    "auto_sync_after_execute": true
+  },
+
+  "guard": {
+    "enabled": false,
+    "mode": "allow",
+    "paths": []
+  },
+
+  "collab": {
+    "preflight_mode": "warn",
+    "preflight_window_min": 30,
+    "auto_preflight": true
+  },
+
+  "specInjection": {},
+
+  "dashboard": {
+    "port": 3001
   },
 
   "worktree": {
-    "enabled": true,
     "root": ".worktrees",
-    "branch_prefix": "milestone/",
-    "auto_cleanup": true
+    "branch_prefix": "milestone/"
   }
 }

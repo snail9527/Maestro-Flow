@@ -37,15 +37,15 @@ maestro hooks install --level standard
 
 ```bash
 /maestro-brainstorm "在线教育平台"       # 多角色头脑风暴
-/maestro-init --from-brainstorm ANL-xxx # 基于头脑风暴初始化
+/maestro-init --from brainstorm:ANL-xxx # 基于头脑风暴初始化
 /maestro-roadmap "创建路线图" -y
 ```
 
-### 完整规范链（大型项目）
+### 完整规范蓝图（大型项目）
 
 ```bash
 /maestro-init
-/maestro-spec-generate                  # 7 阶段完整规范生成（PRD + 架构 + 路线图）
+/maestro-blueprint                      # 6 阶段规范蓝图（产品简报 + PRD + 架构 + 史诗）
 ```
 
 ---
@@ -61,10 +61,13 @@ maestro hooks install --level standard
 /maestro-execute                        # 执行
 /maestro-verify                         # 验证
 
-# 逐 Phase 模式
-/maestro-analyze 1                      # 只分析 Phase 1
+# 逐 Phase 模式（micro 层：Phase 级深度分析）
+/maestro-analyze 1                      # 只分析 Phase 1（6 维度评分）
 /maestro-plan 1                         # 只规划 Phase 1
 /maestro-execute 1                      # 只执行 Phase 1
+
+# 宏观探索模式（macro 层：roadmap 之前使用）
+/maestro-analyze "实现多租户架构"         # 需求影响面探索 → scope_verdict 路由
 ```
 
 ### 一键全自动

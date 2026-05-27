@@ -183,9 +183,49 @@ Session: {sessionFolder}
 Discovery board: {sessionFolder}/discoveries.ndjson
 Previous context: 'prev_context' column
 
-## Output
-result_status, findings, files_modified, pass_rate (TESTRUN), coverage_score (TESTRUN), error
+## Termination Contract (MANDATORY)
+You MUST call report_agent_job_result EXACTLY ONCE before exiting. NO exceptions.
+- Success → result_status=completed after tests run / coverage measured
+- Failure → result_status=failed with error message
+- Blocked → cannot proceed without upstream fix → result_status=blocked
+- Timeout → near max_runtime_seconds → result_status=blocked, error="timeout"
+- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
+## Output (must match output_schema)
+{
+  "id": "<your CSV row id>",
+  "result_status": "completed" | "failed" | "blocked",
+  "findings": "<key findings, max 500 chars>",
+  "files_modified": "<semicolon-separated paths or empty>",
+  "pass_rate": "<0-100 or empty>" (TESTRUN only),
+  "coverage_score": "<0-100 or empty>" (TESTRUN only),
+  "error": "<message if not completed>"
+}
+
+## Hard Constraints
+- Do NOT write to tasks.csv, wave-*.csv, results.csv (orchestrator owns those).
+- Do NOT call spawn_agents_on_csv (no recursion).
 ```
+
+### Spawn output_schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":             { "type": "string" },
+    "result_status":  { "type": "string", "enum": ["completed", "failed", "blocked"] },
+    "findings":       { "type": "string", "maxLength": 500 },
+    "files_modified": { "type": "string" },
+    "pass_rate":      { "type": "string" },
+    "coverage_score": { "type": "string" },
+    "error":          { "type": "string" }
+  },
+  "required": ["id", "result_status", "findings"]
+}
+```
+
+Merge maps `result_status` → master `status`.
 
 </actions>
 </state_machine>

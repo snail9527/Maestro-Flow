@@ -63,6 +63,9 @@ export function InstallResult({ result }: InstallResultProps) {
           value={result.codexMcpRegistered ? 'maestro-tools registered' : t.install.confirmSkipped}
           valueColor={result.codexMcpRegistered ? C.success : C.neutral}
         />
+        {result.agyHooksInstalled > 0 && (
+          <Row label="Agy Hooks:" value={t.install.resultHooks.replace('{count}', String(result.agyHooksInstalled))} />
+        )}
         {(result.extraMcpRegistered.length > 0 || result.extraMcpFailed.length > 0) && (
           <Row
             label="Extra MCP:"
@@ -94,6 +97,16 @@ export function InstallResult({ result }: InstallResultProps) {
           {result.migrationWarnings.map((w, i) => (
             <Text key={i} color={C.warning} wrap="wrap">{w}</Text>
           ))}
+        </Box>
+      )}
+
+      {result.statuslineInstalled && (
+        <Box marginTop={1}>
+          <Text dimColor>
+            Nerd Font glyphs needed for statusline icons — run{' '}
+          </Text>
+          <Text color={C.primary}>maestro install fonts</Text>
+          <Text dimColor> for platform-specific setup.</Text>
         </Box>
       )}
 

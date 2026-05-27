@@ -31,7 +31,7 @@ graph TB
         BS["/maestro-brainstorm"]
         INIT["/maestro-init"]
         RM["/maestro-roadmap"]
-        SG["/maestro-spec-generate"]
+        SG["/maestro-blueprint"]
         UID["/maestro-impeccable"]
     end
 
@@ -165,7 +165,7 @@ graph TB
 ### 项目初始化
 
 ```
-/maestro-init → /maestro-roadmap 或 /maestro-spec-generate
+/maestro-init → /maestro-roadmap 或 /maestro-blueprint
 ```
 
 | 步骤 | 命令 | 作用 | 产出 |
@@ -173,7 +173,7 @@ graph TB
 | 0 | `/maestro-brainstorm` (可选) | 多角色头脑风暴 | guidance-specification.md |
 | 1 | `/maestro-init` | 初始化 .workflow/ 目录 | state.json, project.md, specs/ |
 | 2a | `/maestro-roadmap` | 轻量路线图 | roadmap.md |
-| 2b | `/maestro-spec-generate` | 完整规范链（7 阶段） | PRD + 架构文档 + roadmap.md |
+| 2b | `/maestro-blueprint` | 6 阶段规范蓝图 | PRD + 架构文档 + `.workflow/blueprint/` |
 
 ### Milestone 管线
 
@@ -190,19 +190,39 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 | 审计 | `/maestro-milestone-audit` | audit-report.md | — |
 | 完成 | `/maestro-milestone-complete` | 归档到 milestones/ | — |
 
-**Scope 路由**：无参数 = milestone 全量；数字 = 指定 phase；文本 = adhoc/standalone。`--dir` 直接指定上游产物路径。
+**Scope 路由**：无参数 = milestone 全量；数字 = 指定 phase（micro 模式）；文本 = 宏观探索（macro 模式）。`--dir` 直接指定上游产物路径。
 
-### 五种使用模式
+### 双层 Analyze
+
+| 层级 | 参数 | 作用 | 下游路由 |
+|------|------|------|----------|
+| **Macro（宏观）** | 文本，如 `"用户认证系统"` | 需求影响面探索，产出 scope_verdict | large→roadmap, medium/small→plan |
+| **Micro（微观）** | 数字，如 `1` | Phase 级 6 维度深度分析 | 直接进入 plan |
+
+```bash
+# Macro：在 roadmap 之前探索需求影响面
+/maestro-analyze "实现多租户架构"           # → scope_verdict: large → 建议 roadmap
+
+# Micro：Phase 级深度分析
+/maestro-analyze 1                          # → 6 维度评分 → 直接进入 plan
+
+# 传递上游上下文
+/maestro-analyze "认证模块" --from brainstorm:BRN-001
+```
+
+### 六种使用模式
 
 **A. 全量模式**：`analyze → plan → execute → verify`（一步覆盖所有 phase）
 
-**B. 逐 Phase**：`analyze 1 → plan 1 → execute 1`（每个 phase 独立）
+**B. 逐 Phase**：`analyze 1 → plan 1 → execute 1`（每个 phase 独立，micro 层）
 
 **C. 混合模式**：全量分析 + 逐 phase 执行 + 中途 adhoc
 
 **D. 统一规划**：`analyze 1 → analyze 2 → plan → execute`（分析后统一规划）
 
 **E. 独立模式**：`analyze "topic" → plan --dir → execute --dir`（无需 init/roadmap）
+
+**F. 宏观探索**：`analyze "需求描述"` → scope_verdict → roadmap 或 plan（macro 层，roadmap 之前使用）
 
 ---
 
@@ -271,7 +291,7 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 
 | 链名 | 命令序列 | 适用场景 |
 |------|----------|----------|
-| `full-lifecycle` | init→spec-generate→...→milestone-audit | 全新项目 |
+| `full-lifecycle` | init→blueprint→...→milestone-audit | 全新项目 |
 | `roadmap-driven` | init→roadmap→... | 轻量路线图 |
 | `brainstorm-driven` | brainstorm→init→roadmap→... | 从头脑风暴开始 |
 | `analyze-plan-execute` | analyze→plan→execute | 快速执行 |

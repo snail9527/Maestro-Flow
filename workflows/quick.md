@@ -69,10 +69,10 @@ Quick tasks can run mid-phase -- validation only checks project exists, not phas
 **Create scratch directory:**
 
 Generate slug from $DESCRIPTION (lowercase, hyphens, max 40 chars).
-Set date to current date (YYYY-MM-DD).
+Set date to current date (YYYYMMDD).
 
 ```bash
-QUICK_DIR=".workflow/scratch/quick-${slug}-${date}"
+QUICK_DIR=".workflow/scratch/${date}-quick-${slug}"
 mkdir -p "$QUICK_DIR/.task"
 mkdir -p "$QUICK_DIR/.summaries"
 ```
@@ -80,7 +80,7 @@ mkdir -p "$QUICK_DIR/.summaries"
 Write index.json:
 ```json
 {
-  "id": "quick-{slug}-{date}",
+  "id": "{YYYYMMDD}-quick-{slug}",
   "type": "quick",
   "title": "{$DESCRIPTION}",
   "status": "active",
@@ -315,7 +315,7 @@ Read state.json. Add quick task to accumulated_context or quick_tasks array.
 Record:
 ```json
 {
-  "id": "quick-{slug}-{date}",
+  "id": "{YYYYMMDD}-quick-{slug}",
   "description": "{$DESCRIPTION}",
   "completed_at": "{ISO timestamp}",
   "directory": "{$QUICK_DIR}",

@@ -3,7 +3,7 @@
 Debug issues using scientific method with subagent isolation. Supports three modes:
 
 1. **Standalone**: User describes issue, gather symptoms via 5 questions
-2. **From UAT**: --from-uat reads uat.md gaps as pre-filled symptoms (skip gathering)
+2. **From UAT**: --from-uat reads uat.md gaps as pre-filled symptoms (skip gathering). Input-only: does not write back to uat.md/test artifacts (test workflow is the sole caller and owns uat.md writes).
 3. **Parallel**: --parallel spawns one debug agent per gap cluster concurrently
 
 Output: understanding.md + evidence.ndjson per investigation.
@@ -102,8 +102,8 @@ Display:
 
 | # | Location | Status | Current Hypothesis |
 |---|----------|--------|--------------------|
-| 1 | scratch/plan-auth-2026-04-20/.debug/jwt-expiry/ | investigating | Token not refreshed on 401 |
-| 2 | scratch/debug-nav-crash-2026-03-14/ | checkpoint | Awaiting user input |
+| 1 | scratch/20260420-plan-P3-auth/.debug/jwt-expiry/ | investigating | Token not refreshed on 401 |
+| 2 | scratch/20260314-debug-nav-crash/ | checkpoint | Awaiting user input |
 
 Reply with a number to resume, or describe a new issue.
 ```
@@ -194,11 +194,11 @@ Create debug session directory and proceed to Step 6.
 | Mode | Directory |
 |------|-----------|
 | Phase-scoped (from UAT) | `{ARTIFACT_DIR}/.debug/{gap-slug}/` (ARTIFACT_DIR resolved from artifact registry) |
-| Standalone | `.workflow/scratch/debug-{slug}-{date}/` |
+| Standalone | `.workflow/scratch/{YYYYMMDD}-debug-{slug}/` |
 
 Resolve `DEBUG_DIR` from artifact registry:
 - Phase-scoped: look up phase in `.workflow/state.json` artifacts (type=execute), set `DEBUG_DIR = ".workflow/{art.path}/.debug/{gap-slug}/"`. Error if not found.
-- Standalone: `DEBUG_DIR = ".workflow/scratch/debug-{slug}-{date}/"`
+- Standalone: `DEBUG_DIR = ".workflow/scratch/{YYYYMMDD}-debug-{slug}/"`
 
 Create the directory.
 

@@ -4,7 +4,7 @@
 
 Produces two-layer plan output: `plan.json` (overview with task_ids[] and waves[]) + `.task/TASK-{NNN}.json` (individual task definitions).
 
-All output goes to `.workflow/scratch/plan-{slug}-{date}/`.
+All output goes to `.workflow/scratch/{YYYYMMDD}-plan-[P{N}-|M{N}-]{slug}/`. Date-first ordering enables chronological sorting; scope prefix (`P{N}` for phase, `M{N}` for milestone, omit for standalone/adhoc) enables fallback identification.
 
 ---
 
@@ -18,21 +18,67 @@ All output goes to `.workflow/scratch/plan-{slug}-{date}/`.
 ## Scope Resolution
 
 ```
-Input: [phase] argument OR --dir <path>
+Input: [phase] argument OR --dir <path> OR --from <source>
 
 Worktree guard: reject if phase not in .workflow/worktree-scope.json owned_phases
 Auto-bootstrap: create minimal state.json if missing
 
-Resolution priority:
-  --dir <path>   → CONTEXT_DIR = path, scope from state.json artifact or "standalone"
-  no arguments   → scope = "milestone", CONTEXT_DIR = latest analyze artifact for current_milestone
-                   (ERROR E001 if no roadmap)
-  numeric arg    → scope = "phase", resolve PHASE_SLUG from roadmap.md,
-                   CONTEXT_DIR = latest analyze artifact for phase
-                   (ERROR if no init + roadmap)
+Resolution priority (highest to lowest):
+  1. --from analyze:ANL-xxx → CONTEXT_DIR = artifact path, scope = "standalone"
+     Uses analyze conclusions.implementation_scope to seed task generation
+  2. --from blueprint:BLP-xxx → CONTEXT_DIR = blueprint path, scope = "standalone"
+     Uses blueprint requirements + architecture to seed task generation
+  3. --from <other> (@file, path/) → load context-package.json from path, scope = "standalone"
+  4. --dir <path>   → CONTEXT_DIR = path, scope from state.json artifact or "standalone"
+  5. no arguments + roadmap → scope = "milestone", CONTEXT_DIR = latest analyze artifact for current_milestone
+     (ERROR E001 if no roadmap)
+  6. numeric arg    → scope = "phase", resolve PHASE_SLUG from roadmap.md,
+     CONTEXT_DIR = latest analyze artifact for phase
+     (ERROR if no init + roadmap)
+  7. no arguments + no roadmap → search state.json for latest analyze artifact
+     Found → scope = "standalone", CONTEXT_DIR = artifact path
+     Not found → ERROR E001
 
-OUTPUT_DIR = .workflow/scratch/plan-{PHASE_SLUG or milestone_slug}-{date}/
+Phase-to-Milestone resolution (when scope="phase"):
+  FOR each ms in state.json.milestones[]:
+    IF phase_number in ms.phases[]:
+      target_milestone = ms.id
+      BREAK
+  IF no match: target_milestone = current_milestone (fallback)
+
+  Use target_milestone (not current_milestone) for:
+    - artifact registration (P5 Step 4 milestone field)
+    - collision detection scope (P4.5)
+    - prior artifact lookups
+
+OUTPUT_DIR = .workflow/scratch/{YYYYMMDD}-plan-[P{N}-|M{N}-]{slug}/
 ```
+
+### Ad-hoc Milestone Auto-Creation (D-008)
+
+When plan resolves to `scope == "standalone"` AND `state.json.current_milestone == null`:
+
+```
+1. Generate adhoc milestone ID: "M-adhoc-{YYYYMMDD}-{HHmmss}"
+2. Create milestone entry:
+   {
+     "id": "M-adhoc-{YYYYMMDD}-{HHmmss}",
+     "type": "adhoc",
+     "name": "Ad-hoc: {plan_slug or analyze_title}",
+     "status": "active",
+     "phases": [1],
+     "phase_slugs": { "1": "standalone" },
+     "roadmap_ref": null,
+     "created_at": "{ISO-8601}"
+   }
+3. Push to state.json.milestones[]
+4. Set state.json.current_milestone = milestone.id
+5. Use this milestone ID for artifact registration (P5 Step 4)
+```
+
+This ensures downstream commands (verify, milestone-audit, milestone-complete) have a valid milestone context without requiring roadmap.
+
+**Backward compatibility:** If `state.json.milestones[]` already has entries with `current_milestone != null`, skip creation (existing milestone takes precedence). Missing `type` field on legacy milestones defaults to `"standard"`.
 
 ---
 
@@ -48,6 +94,7 @@ OUTPUT_DIR = .workflow/scratch/plan-{PHASE_SLUG or milestone_slug}-{date}/
 | `--revise [instructions]` | Revise existing plan (skip P1-P3, load → modify → P4). Auto-discovers latest plan or use `--dir` |
 | `--check <plan-dir>` | Standalone plan verification (P4 only, read-only) |
 | `--tdd` | Generate TDD task chains (RED-GREEN-REFACTOR triplets). Load `@~/.maestro/workflows/tdd.md` for discipline and task structure |
+| `--from <source>` | Load upstream context directly (analyze:ANL-xxx, blueprint:BLP-xxx, brainstorm:ID, @file, or path). Bypasses roadmap requirement for analyze/blueprint sources |
 
 ---
 
@@ -78,10 +125,18 @@ When `--tdd` is active:
 ### Steps
 
 1. **Load user decisions**
-   - Read `${CONTEXT_DIR}/context.md` if exists, else warn (no upstream analyze)
+   - If `--from` specified: resolve to `context-package.json` → load
+     - `constraints[locked]` → immutable constraints (planner must respect)
+     - `constraints[open]` → implementer discretion
+     - `constraints[deferred]` → explicitly scoped out
+     - `requirements[]` → task scope input
+     - `insights[]` → role analysis context (data models, state machines, architecture decisions)
+     - `open_questions[]` → flag areas needing clarification in P2
+   - Else: read `${CONTEXT_DIR}/context.md` if exists, else warn (no upstream analyze)
+   - Merge: if both `--from` and `context.md` exist, context-package takes precedence; context.md supplements
 
-2. **Load spec reference** (if `--spec` flag or index.json has spec_ref)
-   - Read from `.workflow/.spec/${spec_ref}/`: spec-summary.md, requirements/_index.md, epics/_index.md
+2. **Load spec reference** (if `--spec` flag or index.json has blueprint_ref)
+   - Read from `.workflow/blueprint/${blueprint_ref}/`: blueprint-summary.md, requirements/_index.md, epics/_index.md
 
 3. **Load project specs**
    ```
@@ -106,12 +161,17 @@ When `--tdd` is active:
        - `scope.priority` → task/wave ordering
      - Skip parallel exploration
 
-5. **Parallel exploration** (skip if `--gaps` or upstream analysis loaded)
+5b. **Merge context-package insights** (if `--from` was loaded)
+   - If context-package `insights[]` contain `area: "data-model"` or `area: "state-machine"`: inject as planner constraints
+   - Map `insights[].summary` to implementation guidance for relevant tasks
+   - These replace the need for a separate analyze step when brainstorm already provided sufficient role analysis
+
+6. **Parallel exploration** (skip if `--gaps` or upstream analysis loaded)
    - Exploration angles (1-4 based on complexity): architecture, implementation, integration, risk
    - Spawn 1-4 `cli-explore-agent` in parallel, each with phase goal + success_criteria + one angle
    - Output: `.process/exploration-{angle}.json`, `.process/explorations-manifest.json`, `.process/context-package.json`
 
-5b. **CLI supplementary context** (runs in parallel with step 5, skip if `--gaps` or no CLI tools enabled)
+6b. **CLI supplementary context** (runs in parallel with step 6, skip if `--gaps` or no CLI tools enabled)
    ```
    IF no CLI tools enabled: skip
 
@@ -128,7 +188,7 @@ When `--tdd` is active:
    ```
    **On callback:** Parse result, merge into explorationContext as `cli_context` field. Planner uses patterns for task `read_first[]`, dependencies for wave ordering, conflict_risks for collision detection.
 
-6. **Gap-mode context** (if `--gaps`)
+7. **Gap-mode context** (if `--gaps`)
 
    Gap sources (in priority order, first non-empty wins, then additionals merged):
    - **Primary**: `.workflow/issues/issues.jsonl` — filter by phase_ref + status in ["registered","diagnosed"], mark as "planning"
@@ -171,9 +231,11 @@ When `--tdd` is active:
 
 **Purpose:** Generate the execution plan.
 
+**Rule:** Main flow MUST NOT create/modify TASK files. All planning delegated to planner agent. Upstream analyze results (conclusions.json / implementation_scope) MUST be passed into planner spawn as `explorationContext` in the same step.
+
 ### Standard Mode (default)
 
-Spawn `workflow-planner` agent with: context.md, spec-ref, doc-index.json, explorationContext (incl. implementationScope), clarificationContext, phase goal + success_criteria, templates (plan.json, task.json).
+Spawn `workflow-planner` agent with: context.md, spec-ref, doc-index.json, explorationContext (incl. implementationScope from P1 Step 5), clarificationContext, phase goal + success_criteria, templates (plan.json, task.json).
 
 **Task count guard**: Before spawning, assess scope complexity:
 - Single feature / simple change → expect **1-2 tasks** max
@@ -236,10 +298,11 @@ Every TASK-*.json MUST include these fields — they are NOT optional:
 
 ### Gap Mode (`--gaps`)
 
-For each gap from explorationContext (P1 Step 6), create `TASK-{NNN}.json`:
-- `type: "fix"`, `description`, `action` (concrete fix_direction), `read_first` (affected files), `convergence.criteria` (grep-verifiable), `issue_id` (if source == "issue")
+Spawn `workflow-planner` agent with: explorationContext (gap list from P1 Step 7), spec-ref, doc-index.json, phase goal + success_criteria, templates, mode = `gap-fix`.
 
-Bidirectional linking: update matching issues in `.workflow/issues/issues.jsonl` → `status: "planned"`. Build plan.json with gap-fix tasks.
+Planner: for each gap emit one task — `type: "fix"`, `description`, `action` (concrete fix_direction), `read_first` (affected files), `convergence.criteria` (grep-verifiable), `issue_id` (if source == "issue"); assign IDs and waves; build plan.json.
+
+Bidirectional linking (main flow, post-planner): update matching issues in `.workflow/issues/issues.jsonl` → `status: "planned"`.
 
 ### Output
 - `plan.json` in PHASE_DIR
@@ -332,6 +395,7 @@ Bidirectional linking: update matching issues in `.workflow/issues/issues.jsonl`
 
 4. **Register artifact in state.json**
    - Find upstream analyze artifact by CONTEXT_DIR path
+   - Determine milestone: use target_milestone from scope resolution; if adhoc milestone was created in this session, use its ID
    - Create artifact: `{ id: "PLN-{NNN}", type: "plan", milestone, phase, scope, path, status: "completed", depends_on, harvested: false, created_at, completed_at }`
    - Append to `state.json.artifacts`, atomic write
 
@@ -389,11 +453,13 @@ Incrementally modify an existing plan without rebuilding from scratch.
      - Update convergence criteria
    - Parse instructions into concrete changes
 
-3. **Apply targeted changes**
-   - Modify affected TASK files in-place
-   - If tasks added/removed: re-sequence task IDs, regenerate wave assignments
-   - Update plan.json summary (task count, wave structure)
-   - Preserve unmodified tasks completely
+3. **Spawn `workflow-planner` agent for revision**
+   - Input: existing plan.json + all `.task/TASK-*.json` + parsed revision instructions + explorationContext (include implementation_scope if conclusions.json exists) + templates
+   - Planner:
+     - Modify affected TASK files in-place
+     - If tasks added/removed: re-sequence task IDs, regenerate wave assignments
+     - Update plan.json summary (task count, wave structure)
+     - Preserve unmodified tasks
 
 4. **Re-run plan-checker (P4)**
    - Validate modified plan with same checker as create mode

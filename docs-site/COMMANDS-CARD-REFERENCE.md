@@ -19,11 +19,11 @@
 
 ### `maestro-init` — 初始化项目
 
-**Usage:** `/maestro-init [--auto] [--from-brainstorm SESSION-ID]`
+**Usage:** `/maestro-init [--auto] [--from <source>]`
 
 自动检测项目状态（空项目/代码库/已有项目），创建 .workflow/ 目录结构，包含 project.md、state.json、config.json 和 specs/
 
-**Flags:** --auto (自动模式) · --from-brainstorm SESSION-ID (从头脑风暴导入)
+**Flags:** --auto (自动模式) · --from <source> (导入上游 context package)
 
 ---
 
@@ -79,9 +79,9 @@
 
 ### `maestro-analyze` — 分析讨论
 
-**Usage:** `/maestro-analyze [phase|topic] [-y] [-c] [-q] [--gaps [ISS-ID]]`
+**Usage:** `/maestro-analyze [phase|topic] [-y] [-c] [-q] [--gaps [ISS-ID]] [--from <source>]`
 
-多维分析：CLI 探索 + 6 维度评分 + 决策记录协议 + 意图覆盖检查。生成 analysis.md 和 context.md，用于后续规划
+双层分析：Macro（文本参数）宏观需求探索产出 scope_verdict，Micro（数字参数）Phase 级 6 维度深度分析。生成 analysis.md 和 context.md，用于后续规划
 
 **Flags:** [phase|topic] (阶段或主题) · -y (自动模式) · -c (恢复会话) · -q (快速模式，仅提取决策) · --gaps [ISS-ID] (缺口分析)
 
@@ -99,11 +99,11 @@
 
 ### `maestro-roadmap` — 路线图
 
-**Usage:** `/maestro-roadmap <requirement> [-y] [-c] [-m progressive|direct|auto] [--from-brainstorm SESSION-ID] [--revise [instructions]] [--review]`
+**Usage:** `/maestro-roadmap <requirement> [-y] [-c] [-m progressive|direct|auto] [--from <source>] [--revise [instructions]] [--review]`
 
-交互式路线图创建：需求分解 → 里程碑规划 → 迭代精化 → 阶段确认。spec-generate 的轻量级替代方案
+交互式路线图创建：需求分解 → 里程碑规划 → 迭代精化 → 阶段确认
 
-**Flags:** <requirement> (需求描述，必填) · -y (自动模式) · -c (恢复会话) · -m progressive|direct|auto (模式) · --from-brainstorm SESSION-ID (从头脑风暴导入) · --revise [instructions] (修订路线图) · --review (审查模式)
+**Flags:** <requirement> (需求描述，必填) · -y (自动模式) · -c (恢复会话) · -m progressive|direct|auto (模式) · --from <source> (导入上游 context package) · --revise [instructions] (修订路线图) · --review (审查模式)
 
 ---
 
@@ -117,13 +117,13 @@
 
 ---
 
-### `maestro-spec-generate` — 规格生成
+### `maestro-blueprint` — 规范蓝图
 
-**Usage:** `/maestro-spec-generate <idea or @file> [-y] [-c] [--count N]`
+**Usage:** `/maestro-blueprint <idea or @file> [-y] [-c] [--from <source>]`
 
-7 阶段文档链：产品简报 → PRD → 架构文档 → 史诗故事 → 用户故事 → 验收标准 → 交互式路线图。适合需要完整规格文档的项目
+6 阶段规范文档链：产品简报 → PRD → 架构文档 → 史诗故事。与 brainstorm 并行的正式规范路径，产出 `.workflow/blueprint/` 包
 
-**Flags:** <idea or @file> (必填) · -y (自动模式) · -c (恢复会话) · --count N (并行角色数)
+**Flags:** <idea or @file> (必填) · -y (自动模式) · -c (恢复会话) · --from <source> (导入上游 context package)
 
 ---
 

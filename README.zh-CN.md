@@ -40,7 +40,7 @@ maestro install
 /maestro-ralph "实现基于 OAuth2 的用户认证，带 refresh token"
 ```
 
-Ralph 自动判断你在生命周期中的位置（brainstorm → roadmap → analyze → plan → execute → verify → review → test → milestone-complete）并构建相应命令链。关键检查点的 decision 节点根据实际执行结果，动态插入 debug → fix → retry 循环。
+Ralph 自动判断你在生命周期中的位置（brainstorm → blueprint → analyze → roadmap → plan → execute → verify → review → test → milestone-complete）并构建相应命令链。上游起源命令（brainstorm、blueprint）和 roadmap 均为可选 — Ralph 根据项目状态和范围自动跳过。关键检查点的 decision 节点根据实际执行结果，动态插入 debug → fix → retry 循环。
 
 ```bash
 /maestro-ralph status              # 查看会话进度
@@ -54,7 +54,7 @@ Ralph 自动判断你在生命周期中的位置（brainstorm → roadmap → an
 |------|---------|
 | `/maestro "..."` | 描述意图，AI 自动路由最优命令链 |
 | `/maestro-quick` | 快速修复、小功能（analyze → plan → execute） |
-| `/maestro-*` | 逐步执行：init、roadmap、analyze、plan、execute、verify |
+| `/maestro-*` | 逐步执行：init、brainstorm、blueprint、analyze、roadmap、plan、execute、verify |
 
 ---
 
@@ -65,8 +65,8 @@ Ralph 自动判断你在生命周期中的位置（brainstorm → roadmap → an
 读取项目状态 → 推断生命周期位置 → 构建含 decision 节点的命令链。每个检查点读取实际执行结果，决定继续还是插入 debug → fix → retry 循环。链在运行中动态增长/收缩。
 
 ```
-brainstorm → init → roadmap → analyze → plan → execute → verify
-                                              ◆ post-verify
+brainstorm → blueprint(可选) → init → analyze(宏观) → roadmap(可选) → analyze(微观) → plan → execute → verify
+                                                                                                       ◆ post-verify
                                               business-test
                                               ◆ post-business-test
                                               review
@@ -89,9 +89,9 @@ brainstorm → init → roadmap → analyze → plan → execute → verify
 4. **test-gen** — 覆盖率缺口分析 + 自动测试生成（TDD/E2E 分类，L0-L3 渐进层）
 5. **test** — 交互式 UAT：探索性测试，会话持久化，缺口闭环
 
-### 3. 结构化管线
+### 3. 分层命令拓扑
 
-49 个斜杠命令覆盖 6 大类别，驱动从项目初始化到质量复盘的每个阶段。所有产物存放于 `.workflow/scratch/`，由 `state.json` 追踪。
+命令按四层组织：**上游起源层**（brainstorm 发散、blueprint 收敛）、**理解层**（analyze 双层模式：宏观探索影响面 + 微观 Phase 级深入）、**编排层**（roadmap — 可选，纯 Milestone > Phase 分解）、**执行层**（plan → execute → verify）。6 条规范路径（Path A–F）覆盖从全新项目到小修复的所有场景。50 个斜杠命令覆盖 7 大类别，所有产物存放于 `.workflow/scratch/`，由 `state.json` 追踪。
 
 ### 4. Issue 闭环
 
@@ -121,7 +121,7 @@ Wiki 知识图谱支持 BM25 搜索、反向链接遍历、健康评分。学习
 
 | 类别 | 数量 | 前缀 | 用途 |
 |------|------|------|------|
-| **核心工作流** | 18 | `maestro-*` | 全生命周期 — ralph、init、roadmap、analyze、plan、execute、verify、milestones、overlays |
+| **核心工作流** | 19 | `maestro-*` | 全生命周期 — ralph、init、brainstorm、blueprint、analyze、roadmap、plan、execute、verify、milestones、overlays |
 | **管理** | 12 | `manage-*` | Issue 生命周期、代码库文档、知识捕获、记忆管理、状态 |
 | **质量** | 9 | `quality-*` | review、test、debug、test-gen、integration-test、business-test、refactor、sync |
 | **学习** | 5 | `learn-*` | 复盘、跟读、模式拆解、探究、多视角 |
@@ -147,7 +147,7 @@ maestro/
 │       ├── server/          # Hono API + WebSocket + SSE
 │       └── shared/          # 共享类型
 ├── .claude/
-│   ├── commands/            # 49 个斜杠命令 (.md)
+│   ├── commands/            # 50 个斜杠命令 (.md)
 │   └── agents/              # 21 个 Agent 定义 (.md)
 ├── workflows/               # 45 个工作流实现 (.md)
 ├── templates/               # JSON 模板 (task, plan, issue, ...)

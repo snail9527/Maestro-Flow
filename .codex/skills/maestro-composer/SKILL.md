@@ -125,7 +125,7 @@ If spec not found, use built-in fallback:
 | `verify` | skill | `maestro-verify` |
 | `refactor` | skill | `quality-refactor` |
 | `debug` | skill | `quality-debug` |
-| `spec` | skill | `maestro-roadmap --mode full` |
+| `spec` | skill | `maestro-blueprint` |
 | `checkpoint` | checkpoint | — |
 
 **Step 2.1** — Load `intent.json`, map each step to executor.

@@ -75,7 +75,7 @@ EXPECTED: JSON with: tech_stack[], architecture_patterns[], conventions[], integ
 
 ## Phase 4: Context Packaging
 
-1. Write spec-config.json -> <session>/spec/
+1. Write blueprint-config.json -> <session>/spec/
 2. Write discovery-context.json -> <session>/spec/
 3. Inline Discuss (DISCUSS-001):
    - Artifact: <session>/spec/discovery-context.json
@@ -94,7 +94,7 @@ EXPECTED: JSON with: tech_stack[], architecture_patterns[], conventions[], integ
        "discuss_verdict": "<verdict>"
      },
      "data": {
-       "output_paths": ["spec-config.json", "discovery-context.json"]
+       "output_paths": ["blueprint-config.json", "discovery-context.json"]
      }
    }
    ```

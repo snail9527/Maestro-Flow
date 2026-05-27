@@ -452,7 +452,7 @@ body{
       <div class="cmd-name">/maestro-init</div>
       <div class="cmd-desc">初始化 .workflow/ 目录，创建 state.json、project.md、specs/。项目起点。</div>
       <div class="cmd-usage">/maestro-init
-/maestro-init --from-brainstorm ANL-xxx</div>
+/maestro-init --from brainstorm:ANL-xxx</div>
       <div class="cmd-chain">
         <code>brainstorm</code><span class="arrow">→</span>
         <code>init</code><span class="arrow">→</span>
@@ -466,7 +466,7 @@ body{
       <div class="cmd-usage">/maestro-brainstorm "&lt;topic&gt;"</div>
       <div class="cmd-chain">
         <code>brainstorm</code><span class="arrow">→</span>
-        <code>init --from-brainstorm</code>
+        <code>init --from</code>
       </div>
     </div>
 
@@ -482,12 +482,12 @@ body{
     </div>
 
     <div class="cmd-card">
-      <div class="cmd-name">/maestro-spec-generate</div>
-      <div class="cmd-desc">完整规范链（7 阶段），产出 PRD + 架构文档 + roadmap。适合大型项目。</div>
-      <div class="cmd-usage">/maestro-spec-generate</div>
+      <div class="cmd-name">/maestro-blueprint</div>
+      <div class="cmd-desc">6 阶段规范蓝图，产出 产品简报 + PRD + 架构文档 + 史诗。适合大型项目。</div>
+      <div class="cmd-usage">/maestro-blueprint</div>
       <div class="cmd-chain">
         <code>init</code><span class="arrow">→</span>
-        <code>spec-generate</code><span class="arrow">→</span>
+        <code>blueprint</code><span class="arrow">→</span>
         <code>plan</code>
       </div>
     </div>
@@ -997,7 +997,7 @@ body{
   <p class="ex-desc">完整的初始化到里程碑完成流程。可选 brainstorm 前置。</p>
   <div class="example-steps">
     <div class="step"><span class="step-num">1</span><div><code>/maestro-brainstorm "在线教育平台"</code><div class="step-note">可选：多角色头脑风暴</div></div></div>
-    <div class="step"><span class="step-num">2</span><div><code>/maestro-init --from-brainstorm ANL-xxx</code><div class="step-note">初始化项目</div></div></div>
+    <div class="step"><span class="step-num">2</span><div><code>/maestro-init --from brainstorm:ANL-xxx</code><div class="step-note">初始化项目</div></div></div>
     <div class="step"><span class="step-num">3</span><div><code>/maestro-roadmap -y</code><div class="step-note">创建路线图</div></div></div>
     <div class="step"><span class="step-num">4</span><div><code>/maestro-plan 1 → /maestro-execute 1 → /maestro-verify 1</code><div class="step-note">逐 Phase 推进</div></div></div>
     <div class="step"><span class="step-num">5</span><div><code>/maestro-milestone-audit → /maestro-milestone-complete</code><div class="step-note">审计并归档</div></div></div>

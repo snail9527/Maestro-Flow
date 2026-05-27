@@ -8,7 +8,7 @@ Multi-dimensional iterative analysis with CLI exploration, multi-perspective syn
 maestro-brainstorm (optional upstream)
         ↓ ideas, scored options
 maestro-analyze ← THIS
-        ↓ analysis.md, discussion.md, conclusions.json, context.md
+        ↓ analysis.md, discussion.md, conclusions.json, context.md, context-package.json
 maestro-plan → maestro-execute → maestro-verify
 ```
 
@@ -41,7 +41,7 @@ Quick mode (-q):
 ## Arguments
 
 ```
-$ARGUMENTS: "[phase|topic] [-y] [-c] [-q]"
+$ARGUMENTS: "[phase|topic] [-y] [-c] [-q] [--from <source>]"
 
 (no args)   -- Milestone-wide analysis (requires init + roadmap)
 <phase>     -- Phase number (phase-scoped, requires init + roadmap)
@@ -49,6 +49,7 @@ $ARGUMENTS: "[phase|topic] [-y] [-c] [-q]"
 -y / --yes  -- Auto mode, skip interactive scoping, auto-deepen
 -c / --continue -- Resume from existing session
 -q / --quick -- Quick mode, skip exploration + scoring, go straight to decision extraction
+--from <source>  -- Load upstream context package (brainstorm:ID, analyze:ID, @file, or path). Replaces --from-brainstorm
 ```
 
 ## Scope Routing
@@ -59,12 +60,31 @@ Worktree guard: If .workflow/worktree-scope.json exists, reject phase args not i
 Auto-bootstrap: Create minimal .workflow/state.json if missing.
 
 Scope determination → OUTPUT_DIR:
-  (no args) + milestone + roadmap → scope="milestone", OUTPUT_DIR=.workflow/scratch/analyze-{milestone_slug}-{date}/
+  (no args) + milestone + roadmap → scope="milestone", mode="micro", OUTPUT_DIR=.workflow/scratch/{YYYYMMDD}-analyze-M{N}-{milestone_slug}/
   (no args) without milestone/roadmap → ERROR E001
-  (number) + milestone + roadmap   → scope="phase", OUTPUT_DIR=.workflow/scratch/analyze-{phase_slug}-{date}/
+  (number) + milestone + roadmap   → scope="phase", mode="micro", OUTPUT_DIR=.workflow/scratch/{YYYYMMDD}-analyze-P{N}-{phase_slug}/
   (number) without milestone/roadmap → ERROR
-  (text) + milestone               → scope="adhoc", OUTPUT_DIR=.workflow/scratch/analyze-{topic_slug}-{date}/
-  (text) without milestone         → scope="standalone", OUTPUT_DIR=.workflow/scratch/analyze-{topic_slug}-{date}/
+  (text) + milestone               → scope="adhoc", mode="macro", OUTPUT_DIR=.workflow/scratch/{YYYYMMDD}-analyze-{topic_slug}/
+  (text) without milestone         → scope="standalone", mode="macro", OUTPUT_DIR=.workflow/scratch/{YYYYMMDD}-analyze-{topic_slug}/
+
+Macro mode additions (scope="adhoc" or "standalone"):
+  - In Step 6 Synthesis, evaluate scope_verdict: "small" | "medium" | "large"
+    - large: 3+ independent subsystems or hard serial dependency barriers
+    - medium: 1-2 subsystems, parallelizable
+    - small: single-file or few-file change
+  - Write scope_verdict to context.md conclusions section
+  - Include scope_verdict in context-package.json for downstream consumption
+
+Phase-to-Milestone resolution (when scope="phase"):
+  FOR each ms in state.json.milestones[]:
+    IF phase_number in ms.phases[]:
+      target_milestone = ms.id
+      BREAK
+  IF no match: target_milestone = current_milestone (fallback)
+
+  Use target_milestone (not current_milestone) for:
+    - artifact registration (milestone field in Step 8.9)
+    - loading prior artifacts (Step 1 context loading)
 
 Create OUTPUT_DIR.
 ```
@@ -79,7 +99,8 @@ Create OUTPUT_DIR.
 ├── explorations.json          # Single perspective aggregated findings (skip in -q)
 ├── perspectives.json          # Multi-perspective findings + synthesis (skip in -q)
 ├── conclusions.json           # Final synthesis, recommendations, decision trail (skip in -q)
-└── context.md                 # Decision extraction: Locked/Free/Deferred decisions for plan
+├── context.md                 # Decision extraction: Locked/Free/Deferred decisions for plan
+└── context-package.json       # Standardized context package for cross-command consumption
 ```
 
 ---
@@ -92,8 +113,8 @@ Parse $ARGUMENTS to determine mode and flags:
 - `-c` present: locate existing session folder (discussion.md exists), resume from last round
 - `-y` present: set AUTO_MODE=true
 - `-q` present: set QUICK_MODE=true (skip Steps 2-7, jump to Step 8: Decision Extraction)
-- Number (e.g., "3") = phase scope: resolve phase slug from roadmap, output to scratch/analyze-{phase-slug}-{date}/
-- Text (e.g., "microservices vs monolith") = adhoc/standalone scope: output to scratch/analyze-{slug}-{date}/
+- Number (e.g., "3") = phase scope: resolve phase slug from roadmap, output to scratch/{YYYYMMDD}-analyze-P{N}-{phase-slug}/
+- Text (e.g., "microservices vs monolith") = adhoc/standalone scope: output to scratch/{YYYYMMDD}-analyze-{slug}/
 - Missing/empty = milestone scope (if roadmap exists) or error E001
 
 **Session initialization:**
@@ -105,7 +126,17 @@ Parse $ARGUMENTS to determine mode and flags:
 2. Read `.workflow/roadmap.md` — phase structure and dependencies
 3. Read `.workflow/state.json` → `current_milestone`, `artifacts[]`, `accumulated_context` (key_decisions, deferred items, blockers)
 4. Find prior analyze artifacts from `state.json.artifacts[]` where type=analyze and same milestone → load their `context.md` to skip already-decided areas
-5. Find brainstorm artifacts from `state.json.artifacts[]` where type=brainstorm and same milestone → load `guidance-specification.md` if exists
+5. **Load upstream context** (priority order):
+   a. If `--from` specified: resolve source → load `context-package.json` (see §9 of workflow-structure-guide.md)
+      - `--from brainstorm:ID` → `state.json.artifacts[type=brainstorm, id=ID].context_package` → load
+      - `--from @file` → create import session, delegate extraction → load context-package.json
+      - `--from path/` → load `path/context-package.json`
+   b. Else: auto-discover from `state.json.artifacts[]` where type=brainstorm and same milestone → if artifact has `context_package` field, load it; else fallback to reading `guidance-specification.md` directly
+   
+   From loaded context-package:
+   - `constraints[status=locked]` → skip these areas (already decided)
+   - `constraints[status=open]` → prioritize for analysis
+   - `open_questions[]` → seed discussion topics
 6. Load project specs: `specs_content = maestro spec load --category arch`
 
 **Load prior context** (adhoc/standalone scope):
@@ -496,7 +527,40 @@ Write to `OUTPUT_DIR/context.md`:
 {relevant code references from exploration or discussion}
 ```
 
-**8.6: Update project.md Key Decisions** (phase mode only)
+**8.6: Write context-package.json**
+
+Write to `OUTPUT_DIR/context-package.json`:
+
+```jsonc
+{
+  "$schema": "context-package/1.0",
+  "source": {
+    "type": "analyze",
+    "artifact_id": "{artifact_id}",
+    "session_path": "{OUTPUT_DIR relative to .workflow/}",
+    "generated_at": "{ISO-8601}"
+  },
+  "requirements": [],      // From conclusions.json implementation_scope items (if any)
+  "constraints": [],        // Locked → { status: "locked" }, Free → { status: "open" }, Deferred → { status: "deferred" }
+  "domain": {},             // Inherit from upstream context-package if loaded via --from
+  "non_goals": [],          // Deferred items → { title, rationale, ref: "context.md#Deferred" }
+  "insights": [],           // From conclusions.json recommendations → { role: "analyzer", area, summary }
+  "open_questions": [],     // Free decisions without strong recommendation → { area, question, options[] }
+  "references": [
+    { "type": "analysis", "path": "context.md" },
+    { "type": "conclusions", "path": "conclusions.json" }
+  ]
+}
+```
+
+Extraction mapping from context.md sections:
+- Each "Locked" decision → `constraints[]` with `status: "locked"`, `ref: "context.md#Locked"`
+- Each "Free" decision → `constraints[]` with `status: "open"`, `ref: "context.md#Free"`
+- Each "Deferred" item → `non_goals[]` with `ref: "context.md#Deferred"`
+- From `conclusions.json.implementation_scope[]` (if exists) → `requirements[]` with `{ id, title: scope.objective, acceptance: scope.acceptance_criteria, ref: "conclusions.json" }`
+- From `conclusions.json.recommendations[]` → `insights[]`
+
+**8.7: Update project.md Key Decisions** (phase mode only)
 
 ```
 Phase mode only: Append each new Locked decision to .workflow/project.md "## Key Decisions" table.
@@ -504,7 +568,7 @@ Row format: | {decision title} | {rationale summary} | Phase {NN} — {date} |
 Skip duplicates (match by title).
 ```
 
-**8.7: Auto-create Issues from Deferred Items**
+**8.8: Auto-create Issues from Deferred Items**
 
 ```
 For each Deferred decision, create an issue in .workflow/issues/issues.jsonl:
@@ -516,7 +580,7 @@ For each Deferred decision, create an issue in .workflow/issues/issues.jsonl:
   tags: ["deferred", "analyze"]
 ```
 
-### Step 8.8: Register Artifact
+### Step 8.9: Register Artifact
 
 ```
 Register artifact in .workflow/state.json:
@@ -525,6 +589,7 @@ Register artifact in .workflow/state.json:
   milestone: current_milestone (null if standalone)
   phase: phase_num (null if milestone/adhoc/standalone)
   path: OUTPUT_DIR relative to .workflow/
+  context_package: "{OUTPUT_DIR}/context-package.json"   // relative to .workflow/
   harvested: false, created_at: session_start_time, completed_at: now()
 Atomic write (tmp + rename).
 ```
@@ -598,6 +663,7 @@ Decisions: {decision_count} (Locked: {n}, Free: {n}, Deferred: {n})
 
 Files:
   context.md           — Locked/Free/Deferred decisions for plan
+  context-package.json — Standardized context package for cross-command consumption
   discussion.md        — Full discussion timeline (full mode)
   analysis.md          — 6-dimension scoring summary (full mode)
   conclusions.json     — Structured conclusions (full mode)
@@ -698,10 +764,12 @@ Replaceable blocks (overwritten each round):
 
 **Both modes (full + quick):**
 - context.md written with all decisions classified as Locked/Free/Deferred
+- context-package.json written with constraints, requirements, insights, and open_questions
 - Gray areas identified through phase-specific analysis
 - Scope creep redirected to Deferred section
 - Every decision follows Context/Options/Chosen/Reason protocol
 - Prior context loaded and applied (no re-asking decided questions)
+- Upstream context loaded via `--from` when specified (context-package.json consumed)
 
 ## Error Handling
 

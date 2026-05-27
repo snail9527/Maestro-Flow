@@ -80,6 +80,26 @@ All agents — regardless of dynamically assigned role — MUST follow these tra
 - 2 retries exhausted → report `failed` with evidence
 - NEVER skip verification and report completed
 
+### Termination Contract (MANDATORY)
+
+Every spawned worker MUST call `report_agent_job_result` EXACTLY ONCE before exiting. NO exceptions:
+
+| Path | Action |
+|------|--------|
+| Success | `result_status=completed` after verification passes |
+| Failure | `result_status=failed` with error message (build error, file write failure, unrecoverable tool error) |
+| Blocked | `result_status=blocked` when upstream missing OR retries exhausted |
+| Timeout | Approaching `max_runtime_seconds` → revert partial unsafe work → `result_status=blocked` with error="timeout" |
+
+- NEVER continue indefinitely.
+- NEVER exit silently.
+- NEVER omit `report_agent_job_result`.
+
+### Hard Constraints
+
+- Do NOT write to `tasks.csv`, `wave-*.csv`, `results.csv` — orchestrator owns those.
+- Do NOT call `spawn_agents_on_csv` (no recursion).
+
 ## 6. Quality Scoring
 
 | Result | Score | Action |

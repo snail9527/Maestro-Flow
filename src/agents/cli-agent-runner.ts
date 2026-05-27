@@ -906,14 +906,20 @@ export class CliAgentRunner {
 
         // Interactive mode: when Claude emits token_usage (end of turn) and no
         // more inject messages are queued, close stdin to let the process exit.
-        if (config.interactive && entry.type === 'token_usage' && broker) {
-          try {
-            const pending = broker!.listMessages(execId)
-              .filter((m) => m.status === 'queued' && m.delivery === 'inject');
-            if (pending.length === 0 && !cancellationRequested) {
-              adapter.endInput?.(agentProcess.id);
-            }
-          } catch { /* best-effort */ }
+        // Sync mode has no broker (and never receives inject messages), so we
+        // still close stdin — otherwise Claude stays paused forever and the
+        // run() promise never resolves.
+        if (config.interactive && entry.type === 'token_usage') {
+          let hasPending = false;
+          if (broker) {
+            try {
+              hasPending = broker.listMessages(execId)
+                .some((m) => m.status === 'queued' && m.delivery === 'inject');
+            } catch { /* best-effort */ }
+          }
+          if (!hasPending && !cancellationRequested) {
+            adapter.endInput?.(agentProcess.id);
+          }
         }
 
         // Resolve when the agent process stops

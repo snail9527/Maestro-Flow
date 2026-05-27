@@ -260,7 +260,35 @@ Write `tasks.csv` to `${sessionFolder}/tasks.csv`.
 
 ### Step 4: Wave Execution
 
-Execute waves sequentially via `spawn_agents_on_csv`.
+Execute waves sequentially via `spawn_agents_on_csv`. All four waves share the same `output_schema` shape (below) — only `instruction` differs.
+
+**Shared output_schema** (strict JSON Schema):
+
+```javascript
+const UI_CODIFY_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    id:            { type: "string" },
+    result_status: { type: "string", enum: ["completed", "failed"] },
+    findings:      { type: "string", maxLength: 500 },
+    output_path:   { type: "string", description: "Absolute path of the file/dir produced by this worker (empty if failed)" },
+    error:         { type: "string" }
+  },
+  required: ["id", "result_status", "findings"]
+}
+```
+
+**Shared termination contract** (embed in every `instruction` below):
+
+```
+TERMINATION CONTRACT (mandatory — NO worker may end without calling report_agent_job_result):
+  - Success → result_status=completed, output_path set to the absolute path of the artifact you wrote
+  - Failure → unrecoverable error → result_status=failed, output_path=""
+  - Timeout → near max_runtime_seconds, finalize current write if safe → otherwise report failed with error="timeout"
+  - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+  - Do NOT write to tasks.csv, wave-*.csv, results.csv (orchestrator owns those).
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 #### Wave 1: File Discovery (Barrier)
 
@@ -270,15 +298,15 @@ Filter `wave == 1 && status == pending` from master CSV. Write `wave-1.csv`.
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-1.csv`,
   id_column: "id",
-  instruction: `You are scanning a source directory for design-relevant files. Read the 'description' column for full instructions. Use Glob to find files, Read to sample content. Write file inventory JSON to the specified path. Report findings as a concise summary.`,
+  instruction: `You are scanning a source directory for design-relevant files. Read the 'description' column for full instructions. Use Glob to find files, Read to sample content. Write file inventory JSON to the specified path. Report findings as a concise summary.\n\n${SHARED_TERMINATION_CONTRACT}`,
   max_concurrency: 1,
   max_runtime_seconds: 1800,
   output_csv_path: `${sessionFolder}/wave-1-results.csv`,
-  output_schema: { id, result_status: ["completed"|"failed"], findings, output_path, error }
+  output_schema: UI_CODIFY_OUTPUT_SCHEMA
 })
 ```
 
-Merge wave-1-results.csv into master `tasks.csv`: map `result_status` -> master `status` column, then delete `wave-1.csv` and `wave-1-results.csv`.
+Merge wave-1-results.csv into master `tasks.csv`: map `result_status` -> master `status` column; copy `findings`, `output_path`, `error`. Delete `wave-1.csv` and `wave-1-results.csv`.
 
 #### Wave 2: Parallel Extraction (3 agents)
 
@@ -288,11 +316,11 @@ Filter `wave == 2 && status == pending`. Build `prev_context` from wave 1 findin
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-2.csv`,
   id_column: "id",
-  instruction: `You are extracting design tokens from source code. Read the 'description' column for your specific extraction task. Use prev_context for file inventory from discovery phase. Read source files, extract tokens, write output JSON to the specified path.`,
+  instruction: `You are extracting design tokens from source code. Read the 'description' column for your specific extraction task. Use prev_context for file inventory from discovery phase. Read source files, extract tokens, write output JSON to the specified path.\n\n${SHARED_TERMINATION_CONTRACT}`,
   max_concurrency: 3,
   max_runtime_seconds: 3600,
   output_csv_path: `${sessionFolder}/wave-2-results.csv`,
-  output_schema: { id, result_status: ["completed"|"failed"], findings, output_path, error }
+  output_schema: UI_CODIFY_OUTPUT_SCHEMA
 })
 ```
 
@@ -308,11 +336,11 @@ Filter `wave == 3 && status == pending`. Build `prev_context` from wave 2 findin
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-3.csv`,
   id_column: "id",
-  instruction: `You are generating a reference design package. Read the 'description' column for full instructions. Copy token files, generate preview.html and preview.css. Report package contents in findings.`,
+  instruction: `You are generating a reference design package. Read the 'description' column for full instructions. Copy token files, generate preview.html and preview.css. Report package contents in findings.\n\n${SHARED_TERMINATION_CONTRACT}`,
   max_concurrency: 1,
   max_runtime_seconds: 1800,
   output_csv_path: `${sessionFolder}/wave-3-results.csv`,
-  output_schema: { id, result_status: ["completed"|"failed"], findings, output_path, error }
+  output_schema: UI_CODIFY_OUTPUT_SCHEMA
 })
 ```
 
@@ -326,11 +354,11 @@ Filter `wave == 4 && status == pending`. Build `prev_context` from wave 3 findin
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-4.csv`,
   id_column: "id",
-  instruction: `You are building knowledge assets from a design package. Read the 'description' column for full instructions. Build manifest, write knowhow files, create spec entries, refresh wiki index, cleanup temp files. Report asset counts in findings.`,
+  instruction: `You are building knowledge assets from a design package. Read the 'description' column for full instructions. Build manifest, write knowhow files, create spec entries, refresh wiki index, cleanup temp files. Report asset counts in findings.\n\n${SHARED_TERMINATION_CONTRACT}`,
   max_concurrency: 1,
   max_runtime_seconds: 1800,
   output_csv_path: `${sessionFolder}/wave-4-results.csv`,
-  output_schema: { id, result_status: ["completed"|"failed"], findings, output_path, error }
+  output_schema: UI_CODIFY_OUTPUT_SCHEMA
 })
 ```
 

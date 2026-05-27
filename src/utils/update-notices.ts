@@ -251,3 +251,54 @@ registerNotice({
     },
   ],
 });
+
+registerNotice({
+  version: '0.4.12',
+  title: '工作流拓扑重构 + maestro-amend + context-package 统一',
+  highlights: [
+    'blueprint 独立命令、Milestone 层级重排、双层 analyze 架构',
+    '新增 maestro-amend skill：生成工作流命令 overlay',
+    'context-package 体系统一，harvest --prune 支持 state.json 管理',
+    'analyze/brainstorm/roadmap 三命令新增 interview_protocol',
+    'spec 工具 seed 模板单一来源 + YAML frontmatter 保证',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.4.16',
+  title: 'Ralph CLI 子命令族 + 三存储知识淘汰入口',
+  highlights: [
+    '新增 maestro ralph 子命令族（session/skills/next/check/complete）+ step 加载脚本化',
+    '新增 manage-knowledge-audit 命令：spec / wiki / knowhow 三存储的对称淘汰入口',
+    'ralph-execute 描述精简：A_EXEC_STEP 改为纯指令、路径展开 + emit 格式重设计',
+    'statusline line 2 链式渲染简化，48h 过期 + 兼容旧 schema',
+    'install manifest 记录 hook level，TUI 默认值从上次安装恢复',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.4.18',
+  title: '统一知识检索 + maestro-next 单链推荐',
+  highlights: [
+    '新增 codebase/session 虚拟节点：wiki 检索自动聚合源码与当前会话',
+    '新增 workflows/finish-work.md：收尾工作流统一驱动 store-knowhow',
+    '新增 maestro-next 命令：从命令池单链推荐下一步并执行',
+    'ralph CLI 同时识别 maestro-* 与 ralph-* 两类 session',
+    '统一 codex skills spawn_agents_on_csv 契约：强制 worker 终止 + 严格 output_schema',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.4.19',
+  title: 'team-swarm 蚁群智能 + Agy hooks 安装支持',
+  highlights: [
+    '新增 team-swarm 技能：ACO 驱动多智能体探索 + 信息素优化控制器',
+    '安装器新增 Agy (Antigravity) hooks 配置步骤，与 Claude/Codex hooks 独立',
+    'InstallFlow 改为按 scope+target 加载 manifest 默认值，避免跨 scope 污染',
+    'maestro-next 命令优化：单链推荐改进 + 多源 session 识别',
+  ],
+  actions: [],
+});

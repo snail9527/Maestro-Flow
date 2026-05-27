@@ -28,10 +28,10 @@ Generator-Critic loop: max 3 iterations per layer to distinguish test defects fr
 **Load spec package:**
 
 ```
-1. Read ${PHASE_DIR}/index.json -> extract spec_ref (if present)
-2. IF --spec provided: SPEC_DIR = .workflow/.spec/{spec_ref}/
-   ELSE IF index.json.spec_ref: SPEC_DIR = .workflow/.spec/{spec_ref}/
-   ELSE: try .workflow/.spec/SPEC-*/ (most recent)
+1. Read ${PHASE_DIR}/index.json -> extract blueprint_ref (if present)
+2. IF --spec provided: SPEC_DIR = .workflow/blueprint/{blueprint_ref}/
+   ELSE IF index.json.blueprint_ref: SPEC_DIR = .workflow/blueprint/{blueprint_ref}/
+   ELSE: try .workflow/blueprint/SPEC-*/ (most recent)
 
 3. IF SPEC_DIR found:
    - Read requirements/_index.md (requirement summary + traceability matrix)
@@ -189,7 +189,7 @@ Write `business-test-plan.json` to `.tests/business/`:
 ```json
 {
   "phase": "{phase}",
-  "spec_ref": "{SPEC_DIR name or 'degraded'}",
+  "blueprint_ref": "{SPEC_DIR name or 'degraded'}",
   "spec_mode": "full|degraded",
   "generated_at": "{ISO timestamp}",
   "layers": {
@@ -363,7 +363,7 @@ Write `.tests/business/business-test-report.json`:
 ```json
 {
   "phase": "{phase}",
-  "spec_ref": "{spec reference}",
+  "blueprint_ref": "{spec reference}",
   "spec_mode": "full|degraded",
   "completed_at": "{ISO timestamp}",
   "execution_mode": "gen-code|agent",
@@ -432,7 +432,7 @@ Write `.tests/business/business-test-summary.md`:
 ```markdown
 ---
 phase: {phase}
-spec_ref: {spec reference}
+blueprint_ref: {spec reference}
 completed_at: {ISO timestamp}
 verdict: passed|gaps_found
 ---

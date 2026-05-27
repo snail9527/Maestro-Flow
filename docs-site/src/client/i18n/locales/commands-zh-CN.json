@@ -15,11 +15,11 @@
       "name_zh": "初始化项目",
       "description": "Initialize project with auto state detection (empty/code/existing) — creates .workflow/ directory structure",
       "description_zh": "自动检测项目状态（空项目/代码库/已有项目），创建 .workflow/ 目录结构，包含 project.md、state.json、config.json 和 specs/",
-      "workflow": "brainstorm → **init** → roadmap/spec-generate",
+      "workflow": "brainstorm → **init** → roadmap/blueprint",
       "workflow_zh": "头脑风暴之后，路线图/规格生成之前执行",
       "prev_commands": ["maestro-brainstorm"],
       "next_commands": ["maestro-roadmap"],
-      "flags": ["--auto (自动模式)", "--from-brainstorm SESSION-ID (从头脑风暴导入)"]
+      "flags": ["--auto (自动模式)", "--from <source> (导入上游 context package，如 brainstorm:ID、@file)"]
     },
     "maestro-plan": {
       "name": "maestro-plan",
@@ -70,7 +70,7 @@
       "name_zh": "头脑风暴",
       "description": "Unified brainstorming with dual-mode operation — auto pipeline (multi-role synthesis) and single role analysis",
       "description_zh": "双模式头脑风暴：自动模式（框架生成 → 多角色并行分析 → 综合输出）或单角色分析。输出 .brainstorming/ 目录中的结构化产物",
-      "workflow": "**brainstorm** → init → roadmap/spec-generate",
+      "workflow": "**brainstorm** → init → roadmap/blueprint",
       "workflow_zh": "工作流起点，为后续初始化和规划提供概念基础",
       "prev_commands": [],
       "next_commands": ["maestro-init"],
@@ -79,13 +79,13 @@
     "maestro-analyze": {
       "name": "maestro-analyze",
       "name_zh": "分析讨论",
-      "description": "Multi-dimensional analysis with CLI exploration, decision extraction, and intent tracking",
-      "description_zh": "多维分析：CLI 探索 + 6 维度评分 + 决策记录协议 + 意图覆盖检查。生成 analysis.md 和 context.md，用于后续规划",
-      "workflow": "brainstorm → **analyze** → plan",
-      "workflow_zh": "在头脑风暴和规划之间使用，提取关键决策和上下文",
-      "prev_commands": ["maestro-brainstorm", "maestro-init"],
-      "next_commands": ["maestro-plan"],
-      "flags": ["[phase|topic] (阶段或主题)", "-y (自动模式)", "-c (恢复会话)", "-q (快速模式，仅提取决策)", "--gaps [ISS-ID] (缺口分析)"]
+      "description": "Dual-layer analysis: macro (text) for requirement exploration with scope_verdict, micro (number) for phase-level 6-dimension deep analysis",
+      "description_zh": "双层分析：Macro（文本参数）宏观需求探索产出 scope_verdict，Micro（数字参数）Phase 级 6 维度深度分析。生成 analysis.md 和 context.md",
+      "workflow": "brainstorm/blueprint → **analyze** → roadmap/plan",
+      "workflow_zh": "Macro 层在 roadmap 之前探索需求影响面，Micro 层在 plan 之前深度分析 Phase",
+      "prev_commands": ["maestro-brainstorm", "maestro-init", "maestro-blueprint"],
+      "next_commands": ["maestro-roadmap", "maestro-plan"],
+      "flags": ["[phase|topic] (阶段编号=micro 或主题文本=macro)", "-y (自动模式)", "-c (恢复会话)", "-q (快速模式，仅提取决策)", "--gaps [ISS-ID] (缺口分析)", "--from <source> (导入上游 context package)"]
     },
     "maestro-collab": {
       "name": "maestro-collab",
@@ -101,13 +101,13 @@
     "maestro-roadmap": {
       "name": "maestro-roadmap",
       "name_zh": "路线图",
-      "description": "Interactive roadmap creation with iterative refinement — lightweight alternative to spec-generate",
-      "description_zh": "交互式路线图创建：需求分解 → 里程碑规划 → 迭代精化 → 阶段确认。spec-generate 的轻量级替代方案",
+      "description": "Interactive roadmap creation with iterative refinement — lightweight alternative to blueprint",
+      "description_zh": "交互式路线图创建：需求分解 → 里程碑规划 → 迭代精化 → 阶段确认。blueprint 的轻量级替代方案",
       "workflow": "init → **roadmap** → plan",
       "workflow_zh": "项目初始化之后，阶段规划之前。适合不需要完整规格文档的项目",
       "prev_commands": ["maestro-init", "maestro-brainstorm"],
       "next_commands": ["maestro-plan"],
-      "flags": ["<requirement> (需求描述，必填)", "-y (自动模式)", "-c (恢复会话)", "-m progressive|direct|auto (模式)", "--from-brainstorm SESSION-ID (从头脑风暴导入)", "--revise [instructions] (修订路线图)", "--review (审查模式)"]
+      "flags": ["<requirement> (需求描述，必填)", "-y (自动模式)", "-c (恢复会话)", "-m progressive|direct|auto (模式)", "--from <source> (导入上游 context package，如 brainstorm:ID、@file)", "--revise [instructions] (修订路线图)", "--review (审查模式)"]
     },
     "maestro-impeccable": {
       "name": "maestro-impeccable",

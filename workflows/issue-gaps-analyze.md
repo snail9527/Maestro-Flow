@@ -1,5 +1,7 @@
 # Workflow: Issue Gaps Analysis
 
+> **CLI variants**: see `issue-gaps-analyze.codex.md` for codex-specific notes (CSV-wave variant using `spawn_agents_on_csv`).
+
 Root cause analysis for issues using CLI exploration and codebase context gathering.
 Supports single issue (ISS-ID) or batch (all open/registered) with classification and parallel analysis.
 Produces analysis records in issues.jsonl and context.md for downstream `plan --gaps`.

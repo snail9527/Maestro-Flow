@@ -8,19 +8,27 @@ Cross-phase integration audit for milestone completion. Based on artifact regist
 
 1. Read `.workflow/state.json`:
    - Determine target milestone (from $ARGUMENTS or current_milestone)
+   - If no milestone: ERROR E001
    - Get `artifacts[]` array
+   - Resolve milestone object from `milestones[]` by id
+   - Determine milestone type: `milestone_obj.type` (default `"standard"` if field missing)
 
-2. Parse `.workflow/roadmap.md` to identify all phases belonging to this milestone
+2. **Standard milestone** (`type != "adhoc"`):
+   - Parse `.workflow/roadmap.md` to identify all phases belonging to this milestone
 
-3. Group milestone artifacts by type → `analyze_artifacts`, `plan_artifacts`, `execute_artifacts`, `verify_artifacts`
+3. **Adhoc milestone** (`type == "adhoc"`):
+   - Skip roadmap.md parsing (roadmap may not exist)
+   - Phases are defined by `milestone_obj.phases[]` (typically `[1]` with slug `"standalone"`)
+
+4. Group milestone artifacts by type → `analyze_artifacts`, `plan_artifacts`, `execute_artifacts`, `verify_artifacts`
 
 ---
 
 ## Step 2: Phase Coverage Check
 
-Parse roadmap.md phases for this milestone. For each phase, verify completed artifacts exist for analyze, plan, and execute types.
+**Standard milestone**: Parse roadmap.md phases for this milestone. For each phase, verify completed artifacts exist for analyze, plan, and execute types. WARN if any phase is missing its execute artifact: "Phase {number} ({title}) missing execute artifact"
 
-WARN if any phase is missing its execute artifact: "Phase {number} ({title}) missing execute artifact"
+**Adhoc milestone**: Skip phase-level coverage check (no roadmap phases to validate). Instead, verify that at least one complete artifact chain exists: plan artifact (PLN) + execute artifact (EXC) with matching milestone ID. WARN if no execute artifact found.
 
 ---
 

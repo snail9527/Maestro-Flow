@@ -154,7 +154,7 @@ Inside a worktree, new artifacts auto-belong to the milestone in `worktree-scope
 |---------|--------|
 | `maestro-init` | Would reset project state |
 | `maestro-roadmap` | Would re-decompose phases |
-| `maestro-spec-generate` | Would modify global specs |
+| `maestro-blueprint` | Would modify global blueprint |
 | `maestro-fork` | Cannot fork from within a worktree |
 | `maestro-merge` | Must be executed from main |
 

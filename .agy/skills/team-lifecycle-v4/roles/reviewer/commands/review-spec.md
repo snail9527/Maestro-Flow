@@ -22,7 +22,7 @@
 2. Load quality gate thresholds from specs/quality-gates.md
 3. Score each dimension
 4. Run cross-document validation
-5. Generate readiness-report.md + spec-summary.md
+5. Generate readiness-report.md + blueprint-summary.md
 6. Run DISCUSS-003:
    - Artifact: <session>/spec/readiness-report.md
    - Perspectives: product, technical, quality, risk, coverage
@@ -41,4 +41,4 @@
 
 Write to <session>/artifacts/:
 - readiness-report.md: Dimension scores, issue list, traceability matrix
-- spec-summary.md: Executive summary of all spec docs
+- blueprint-summary.md: Executive summary of all spec docs

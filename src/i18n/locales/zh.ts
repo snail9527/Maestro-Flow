@@ -98,6 +98,7 @@ export const zh: LocaleStrings = {
     confirmLabelBackup: '备份：',
     confirmLabelCodexHooks: 'Codex Hooks：',
     confirmLabelCodexMcp: 'Codex MCP：',
+    confirmLabelAgyHooks: 'Agy Hooks：',
     confirmSkipped: '已跳过',
 
     // Codex Hooks
@@ -110,6 +111,14 @@ export const zh: LocaleStrings = {
     codexHooksWinWarning: '警告：Codex hooks 暂不支持 Windows。',
     codexHooksFeatureFlagHint: '在 ~/.codex/config.toml 的 [features] 中添加 codex_hooks = true 以启用 hooks。',
 
+    // Agy Hooks (Antigravity)
+    agyHooksLevelDescriptions: {
+      none: '无 Hooks',
+      minimal: 'spec-injector (PreToolUse 拦截 invoke_subagent)',
+      standard: '+ 会话/skill/关键词上下文 (PreInvocation) + delegate 监控 (PostToolUse) + 团队/遥测/协调器 (Stop) + preflight/spec 守护',
+      full: '+ 工作流防护 (PreToolUse 拦截 shell/文件写入)',
+    },
+
     // Execution
     execPreparing: '准备中...',
     execScanning: '扫描禁用项...',
@@ -119,6 +128,7 @@ export const zh: LocaleStrings = {
     execWritingVersion: '写入版本标记...',
     execInstallingHooks: '正在安装 {level} hooks...',
     execInstallingCodexHooks: '正在安装 Codex {level} hooks...',
+    execInstallingAgyHooks: '正在安装 Agy {level} hooks...',
     execInstallingStatusline: '正在安装 statusline...',
     execRegisteringMcp: '注册 MCP 服务器...',
     execRegisteringCodexMcp: '注册 Codex MCP 服务器...',

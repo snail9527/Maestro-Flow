@@ -137,17 +137,17 @@ S_COMPLETE:
 
 1. **Checkpoint**: handle inline — save snapshot, update context.last_checkpoint, mark completed. If auto_continue==false: AskUserQuestion (Continue/Pause/Abort).
 
-2. **Skill nodes**: resolve runtime references → write wave-{N}.csv → spawn:
+2. **Skill nodes**: resolve runtime references → write wave-{N}.csv (only rows with status == "pending") → spawn:
 ```
 spawn_agents_on_csv({
   csv_path: "wave-{N}.csv", id_column: "id",
   instruction: SUB_AGENT_INSTRUCTION,
-  max_workers: waveSteps.length, max_runtime_seconds: 3600,
+  max_concurrency: waveSteps.length, max_runtime_seconds: 3600,
   output_csv_path: "wave-{N}-results.csv", output_schema: RESULT_SCHEMA
 })
 ```
 
-3. Read results → update step status/findings/artifacts
+3. Read results → map `result_status` → master step `status`; copy `summary` into findings and `artifacts` into the step artifact list
 4. **Barrier analysis**: read artifacts, update context per barrier table
 5. Append wave record to state.waves[], persist state.json
 
@@ -158,14 +158,33 @@ spawn_agents_on_csv({
 先原样执行技能调用：{skill_call}
 然后基于结果完成任务说明：{topic}
 限制：不要修改 .workflow/.maestro/ 下的 state 文件
-最后调用 report_agent_job_result，返回 JSON：
-{"status":"completed|failed","skill_call":"...","summary":"一句话","artifacts":"路径或空","error":"原因或空"}
+最后必须调用 report_agent_job_result（无论成功/失败/超时都必须上报）。
+
+TERMINATION CONTRACT（强制）：
+  - 成功：result_status = completed，summary 描述产出
+  - 失败：result_status = failed，error 写明原因
+  - 超时：临近 max_runtime_seconds 时立即上报 result_status = failed，error = "timeout"
+  - 禁止：无限循环、静默退出、跳过 report_agent_job_result
+
+OUTPUT（必须匹配 output_schema）：
+{"id":"<row id>","result_status":"completed|failed","skill_call":"...","summary":"一句话","artifacts":"路径或空","error":"原因或空"}
 ```
 
 ### RESULT_SCHEMA
 
 ```json
-{ "status": "completed|failed", "skill_call": "", "summary": "", "artifacts": "", "error": "" }
+{
+  "type": "object",
+  "properties": {
+    "id":            { "type": "string" },
+    "result_status": { "type": "string", "enum": ["completed", "failed"] },
+    "skill_call":    { "type": "string" },
+    "summary":       { "type": "string", "maxLength": 500 },
+    "artifacts":     { "type": "string" },
+    "error":         { "type": "string" }
+  },
+  "required": ["id", "result_status", "summary"]
+}
 ```
 
 </actions>

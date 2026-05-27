@@ -42,29 +42,30 @@ state.json exists → Path C (existing) | source files exist → Path B (brownfi
    - "Keep exploring" → continue questioning
 
    If `--auto` flag: skip interactive questioning, extract from @ referenced document.
-   If `--from-brainstorm SESSION-ID`:
-   - Locate brainstorm session directory (`.workflow/scratch/brainstorm-*/`)
-   - Read `guidance-specification.md`:
-     - Problem statement → project vision + core value
-     - Features → project goals (Active requirements)
-     - Non-goals → constraints + Out of Scope requirements
-     - Terminology → project glossary context
+   If `--from <source>` (alias: `--from-brainstorm`):
+   - Locate source directory (`.workflow/scratch/*-brainstorm-*/`, `.workflow/scratch/*-import-*/`, etc.)
+   - Load `context-package.json` (preferred) or fall back to `guidance-specification.md`:
+     - `domain` (name, description, problem_statement) → project vision + core value
+     - `requirements[]` → project goals (Active requirements)
+     - `constraints[locked]` → key decisions
+     - `non_goals[]` → constraints + Out of Scope requirements
+     - `domain.terminology[]` → project glossary context
    - Skip interactive questioning (context already gathered)
 
 2. **Workflow Preferences** -- Configure project workflow settings:
 
-   Round 1 — Core settings (AskUserQuestion):
-   - Granularity: Coarse (3-5 phases) / Standard (5-8) / Fine (8-12)
-   - Execution: Parallel / Sequential
-   - Git Tracking: Commit planning docs to git?
-
-   Round 2 — Workflow agents:
-   - Research: Research before planning each phase?
-   - Plan Check: Verify plans achieve goals?
-   - Verifier: Verify work after each phase?
+   Single round (AskUserQuestion):
+   - Research: Research before planning each phase? (`workflow.research`)
+   - Reflection: Reflect on results after each phase? (`workflow.reflection`)
+   - Git Tracking: Commit planning docs to git? (`git.commit_docs`)
+   - Auto-sync: Sync codebase docs after execute? (`codebase.auto_sync_after_execute`)
 
    Write `.workflow/config.json` from template + user selections.
-   If `--auto`: use defaults (standard, parallel, commit, all agents on).
+   Other segments (`execution`, `gates`, `guard`, `collab`, `specInjection`, `dashboard`)
+   stay at template defaults; user can edit later or configure via dedicated commands
+   (`/maestro-guard`, `maestro spec injection set`).
+
+   If `--auto`: use template defaults (all the above on).
 
 3. **Research** (optional, based on config.workflow.research) -- Spawn 4 parallel `workflow-project-researcher` agents writing to `.workflow/research/`: STACK.md, FEATURES.md, ARCHITECTURE.md, PITFALLS.md.
 
@@ -86,7 +87,7 @@ state.json exists → Path C (existing) | source files exist → Path B (brownfi
    - "Skip mapping" → proceed
 4. Run Workflow Preferences (same as Path A step 2) → `.workflow/config.json`
 5. Ask user for project vision, goals, constraints (same deep questioning as Path A step 1)
-   - If `--from-brainstorm SESSION-ID`: extract from guidance-specification.md (skip questioning)
+   - If `--from <source>` (alias: `--from-brainstorm`): load context-package.json (skip questioning)
    - For brownfield: infer Validated requirements from existing code (what does codebase already do?)
 6. Create `.workflow/project.md` (include inferred Validated requirements + new Active requirements)
 
@@ -138,7 +139,7 @@ Verify all required directories and files exist:
 1. If git repo and config.git.commit_docs: commit all `.workflow/` files with message `"chore: initialize project workflow"`
 2. Display initialization summary:
    - Project name and core value
-   - Config highlights (mode, granularity, execution method, enabled agents)
+   - Config highlights (research/reflection/commit_docs/auto_sync_after_execute toggles)
    - Research summary (if research was run)
 3. Route next steps:
    - "Run `/maestro-roadmap --mode full` to create full spec package with roadmap (heavy path)"

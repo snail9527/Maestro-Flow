@@ -1,7 +1,7 @@
 ---
 name: spec-remove
 description: Remove spec entry by ID
-argument-hint: "<entry-id>"
+argument-hint: "<entry-id> [--cascade]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
 
@@ -23,6 +23,9 @@ $ARGUMENTS — entry ID to remove (e.g., `spec-learnings-003`)
 - `maestro wiki list --type spec --json` — list all spec entries
 - `/spec-load --keyword <term>` — find by keyword
 - `maestro wiki search "<query>"` — BM25 search
+
+**Flags:**
+- `--cascade` — When the target spec is a ref-type entry (created via `spec-add --ref` and linked to a knowhow document), also delete the referenced knowhow file. Without this flag, ref-type removal leaves an orphan knowhow file.
 </context>
 
 <execution>
@@ -45,6 +48,8 @@ Display entry details. Ask user to confirm unless `-y` flag present.
 
 Run `maestro wiki remove-entry <entry-id>`. WikiIndexer auto-updates `wiki-index.json`.
 
+If `--cascade` is set and the entry has a `ref` attribute pointing to a knowhow file, also delete that file to avoid leaving an orphan.
+
 ### Step 5: Verify & Report
 
 Confirm removal via `maestro wiki get <entry-id>` (should return not-found). Display removed ID, source file, and commands for verify/re-add.
@@ -65,5 +70,6 @@ Confirm removal via `maestro wiki get <entry-id>` (should return not-found). Dis
 - [ ] User confirmed removal
 - [ ] Entry removed via `maestro wiki remove-entry`
 - [ ] Wiki index auto-updated
-- [ ] Confirmation displayed
+- [ ] If `--cascade` and entry has a `ref` attribute: referenced knowhow file deleted, orphan avoided
+- [ ] Confirmation displayed (and cascaded knowhow path if applicable)
 </success_criteria>

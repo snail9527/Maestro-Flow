@@ -32,7 +32,7 @@ status: draft
 generated_at: {timestamp}
 version: 1
 dependencies:
-  - ../spec-config.json
+  - ../blueprint-config.json
   - ../product-brief.md
   - ../requirements/_index.md
   - ../architecture/_index.md
@@ -187,7 +187,7 @@ status: draft
 
 | Variable | Source | Description |
 |----------|--------|-------------|
-| `{session_id}` | spec-config.json | Session identifier |
+| `{session_id}` | blueprint-config.json | Session identifier |
 | `{timestamp}` | Runtime | ISO8601 generation timestamp |
 | `{product_name}` | product-brief.md | Product/feature name |
 | `{EPIC}` | Auto-increment | Epic number (3 digits) |

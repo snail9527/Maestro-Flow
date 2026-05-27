@@ -3,6 +3,8 @@ import { Box, Text, useInput } from 'ink';
 import { type HookLevel } from '../../commands/hooks.js';
 import { t } from '../../i18n/index.js';
 import { C, SYM, SP, wrapCursor, parseNumberKey, KeyHints, SectionHeader } from '../shared/index.js';
+// Note: each step labels its level using its own description map (Claude /
+// Codex / Agy descriptions diverge; never share text across them).
 
 // ---------------------------------------------------------------------------
 // InstallHub — menu hub with status for each install category
@@ -92,11 +94,12 @@ export function InstallHub({ items, onToggle, onEnter, onInstall, onBack }: Inst
 // ---------------------------------------------------------------------------
 
 export function buildHubItems(
-  enabled: { components: boolean; hooks: boolean; mcp: boolean; codexHooks: boolean; codexMcp: boolean; extraMcp: boolean; statusline: boolean; backup: boolean },
+  enabled: { components: boolean; hooks: boolean; mcp: boolean; codexHooks: boolean; codexMcp: boolean; agyHooks: boolean; extraMcp: boolean; statusline: boolean; backup: boolean },
   summaries: {
     componentCount: number; fileCount: number; hookLevel: HookLevel;
     mcpToolCount: number; mcpEnabled: boolean;
     codexHookLevel: HookLevel; codexMcpToolCount: number; codexMcpEnabled: boolean;
+    agyHookLevel: HookLevel;
     extraMcpTargetCount: number;
     statuslineDetected: string | null;
     backupClaudeMd: boolean; backupAll: boolean;
@@ -155,6 +158,14 @@ export function buildHubItems(
       enabled: enabled.codexMcp,
       summary: enabled.codexMcp && summaries.codexMcpEnabled
         ? t.install.hubTools.replace('{count}', String(summaries.codexMcpToolCount))
+        : t.install.hubSkipped,
+    },
+    {
+      id: 'agyHooks',
+      label: 'Agy Hooks',
+      enabled: enabled.agyHooks,
+      summary: enabled.agyHooks
+        ? `${summaries.agyHookLevel} — ${t.install.agyHooksLevelDescriptions[summaries.agyHookLevel]}`
         : t.install.hubSkipped,
     },
     {

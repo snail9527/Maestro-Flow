@@ -302,19 +302,23 @@ Extract wave N rows + add `prev_context` column.
 
 ```javascript
 spawn_agents_on_csv({
-  csv_path: `${sessionFolder}/wave-${N}.csv`,
+  csv_path: `${sessionFolder}/wave-${N}.csv`,    // only rows where wave==N AND status=="pending"
   id_column: "id",
   instruction: buildLifecycleInstruction(sessionFolder, skillRoot),
   max_concurrency: maxConcurrency,
   max_runtime_seconds: 3600,
   output_csv_path: `${sessionFolder}/wave-${N}-results.csv`,
   output_schema: {
-    id,
-    result_status,    // completed | failed | blocked
-    findings,         // key findings (max 500 chars)
-    files_modified,   // semicolon-separated paths
-    quality_score,    // 0-100
-    error             // error message
+    type: "object",
+    properties: {
+      id:             { type: "string" },
+      result_status:  { type: "string", enum: ["completed", "failed", "blocked"] },
+      findings:       { type: "string", maxLength: 500 },
+      files_modified: { type: "string", description: "Semicolon-separated paths" },
+      quality_score:  { type: "string", description: "0-100" },
+      error:          { type: "string" }
+    },
+    required: ["id", "result_status", "findings"]
   }
 })
 ```
@@ -362,6 +366,18 @@ For roles with commands/ subdirectory, load the relevant command file based on y
 2. Include quality_score (0-100) based on specs/quality-gates.md criteria
 3. Retry on verification failure (max 2 retries)
 4. Report blocked if still failing after retries
+
+## Termination Contract (MANDATORY)
+You MUST call report_agent_job_result EXACTLY ONCE before exiting. NO exceptions.
+- Success → result_status=completed after all verifications pass
+- Failure → result_status=failed with error message (build error, file write fail)
+- Blocked → result_status=blocked when upstream missing OR after retries exhausted
+- Timeout → near max_runtime_seconds → revert partial unsafe work → result_status=blocked, error="timeout"
+- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
+## Hard Constraints
+- Do NOT write to tasks.csv, wave-*.csv, results.csv (orchestrator owns those).
+- Do NOT call spawn_agents_on_csv (no recursion).
 
 ## Discovery Protocol
 Write task output to {sessionFolder}/discoveries/{task_id}.json:

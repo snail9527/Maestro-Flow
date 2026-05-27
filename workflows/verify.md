@@ -82,7 +82,7 @@ Resolve PLAN_DIRS and VERIFY_MODE by input type:
   numeric arg     → phase mode, collect completed execute artifacts for that phase from state.json
 
 If no matching artifacts found: ERROR E001.
-Milestone mode creates output dir: .workflow/scratch/verify-{milestone_slug}-{date}/
+Milestone mode creates output dir: .workflow/scratch/{YYYYMMDD}-verify-{milestone_slug}/
 ```
 
 ---

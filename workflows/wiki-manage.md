@@ -44,6 +44,8 @@ Run in parallel: `maestro wiki health`, `list --json`, `orphans`, `hubs --top 5`
 
 Display: health score, entry counts by type, broken links, orphan count, top hubs. Include health status message and quick-action commands (`/wiki-connect --fix`, `/wiki-digest`, `/manage-wiki cleanup --fix`, `maestro wiki graph`).
 
+> **Scope split (complementary, not conflicting):** `/wiki-connect --fix` repairs/augments `related` links between existing entries (no deletion). `/manage-wiki cleanup --fix` deletes/flags orphans and removes broken-link entries from frontmatter. Run `wiki-connect` first to maximize link recovery, then `cleanup` to handle the true residual orphans.
+
 ---
 
 ## Subcommand: search <query>

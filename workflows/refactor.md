@@ -2,7 +2,7 @@
 
 Systematically reduce tech debt through scope analysis, task planning, and reflection-driven execution. Each refactoring round records strategy, outcome, and adjustments. Existing tests must pass after every change.
 
-Output: scratch/refactor-{slug}-{date}/ with index.json + reflection-log.md + .task/ + .summaries/
+Output: scratch/{YYYYMMDD}-refactor-{slug}/ with index.json + reflection-log.md + .task/ + .summaries/
 
 ---
 
@@ -24,13 +24,13 @@ Output: scratch/refactor-{slug}-{date}/ with index.json + reflection-log.md + .t
 
 Prompt user for scope type: module path, feature area, or full codebase.
 
-Generate slug from scope (lowercase, hyphens, max 40 chars). Set date = YYYY-MM-DD.
+Generate slug from scope (lowercase, hyphens, max 40 chars). Set date = YYYYMMDD.
 
 ---
 
 ### Step 2: Create Scratch Directory
 
-Create `REFACTOR_DIR=".workflow/scratch/refactor-${slug}-${date}"` with `.task/` and `.summaries/` subdirs.
+Create `REFACTOR_DIR=".workflow/scratch/${date}-refactor-${slug}"` with `.task/` and `.summaries/` subdirs.
 
 Write index.json: id, type="refactor", title, status="active", scope, plan (empty task_ids), execution (method=agent, counts=0), reflection (rounds=0).
 

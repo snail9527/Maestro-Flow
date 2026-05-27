@@ -20,14 +20,23 @@ import { paths } from '../config/paths.js';
 import {
   addFile,
   addDir,
+  cleanManifestFiles,
+  deleteManifest,
   type Manifest,
 } from '../core/manifest.js';
-import { applyOverlays, ensureOverlayDir } from '../core/overlay/applier.js';
+import { applyOverlays, ensureOverlayDir, deleteOverlayManifest } from '../core/overlay/applier.js';
 import { injectDocFile, type MigrateResult } from '../core/tag-injector.js';
 import { COMPONENT_DEFS, type ComponentDef } from '../core/component-defs.js';
 import {
   HOOK_LEVELS,
   HOOK_LEVEL_DESCRIPTIONS,
+  removeClaudeStatusline,
+  removeMaestroHooks,
+  uninstallClaudeHooks,
+  uninstallCodexHooks,
+  uninstallAgyHooks,
+  loadClaudeSettings,
+  getClaudeSettingsPath,
   type HookLevel,
 } from './hooks.js';
 
@@ -141,12 +150,25 @@ export function applyOverlaysPostInstall(
 // MCP config helpers
 // ---------------------------------------------------------------------------
 
+/** MCP server name used everywhere maestro registers itself. */
+export const MAESTRO_MCP_SERVER_NAME = 'maestro-tools';
+
+export function getClaudeMcpConfigPath(scope: 'global' | 'project', projectPath: string): string {
+  return scope === 'project'
+    ? join(projectPath, '.mcp.json')
+    : join(homedir(), '.claude.json');
+}
+
+/**
+ * Register the maestro MCP server in Claude's config. Returns the path that
+ * was written on success, or null on failure.
+ */
 export function addMcpServer(
   scope: 'global' | 'project',
   projectPath: string,
   enabledTools: string[],
   projectRoot?: string,
-): boolean {
+): string | null {
   const isWin = process.platform === 'win32';
   const env: Record<string, string> = {
     MAESTRO_ENABLED_TOOLS: enabledTools.join(','),
@@ -162,29 +184,18 @@ export function addMcpServer(
     env,
   };
 
+  const fp = getClaudeMcpConfigPath(scope, projectPath);
   try {
-    if (scope === 'project') {
-      const fp = join(projectPath, '.mcp.json');
-      let mj: Record<string, unknown> = { mcpServers: {} };
-      if (existsSync(fp)) {
-        mj = JSON.parse(readFileSync(fp, 'utf-8'));
-        if (!mj.mcpServers) mj.mcpServers = {};
-      }
-      (mj.mcpServers as Record<string, unknown>)['maestro-tools'] = serverConfig;
-      writeFileSync(fp, JSON.stringify(mj, null, 2), 'utf-8');
-    } else {
-      const fp = join(homedir(), '.claude.json');
-      let cc: Record<string, unknown> = { mcpServers: {} };
-      if (existsSync(fp)) {
-        cc = JSON.parse(readFileSync(fp, 'utf-8'));
-        if (!cc.mcpServers) cc.mcpServers = {};
-      }
-      (cc.mcpServers as Record<string, unknown>)['maestro-tools'] = serverConfig;
-      writeFileSync(fp, JSON.stringify(cc, null, 2), 'utf-8');
+    let data: Record<string, unknown> = { mcpServers: {} };
+    if (existsSync(fp)) {
+      data = JSON.parse(readFileSync(fp, 'utf-8'));
+      if (!data.mcpServers) data.mcpServers = {};
     }
-    return true;
+    (data.mcpServers as Record<string, unknown>)[MAESTRO_MCP_SERVER_NAME] = serverConfig;
+    writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
+    return fp;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -192,19 +203,19 @@ export function removeMcpServer(
   scope: 'global' | 'project',
   projectPath: string,
 ): boolean {
+  const fp = getClaudeMcpConfigPath(scope, projectPath);
+  return removeMcpServerAt(fp);
+}
+
+/** Remove the maestro-tools entry from a known config file path. */
+export function removeMcpServerAt(configPath: string): boolean {
+  if (!existsSync(configPath)) return false;
   try {
-    const fp = scope === 'project'
-      ? join(projectPath, '.mcp.json')
-      : join(homedir(), '.claude.json');
-
-    if (!existsSync(fp)) return false;
-
-    const data = JSON.parse(readFileSync(fp, 'utf-8')) as Record<string, unknown>;
+    const data = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
     const servers = data.mcpServers as Record<string, unknown> | undefined;
-    if (!servers || !('maestro-tools' in servers)) return false;
-
-    delete servers['maestro-tools'];
-    writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
+    if (!servers || !(MAESTRO_MCP_SERVER_NAME in servers)) return false;
+    delete servers[MAESTRO_MCP_SERVER_NAME];
+    writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
     return true;
   } catch {
     return false;
@@ -224,15 +235,32 @@ function getCodexConfigPath(scope: 'global' | 'project', projectPath: string): s
 /**
  * Remove the `[mcp_servers.maestro-tools]` and `[mcp_servers.maestro-tools.env]`
  * sections from a TOML string. Returns the cleaned content.
+ *
+ * Line-by-line parsing — robust against bracket characters inside values
+ * (e.g. `args = ["/c", "maestro-mcp"]`), which previously broke a regex-based
+ * implementation and left stale blocks behind, producing duplicate-key errors.
  */
 function removeCodexMcpBlock(content: string): string {
-  // Match from [mcp_servers.maestro-tools] (and any sub-tables like .env)
-  // up to the next top-level section header or end of file.
-  // The regex handles both the main section and its sub-sections.
-  return content.replace(
-    /\n?\[mcp_servers\.maestro-tools(?:\.[^\]]+)?\][^\[]*(?=\n\[|\s*$)/g,
-    '',
-  ).trim();
+  // A TOML table header starts at column 0 with `[` (or `[[` for arrays of tables)
+  // and is the only token on the line aside from optional trailing whitespace/comment.
+  const tableHeaderRe = /^\[\[?[^\]]+\]\]?\s*(?:#.*)?$/;
+  const maestroHeaderRe = /^\[mcp_servers\.maestro-tools(?:\.[^\]]+)?\]\s*(?:#.*)?$/;
+
+  const lines = content.split(/\r?\n/);
+  const out: string[] = [];
+  let skipping = false;
+
+  for (const line of lines) {
+    if (tableHeaderRe.test(line)) {
+      // Entering a new section — decide whether to skip it
+      skipping = maestroHeaderRe.test(line);
+      if (skipping) continue;
+    }
+    if (!skipping) out.push(line);
+  }
+
+  // Collapse 3+ consecutive blank lines left behind by removal
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 export function addCodexMcpServer(
@@ -240,7 +268,7 @@ export function addCodexMcpServer(
   projectPath: string,
   enabledTools: string[],
   projectRoot?: string,
-): boolean {
+): string | null {
   const isWin = process.platform === 'win32';
   const fp = getCodexConfigPath(scope, projectPath);
 
@@ -277,9 +305,9 @@ export function addCodexMcpServer(
     const dir = join(fp, '..');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(fp, content, 'utf-8');
-    return true;
+    return fp;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -287,14 +315,16 @@ export function removeCodexMcpServer(
   scope: 'global' | 'project',
   projectPath: string,
 ): boolean {
-  const fp = getCodexConfigPath(scope, projectPath);
-  if (!existsSync(fp)) return false;
+  return removeCodexMcpServerAt(getCodexConfigPath(scope, projectPath));
+}
 
+export function removeCodexMcpServerAt(configPath: string): boolean {
+  if (!existsSync(configPath)) return false;
   try {
-    const original = readFileSync(fp, 'utf-8');
+    const original = readFileSync(configPath, 'utf-8');
     const cleaned = removeCodexMcpBlock(original);
     if (cleaned === original.trim()) return false;
-    writeFileSync(fp, cleaned + '\n', 'utf-8');
+    writeFileSync(configPath, cleaned + '\n', 'utf-8');
     return true;
   } catch {
     return false;
@@ -553,7 +583,7 @@ export type ExtraMcpTargetId =
   | 'cursor' | 'qoder' | 'trae' | 'kiro' | 'roo'
   | 'vscode-copilot' | 'gemini-cli';
 
-type McpFormat = 'json-mcpServers' | 'json-vscode-servers' | 'json-gemini-merge';
+export type McpFormat = 'json-mcpServers' | 'json-vscode-servers' | 'json-gemini-merge';
 
 interface ExtraMcpTargetSpec {
   id: ExtraMcpTargetId;
@@ -654,17 +684,21 @@ function buildServerConfig(
   return base;
 }
 
+export function getExtraMcpTargetSpec(targetId: ExtraMcpTargetId): ExtraMcpTargetSpec | undefined {
+  return EXTRA_MCP_TARGETS.find((t) => t.id === targetId);
+}
+
 export function addExtraMcpServer(
   targetId: ExtraMcpTargetId,
   scope: 'global' | 'project',
   projectPath: string,
   enabledTools: string[],
   projectRoot?: string,
-): boolean {
-  const spec = EXTRA_MCP_TARGETS.find((t) => t.id === targetId);
-  if (!spec) return false;
+): string | null {
+  const spec = getExtraMcpTargetSpec(targetId);
+  if (!spec) return null;
   const fp = spec.configPath(scope, projectPath);
-  if (!fp) return false;
+  if (!fp) return null;
 
   try {
     const dir = dirname(fp);
@@ -689,11 +723,11 @@ export function addExtraMcpServer(
     if (!data[containerKey] || typeof data[containerKey] !== 'object') {
       data[containerKey] = {};
     }
-    (data[containerKey] as Record<string, unknown>)['maestro-tools'] = serverConfig;
+    (data[containerKey] as Record<string, unknown>)[MAESTRO_MCP_SERVER_NAME] = serverConfig;
     writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
-    return true;
+    return fp;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -702,20 +736,161 @@ export function removeExtraMcpServer(
   scope: 'global' | 'project',
   projectPath: string,
 ): boolean {
-  const spec = EXTRA_MCP_TARGETS.find((t) => t.id === targetId);
+  const spec = getExtraMcpTargetSpec(targetId);
   if (!spec) return false;
   const fp = spec.configPath(scope, projectPath);
-  if (!fp || !existsSync(fp)) return false;
+  if (!fp) return false;
+  return removeExtraMcpServerAt(fp, spec.format);
+}
 
+export function removeExtraMcpServerAt(configPath: string, format: McpFormat): boolean {
+  if (!existsSync(configPath)) return false;
   try {
-    const data = JSON.parse(readFileSync(fp, 'utf-8')) as Record<string, unknown>;
-    const containerKey = spec.format === 'json-vscode-servers' ? 'servers' : 'mcpServers';
+    const data = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    const containerKey = format === 'json-vscode-servers' ? 'servers' : 'mcpServers';
     const servers = data[containerKey] as Record<string, unknown> | undefined;
-    if (!servers || !('maestro-tools' in servers)) return false;
-    delete servers['maestro-tools'];
-    writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
+    if (!servers || !(MAESTRO_MCP_SERVER_NAME in servers)) return false;
+    delete servers[MAESTRO_MCP_SERVER_NAME];
+    writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
     return true;
   } catch {
     return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Unified uninstall — single source of truth for reversing a manifest
+//
+// Reads every tracking field on the manifest and undoes exactly what was
+// installed. No marker scanning — manifest is authoritative.
+// ---------------------------------------------------------------------------
+
+export interface UninstallResult {
+  filesRemoved: number;
+  filesSkipped: number;
+  claudeHooksRemoved: number;
+  codexHooksRemoved: number;
+  agyHooksRemoved: number;
+  statuslineRemoved: boolean;
+  mcpRemoved: { claude: boolean; codex: boolean; extras: string[] };
+}
+
+export interface UninstallOptions {
+  /**
+   * Skip CONTENT_MANAGED files (CLAUDE.md, AGENTS.md). Used when uninstalling
+   * before a re-install — tag injection updates these in place, so cleanup
+   * would lose user content.
+   */
+  skipContentManaged?: boolean;
+  /**
+   * Skip deletion of the manifest file itself. Useful when the caller wants
+   * to mutate and re-save the manifest as part of a re-install.
+   */
+  keepManifestFile?: boolean;
+}
+
+/**
+ * Reverse everything a manifest installed: files, hooks, statusline, MCP.
+ *
+ * Falls back to legacy "scan for `maestro` marker" cleanup for old manifests
+ * (schema < 2.0) that don't have hooks/mcp/statusline records.
+ */
+export function uninstallManifest(
+  manifest: Manifest,
+  opts: UninstallOptions = {},
+): UninstallResult {
+  const result: UninstallResult = {
+    filesRemoved: 0,
+    filesSkipped: 0,
+    claudeHooksRemoved: 0,
+    codexHooksRemoved: 0,
+    agyHooksRemoved: 0,
+    statuslineRemoved: false,
+    mcpRemoved: { claude: false, codex: false, extras: [] },
+  };
+
+  // --- Files ---
+  const fileResult = cleanManifestFiles(manifest, { skipContentManaged: opts.skipContentManaged });
+  result.filesRemoved = fileResult.removed;
+  result.filesSkipped = fileResult.skipped;
+
+  // --- Overlays ---
+  const targetBase = manifest.scope === 'global' ? homedir() : manifest.targetPath;
+  try { deleteOverlayManifest(manifest.scope, targetBase); } catch { /* skip */ }
+
+  // --- Hooks (precise removal from manifest records) ---
+  const hooks = manifest.hooks;
+  if (hooks?.claude) {
+    result.claudeHooksRemoved = uninstallClaudeHooks(hooks.claude.settingsPath, hooks.claude.installed);
+  }
+  if (hooks?.codex) {
+    result.codexHooksRemoved = uninstallCodexHooks(hooks.codex.settingsPath, hooks.codex.installed);
+  }
+  if (hooks?.agy) {
+    result.agyHooksRemoved = uninstallAgyHooks(hooks.agy.settingsPath, hooks.agy.installed);
+  }
+
+  // --- Statusline ---
+  if (manifest.statusline) {
+    result.statuslineRemoved = removeClaudeStatusline(manifest.statusline.settingsPath);
+  }
+
+  // --- MCP ---
+  if (manifest.mcp?.claude) {
+    result.mcpRemoved.claude = removeMcpServerAt(manifest.mcp.claude.configPath);
+  }
+  if (manifest.mcp?.codex) {
+    result.mcpRemoved.codex = removeCodexMcpServerAt(manifest.mcp.codex.configPath);
+  }
+  if (manifest.mcp?.extras) {
+    for (const extra of manifest.mcp.extras) {
+      const spec = getExtraMcpTargetSpec(extra.targetId as ExtraMcpTargetId);
+      if (!spec) continue;
+      if (removeExtraMcpServerAt(extra.configPath, spec.format)) {
+        result.mcpRemoved.extras.push(extra.targetId);
+      }
+    }
+  }
+
+  // --- Legacy fallback ---
+  // For old manifests (no hooks/mcp/statusline records), fall back to broad
+  // cleanup so reinstall/uninstall still works on upgrade.
+  const hasNewRecords = manifest.hooks || manifest.statusline || manifest.mcp;
+  if (!hasNewRecords) {
+    legacyCleanup(manifest, result);
+  }
+
+  // --- Manifest file ---
+  if (!opts.keepManifestFile) {
+    deleteManifest(manifest);
+  }
+
+  return result;
+}
+
+/**
+ * Legacy cleanup for manifests without explicit hooks/mcp/statusline records.
+ * Uses the old marker-scan approach so upgrade users aren't stranded.
+ */
+function legacyCleanup(manifest: Manifest, result: UninstallResult): void {
+  // Claude settings — strip all maestro hooks + statusline (full scan)
+  const settingsPath = manifest.scope === 'global'
+    ? getClaudeSettingsPath()
+    : join(manifest.targetPath, '.claude', 'settings.json');
+  if (existsSync(settingsPath)) {
+    if (removeClaudeStatusline(settingsPath)) result.statuslineRemoved = true;
+    try {
+      const settings = loadClaudeSettings(settingsPath);
+      const before = JSON.stringify(settings.hooks ?? {});
+      removeMaestroHooks(settings); // no whitelist → strip everything containing "maestro"
+      const after = JSON.stringify(settings.hooks ?? {});
+      if (before !== after) result.claudeHooksRemoved++;
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    } catch { /* skip */ }
+  }
+
+  // Claude MCP (project-level .mcp.json or global .claude.json)
+  if (removeMcpServer(manifest.scope, manifest.targetPath)) {
+    result.mcpRemoved.claude = true;
   }
 }

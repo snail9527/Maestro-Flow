@@ -40,7 +40,7 @@ maestro install
 /maestro-ralph "implement OAuth2 authentication with refresh tokens"
 ```
 
-Ralph automatically determines where you are in the lifecycle (brainstorm → roadmap → analyze → plan → execute → verify → review → test → milestone-complete) and builds the appropriate chain. Decision nodes at key checkpoints evaluate results and dynamically insert debug+fix loops when needed.
+Ralph automatically determines where you are in the lifecycle (brainstorm → blueprint → analyze → roadmap → plan → execute → verify → review → test → milestone-complete) and builds the appropriate chain. Upstream origin commands (brainstorm, blueprint) and roadmap are optional — Ralph skips them based on project state and scope. Decision nodes at key checkpoints evaluate results and dynamically insert debug+fix loops when needed.
 
 ```bash
 /maestro-ralph status              # View session progress
@@ -54,7 +54,7 @@ Ralph automatically determines where you are in the lifecycle (brainstorm → ro
 |---------|-------------|
 | `/maestro "..."` | Describe intent, let AI route to the optimal command chain |
 | `/maestro-quick` | Quick fixes, small features (analyze → plan → execute) |
-| `/maestro-*` | Step-by-step: init, roadmap, analyze, plan, execute, verify |
+| `/maestro-*` | Step-by-step: init, brainstorm, blueprint, analyze, roadmap, plan, execute, verify |
 
 ---
 
@@ -65,8 +65,8 @@ Ralph automatically determines where you are in the lifecycle (brainstorm → ro
 Reads project state → infers lifecycle position → builds command chain with decision nodes. At each checkpoint, Ralph reads actual execution results and decides: continue, or insert a debug → fix → retry loop. The chain grows and shrinks dynamically based on outcomes.
 
 ```
-brainstorm → init → roadmap → analyze → plan → execute → verify
-                                              ◆ post-verify
+brainstorm → blueprint(opt) → init → analyze(macro) → roadmap(opt) → analyze(micro) → plan → execute → verify
+                                                                                                 ◆ post-verify
                                               business-test
                                               ◆ post-business-test
                                               review
@@ -95,9 +95,9 @@ brainstorm → init → roadmap → analyze → plan → execute → verify
 
 At each `◆` decision node, Ralph evaluates outcomes and decides: pass through, or insert a debug → fix → retry loop. Max retries configurable per decision point.
 
-### 2. Structured Pipeline
+### 2. Layered Command Topology
 
-49 slash commands across 6 categories power every stage — from project initialization to quality retrospective. All artifacts live in `.workflow/scratch/`, tracked by `state.json`.
+Commands are organized in four layers: **upstream origin** (brainstorm, blueprint), **understanding** (analyze with dual-mode: macro for scope exploration, micro for phase-level depth), **orchestration** (roadmap — optional, pure Milestone > Phase decomposition), and **execution** (plan → execute → verify). Six canonical paths (A–F) cover everything from full greenfield projects to small fixes. 50 slash commands across 7 categories power every stage, with all artifacts in `.workflow/scratch/` tracked by `state.json`.
 
 ### 3. Issue Closed-Loop
 
@@ -131,7 +131,7 @@ Wiki knowledge graph with BM25 search, backlink traversal, and health scoring. L
 
 | Category | Count | Prefix | Purpose |
 |----------|-------|--------|---------|
-| **Core Workflow** | 18 | `maestro-*` | Full lifecycle — ralph, init, roadmap, analyze, plan, execute, verify, milestones, overlays |
+| **Core Workflow** | 19 | `maestro-*` | Full lifecycle — ralph, init, brainstorm, blueprint, analyze, roadmap, plan, execute, verify, milestones, overlays |
 | **Management** | 12 | `manage-*` | Issue lifecycle, codebase docs, knowledge capture, memory, status |
 | **Quality** | 9 | `quality-*` | Review, test, debug, test-gen, integration-test, business-test, refactor, sync |
 | **Learning** | 5 | `learn-*` | Retro, follow-along, pattern decompose, investigate, second opinion |
@@ -157,7 +157,7 @@ maestro/
 │       ├── server/          # Hono API + WebSocket + SSE
 │       └── shared/          # Shared types
 ├── .claude/
-│   ├── commands/            # 49 slash commands (.md)
+│   ├── commands/            # 50 slash commands (.md)
 │   └── agents/              # 21 agent definitions (.md)
 ├── workflows/               # 45 workflow implementations (.md)
 ├── templates/               # JSON templates (task, plan, issue, ...)

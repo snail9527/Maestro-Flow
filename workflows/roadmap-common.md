@@ -1,6 +1,6 @@
 # Workflow: Roadmap Common
 
-Shared logic for roadmap generation — used by both light mode (roadmap.md) and full mode (spec-generate.md).
+Shared logic for roadmap generation — used by roadmap.md.
 
 ---
 

@@ -25,7 +25,7 @@ Flags: --executor claude-code|codex|gemini (default: claude-code), --dry-run (de
 
 ```
 Load ISS-ID from .workflow/issues/issues.jsonl → fatal if file missing or ID not found.
-Require issue.solution with non-empty steps[] → error if missing (run manage-issue-plan first).
+Require issue.solution with non-empty steps[] → error if missing (run `maestro-plan --gaps {ISS-ID}` first).
 Resolve EXECUTOR → CLI tool (claude-code→claude, codex→codex, gemini→gemini), all with --mode write.
 ```
 

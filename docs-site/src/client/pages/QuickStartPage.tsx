@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useI18n } from '@/client/i18n/index.js';
 import { Link } from 'react-router-dom';
+import { TerminalBlock } from '@/client/components/content/GuideComponents.js';
 
 // ---------------------------------------------------------------------------
 // QuickStartPage — Interactive single-page quick guide
@@ -42,44 +43,59 @@ const COMMANDS: CommandData[] = [
       desc: '初始化 .workflow/ 目录，创建 state.json 和目录结构',
       when: '新项目第一次使用 Maestro，或已有项目需要引入工作流管理',
       how: '/maestro-init',
-      tips: ['会自动扫描代码库填充初始 spec', '可配合 --from-brainstorm 基于头脑风暴结果初始化'],
+      tips: ['会自动扫描代码库填充初始 spec', '可配合 --from brainstorm:ID 基于头脑风暴结果初始化'],
     },
     en: {
       desc: 'Initialize .workflow/ directory, create state.json and directory structure',
       when: 'First time using Maestro on a new or existing project',
       how: '/maestro-init',
-      tips: ['Auto-scans codebase to populate initial specs', 'Use --from-brainstorm to init from brainstorm results'],
+      tips: ['Auto-scans codebase to populate initial specs', 'Use --from brainstorm:ID to init from brainstorm results'],
     },
   },
   {
     id: 'roadmap', cmd: '/maestro-roadmap', category: 'init', status: 'core', level: 1,
     zh: {
-      desc: '生成项目路线图，将目标分解为里程碑和 Phase',
-      when: 'init 之后，需要规划项目阶段和里程碑',
-      how: '/maestro-roadmap "项目目标描述" -y',
-      tips: ['-y 自动确认，省去交互问答', '路线图可随时通过重新运行来调整'],
+      desc: '消费 analyze 宏观产出，将目标分解为 Milestone > Phase 层级',
+      when: 'analyze 宏观分析产出 scope_verdict=large 时，需要多 Phase 里程碑分解',
+      how: '/maestro-roadmap -y',
+      tips: ['纯编排层，需要上游 context（analyze 或 brainstorm 产出）', '-y 自动确认，省去交互问答', '路线图可通过 --revise 随时修订', 'scope_verdict=medium/small 时可跳过，直接 plan --from analyze:ANL-xxx'],
     },
     en: {
-      desc: 'Generate project roadmap, decompose goals into milestones and phases',
-      when: 'After init, when you need to plan project stages and milestones',
-      how: '/maestro-roadmap "project goal description" -y',
-      tips: ['-y auto-confirms, skips interactive Q&A', 'Rerun anytime to adjust the roadmap'],
+      desc: 'Consume macro analyze output, decompose goals into Milestone > Phase hierarchy',
+      when: 'After macro analyze produces scope_verdict=large, for multi-phase milestone decomposition',
+      how: '/maestro-roadmap -y',
+      tips: ['Pure orchestration layer, requires upstream context (analyze or brainstorm output)', '-y auto-confirms, skips interactive Q&A', 'Revise anytime with --revise', 'Skip when scope_verdict=medium/small — go direct with plan --from analyze:ANL-xxx'],
+    },
+  },
+  {
+    id: 'blueprint', cmd: '/maestro-blueprint', category: 'init', status: 'recommended', level: 2,
+    zh: {
+      desc: '6 阶段规范蓝图：产品简报 → PRD → 架构文档 → 史诗故事',
+      when: '大型项目需要完整规范文档体系，与 brainstorm 并行的正式规范路径',
+      how: '/maestro-blueprint "项目想法或目标"',
+      tips: ['产出保存在 .workflow/blueprint/ 目录', '下游通过 --from blueprint:BLP-xxx 消费', '-y 自动模式跳过交互确认'],
+    },
+    en: {
+      desc: '6-stage spec blueprint: Product Brief → PRD → Architecture → Epics',
+      when: 'Large projects needing comprehensive spec documentation, parallel to brainstorm',
+      how: '/maestro-blueprint "project idea or goal"',
+      tips: ['Outputs saved to .workflow/blueprint/ directory', 'Downstream consumes via --from blueprint:BLP-xxx', '-y auto-mode skips interactive confirmation'],
     },
   },
   // Pipeline
   {
     id: 'analyze', cmd: '/maestro-analyze', category: 'pipeline', status: 'core', level: 1,
     zh: {
-      desc: '分析 Phase 现状，生成分析报告和依赖图',
-      when: '开始新 Phase 或需要了解当前代码状态',
+      desc: '双层分析：Micro（数字参数）Phase 级 6 维度深度分析，Macro（文本参数）宏观需求探索',
+      when: 'Micro：开始新 Phase 前深度分析；Macro：roadmap 之前探索需求影响面',
       how: '/maestro-analyze 1',
-      tips: ['可指定 Phase 编号，不指定则分析当前里程碑所有 Phase', 'standalone 模式可免初始化：/maestro-analyze "描述"'],
+      tips: ['Micro 模式：数字参数（如 1）→ Phase 级 6 维度评分 → 直接进入 plan', 'Macro 模式：文本参数（如 "多租户架构"）→ scope_verdict → 路由到 roadmap 或 plan', '支持 --from brainstorm:ID 导入上游上下文'],
     },
     en: {
-      desc: 'Analyze phase status, generate analysis report and dependency graph',
-      when: 'Starting a new phase or need to understand current code state',
+      desc: 'Dual-layer: Micro (number) for phase-level 6-dimension analysis, Macro (text) for requirement exploration',
+      when: 'Micro: deep analysis before a phase; Macro: explore requirement impact before roadmap',
       how: '/maestro-analyze 1',
-      tips: ['Specify phase number, or omit to analyze all phases in current milestone', 'Standalone mode skips init: /maestro-analyze "description"'],
+      tips: ['Micro mode: number arg (e.g. 1) → 6-dimension scoring → directly to plan', 'Macro mode: text arg (e.g. "multi-tenancy") → scope_verdict → routes to roadmap or plan', 'Use --from brainstorm:ID for upstream context'],
     },
   },
   {
@@ -88,13 +104,13 @@ const COMMANDS: CommandData[] = [
       desc: '基于分析结果生成执行计划，分解为具体任务',
       when: '分析完成后，准备制定实现方案',
       how: '/maestro-plan 1',
-      tips: ['可带 --gaps 基于验证缺陷生成修复计划', '计划产物保存在 .workflow/scratch/ 下'],
+      tips: ['--from analyze:ANL-xxx 可跳过 roadmap 直达规划（中小功能推荐）', '可带 --gaps 基于验证缺陷生成修复计划', '计划产物保存在 .workflow/scratch/ 下'],
     },
     en: {
       desc: 'Generate execution plan from analysis, decompose into tasks',
       when: 'After analysis, ready to create implementation plan',
       how: '/maestro-plan 1',
-      tips: ['Use --gaps to generate fix plan from verification gaps', 'Plan artifacts saved under .workflow/scratch/'],
+      tips: ['--from analyze:ANL-xxx skips roadmap for direct planning (recommended for mid/small features)', 'Use --gaps to generate fix plan from verification gaps', 'Plan artifacts saved under .workflow/scratch/'],
     },
   },
   {
@@ -316,14 +332,27 @@ const SCENARIOS: ScenarioData[] = [
   {
     id: 'new-project', icon: '🚀',
     zh: {
-      title: '新项目起步',
-      desc: '从零开始的项目完整工作流',
-      steps: ['/maestro-init', '/maestro-roadmap "项目目标" -y', '/maestro-analyze 1', '/maestro-plan 1', '/maestro-execute 1', '/maestro-verify 1', '/quality-auto-test 1', '/maestro-milestone-audit'],
+      title: '新项目起步（Path A）',
+      desc: '大型项目完整工作流：宏观分析 → roadmap 分解 → 逐 Phase 推进',
+      steps: ['/maestro-init', '/maestro-analyze "项目目标"', '# scope_verdict=large → roadmap', '/maestro-roadmap -y', '/maestro-analyze 1', '/maestro-plan 1', '/maestro-execute 1', '/maestro-verify 1'],
     },
     en: {
-      title: 'New Project',
-      desc: 'Complete workflow from scratch',
-      steps: ['/maestro-init', '/maestro-roadmap "goal" -y', '/maestro-analyze 1', '/maestro-plan 1', '/maestro-execute 1', '/maestro-verify 1', '/quality-auto-test 1', '/maestro-milestone-audit'],
+      title: 'New Project (Path A)',
+      desc: 'Large project full workflow: macro analyze → roadmap decomposition → per-phase execution',
+      steps: ['/maestro-init', '/maestro-analyze "project goals"', '# scope_verdict=large → roadmap', '/maestro-roadmap -y', '/maestro-analyze 1', '/maestro-plan 1', '/maestro-execute 1', '/maestro-verify 1'],
+    },
+  },
+  {
+    id: 'medium-feature', icon: '📦',
+    zh: {
+      title: '中等功能（Path B）',
+      desc: '跳过 roadmap，analyze 直达 plan — 适合 1-2 个子系统的功能',
+      steps: ['/maestro-analyze "功能描述"', '# scope_verdict=medium → 直达 plan', '/maestro-plan --from analyze:ANL-xxx', '/maestro-execute', '/maestro-verify'],
+    },
+    en: {
+      title: 'Medium Feature (Path B)',
+      desc: 'Skip roadmap, analyze direct to plan — for features spanning 1-2 subsystems',
+      steps: ['/maestro-analyze "feature description"', '# scope_verdict=medium → direct to plan', '/maestro-plan --from analyze:ANL-xxx', '/maestro-execute', '/maestro-verify'],
     },
   },
   {
@@ -395,7 +424,7 @@ const SCENARIOS: ScenarioData[] = [
 
 // -- Status Badge --
 
-function StatusBadge({ status }: { status: Status }) {
+function StatusBadge({ status, isZh }: { status: Status; isZh: boolean }) {
   const styles: Record<Status, string> = {
     core: 'bg-tint-blue text-accent-blue',
     recommended: 'bg-tint-green text-accent-green',
@@ -408,7 +437,7 @@ function StatusBadge({ status }: { status: Status }) {
   };
   return (
     <span className={`text-[length:10px] font-[var(--font-weight-semibold)] px-[var(--spacing-1-5)] py-[1px] rounded-[var(--radius-full)] ${styles[status]}`}>
-      {labels[status].zh}
+      {isZh ? labels[status].zh : labels[status].en}
     </span>
   );
 }
@@ -428,52 +457,7 @@ function LevelDots({ level }: { level: Level }) {
   );
 }
 
-// -- Mac-style Terminal Block --
-
-function TerminalBlock({ children, title, compact }: { children: React.ReactNode; title?: string; compact?: boolean }) {
-  return (
-    <div
-      className={[
-        'rounded-[8px] overflow-hidden',
-        'shadow-[1.6px_1.6px_3.2px_0px_rgba(41,41,41,0.15)]',
-        'dark:shadow-[1.6px_1.6px_3.2px_0px_rgba(0,0,0,0.4)]',
-        'border border-[#e0e0e0] dark:border-[rgba(232,234,237,0.12)]',
-      ].join(' ')}
-    >
-      {/* Title bar with Mac dots */}
-      <div
-        className={[
-          'flex items-center px-[12px]',
-          'bg-[#f0f0f0] dark:bg-[#2a2a2e]',
-          'border-b border-[#e0e0e0] dark:border-b-[rgba(232,234,237,0.08)]',
-          compact ? 'py-[5px]' : 'py-[7px]',
-        ].join(' ')}
-      >
-        {/* Three Mac dots */}
-        <span className="flex items-center gap-[6px] mr-[10px]">
-          <span className="w-[10px] h-[10px] rounded-full bg-[#ff5f57]" />
-          <span className="w-[10px] h-[10px] rounded-full bg-[#febc2e]" />
-          <span className="w-[10px] h-[10px] rounded-full bg-[#28c840]" />
-        </span>
-        {title && (
-          <span className="text-[11px] text-[#80868b] dark:text-[rgba(232,234,237,0.5)] font-[var(--font-weight-medium)] truncate">
-            {title}
-          </span>
-        )}
-      </div>
-      {/* Code area */}
-      <div
-        className={[
-          compact ? 'px-[12px] py-[6px]' : 'px-[14px] py-[10px]',
-          'bg-[#faf8f8] dark:bg-[#1a1a22]',
-          'font-[var(--font-mono)]',
-        ].join(' ')}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
+// TerminalBlock imported from GuideComponents
 
 // -- Pipeline Step --
 
@@ -538,7 +522,7 @@ function CommandCard({ cmd, isZh, isExpanded, onToggle }: CommandCardProps) {
           <code className="text-[length:13px] font-[var(--font-mono)] font-[var(--font-weight-semibold)] text-text-primary">
             {cmd.cmd}
           </code>
-          <StatusBadge status={cmd.status} />
+          <StatusBadge status={cmd.status} isZh={isZh} />
           <LevelDots level={cmd.level} />
           <svg
             className={[

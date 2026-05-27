@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { formatNewEntry } from './spec-entry-parser.js';
 import { resolveSpecDir, CATEGORY_MAP, type SpecCategory, type SpecScope } from './spec-loader.js';
+import { ensureSpecFile } from './spec-init.js';
 
 // ============================================================================
 // Types
@@ -69,11 +70,9 @@ export function appendSpecEntry(
 
   const filePath = join(specsDir, filename);
 
-  // Create file with header if it doesn't exist
-  if (!existsSync(filePath)) {
-    const headerTitle = filename.replace('.md', '').split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
-    writeFileSync(filePath, `# ${headerTitle}\n\n## Entries\n\n`, 'utf-8');
-  }
+  // Ensure file exists with proper YAML frontmatter; also migrates legacy
+  // stubs that lack a frontmatter block.
+  ensureSpecFile(specsDir, filename);
 
   // Read current content
   const existing = readFileSync(filePath, 'utf-8');
@@ -119,10 +118,9 @@ export function appendSpecEntryWithRef(
 
   const filePath = join(specsDir, filename);
 
-  if (!existsSync(filePath)) {
-    const headerTitle = filename.replace('.md', '').split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
-    writeFileSync(filePath, `# ${headerTitle}\n\n## Entries\n\n`, 'utf-8');
-  }
+  // Ensure file exists with proper YAML frontmatter; also migrates legacy
+  // stubs that lack a frontmatter block.
+  ensureSpecFile(specsDir, filename);
 
   const existing = readFileSync(filePath, 'utf-8');
 

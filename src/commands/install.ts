@@ -23,7 +23,10 @@ import {
   addFile,
   saveManifest,
   findManifest,
-  cleanManifestFiles,
+  recordClaudeHooks,
+  recordCodexHooks,
+  recordAgyHooks,
+  recordCodexMcp,
 } from '../core/manifest.js';
 import {
   installHooksByLevel,
@@ -42,10 +45,12 @@ import {
   injectDocFile,
   createTargetBackup,
   addCodexMcpServer,
+  uninstallManifest,
   MCP_TOOLS,
   type CopyStats,
 } from './install-backend.js';
 import { t } from '../i18n/index.js';
+import { registerFontsSubcommand } from './font-guide.js';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -168,6 +173,7 @@ export function registerInstallCommand(program: Command): void {
   registerComponentsSubcommand(install);
   registerHooksSubcommand(install);
   registerMcpSubcommand(install);
+  registerFontsSubcommand(install);
 
   // Legacy TUI wizard
   install
@@ -222,15 +228,24 @@ function forceInstall(
     console.error(`  Backup: ${backupPath}`);
   }
 
-  // Clean previous
+  // Clean previous — full uninstall of prior manifest (files + hooks + mcp + statusline)
   const existingManifest = findManifest(mode, targetPath);
   if (existingManifest) {
-    const { removed, skipped } = cleanManifestFiles(existingManifest, { skipContentManaged: true });
-    if (removed > 0) {
-      let msg = t.install.forceCleaned.replace('{count}', String(removed));
-      if (skipped > 0) msg += t.install.forceCleanedPreserved.replace('{count}', String(skipped));
+    const r = uninstallManifest(existingManifest, { skipContentManaged: true });
+    if (r.filesRemoved > 0) {
+      let msg = t.install.forceCleaned.replace('{count}', String(r.filesRemoved));
+      if (r.filesSkipped > 0) msg += t.install.forceCleanedPreserved.replace('{count}', String(r.filesSkipped));
       console.error(msg);
     }
+    const sideParts: string[] = [];
+    if (r.claudeHooksRemoved) sideParts.push(`${r.claudeHooksRemoved} claude hooks`);
+    if (r.codexHooksRemoved) sideParts.push(`${r.codexHooksRemoved} codex hooks`);
+    if (r.agyHooksRemoved) sideParts.push(`${r.agyHooksRemoved} agy hooks`);
+    if (r.statuslineRemoved) sideParts.push('statusline');
+    if (r.mcpRemoved.claude) sideParts.push('claude mcp');
+    if (r.mcpRemoved.codex) sideParts.push('codex mcp');
+    if (r.mcpRemoved.extras.length) sideParts.push(`${r.mcpRemoved.extras.length} extra mcp`);
+    if (sideParts.length) console.error(`  Cleaned: ${sideParts.join(', ')}`);
   }
 
   paths.ensure(paths.home);
@@ -238,7 +253,11 @@ function forceInstall(
   const hookLevel = (opts.hooks ?? 'none') as HookLevel;
 
   const manifest = createManifest(mode, targetPath, {
-    hookLevel,
+    // Only persist hookLevel when actually installing Claude hooks; avoids
+    // the next install reading back a stale 'none' as the default level.
+    ...(hookLevel !== 'none' && HOOK_LEVELS.includes(hookLevel)
+      ? { hookLevel }
+      : {}),
     selectedComponentIds: toInstall.map(c => c.def.id),
   });
   const totalStats: CopyStats = { files: 0, dirs: 0, skipped: 0 };
@@ -279,6 +298,11 @@ function forceInstall(
   // Hook installation
   if (hookLevel !== 'none' && HOOK_LEVELS.includes(hookLevel)) {
     const hookResult = installHooksByLevel(hookLevel, { project: mode === 'project' });
+    recordClaudeHooks(manifest, {
+      settingsPath: hookResult.settingsPath,
+      installed: hookResult.installedHooks,
+      level: hookLevel,
+    });
     console.error(t.install.forceHooksResult
       .replace('{level}', hookLevel)
       .replace('{count}', String(hookResult.installedHooks.length))
@@ -289,6 +313,11 @@ function forceInstall(
   const codexHookLevel = (opts.codexHooks ?? 'none') as HookLevel;
   if (codexHookLevel !== 'none' && HOOK_LEVELS.includes(codexHookLevel)) {
     const codexResult = installCodexHooksByLevel(codexHookLevel, { project: mode === 'project' });
+    recordCodexHooks(manifest, {
+      settingsPath: codexResult.settingsPath,
+      installed: codexResult.installedHooks,
+      level: codexHookLevel,
+    });
     console.error(`  Codex Hooks (${codexHookLevel}): ${codexResult.installedHooks.length} hooks → ${codexResult.settingsPath}`);
   }
 
@@ -299,13 +328,23 @@ function forceInstall(
       project: mode === 'project',
       projectPath: mode === 'project' ? projectPath : undefined,
     });
+    recordAgyHooks(manifest, {
+      settingsPath: agyResult.settingsPath,
+      installed: agyResult.installedHooks,
+      level: agyHookLevel,
+    });
     console.error(`  Agy Hooks (${agyHookLevel}): ${agyResult.installedHooks.length} hooks → ${agyResult.settingsPath}`);
   }
 
   // Codex MCP registration
   if (opts.codexMcp) {
-    const ok = addCodexMcpServer(mode, projectPath || '', [...MCP_TOOLS]);
-    console.error(`  Codex MCP: ${ok ? 'maestro-tools registered' : 'failed'}`);
+    const path = addCodexMcpServer(mode, projectPath || '', [...MCP_TOOLS]);
+    if (path) {
+      recordCodexMcp(manifest, { configPath: path, serverName: 'maestro-tools' });
+      console.error(`  Codex MCP: maestro-tools registered → ${path}`);
+    } else {
+      console.error(`  Codex MCP: failed`);
+    }
   }
 
   saveManifest(manifest);

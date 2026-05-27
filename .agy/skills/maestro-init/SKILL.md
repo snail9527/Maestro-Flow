@@ -1,7 +1,7 @@
 ---
 name: maestro-init
 description: Initialize project with auto state detection
-argument-hint: [-y] [--from-brainstorm SESSION-ID]
+argument-hint: [-y] [--from <source>]
 allowed-tools:
   - ask_question
   - define_subagent
@@ -27,7 +27,7 @@ Initialize a new project through auto state detection and unified flow. Invoked 
 <context>
 **Flags:**
 - `-y` -- Automatic mode. After config questions, runs research without further interaction. Expects idea document via @ reference.
-- `--from-brainstorm SESSION-ID` -- Import from a brainstorm session. Reads guidance-specification.md to pre-fill project vision, goals, constraints, and terminology. Skips interactive questioning.
+- `--from <source>` -- Load upstream context package (brainstorm:ID, @file, or path). Consumes context-package.json to pre-fill project vision, goals, constraints, and terminology. Skips interactive questioning. Alias: `--from-brainstorm`
 
 **Load project state if exists:**
 Check for `.workflow/state.json` -- loads context if project already initialized.
@@ -65,7 +65,7 @@ Other commands:
 |------|----------|-----------|----------|
 | E001 | error | No arguments provided when -y requires @ reference | Check arguments format, re-run with correct input |
 | E002 | error | .workflow/ already exists for greenfield init | Check .workflow/ directory state, resolve conflicts |
-| E003 | error | Brainstorm session not found (--from-brainstorm) | Check arguments format, re-run with correct input |
+| E003 | error | Context source not found (--from / --from-brainstorm) | Check arguments format, re-run with correct input |
 | W001 | warning | Research agent failed, continuing with partial results | Retry research or proceed with partial results |
 </error_codes>
 
@@ -73,7 +73,7 @@ Other commands:
 - [ ] Deep questioning completed (threads followed, not rushed) — or extracted from document/brainstorm
 - [ ] `.workflow/project.md` created with Core Value, Requirements (Validated/Active/Out of Scope), Key Decisions
 - [ ] `.workflow/state.json` created with artifacts[] array, initialized to idle state
-- [ ] `.workflow/config.json` created with user-selected granularity, workflow agents, gate preferences
+- [ ] `.workflow/config.json` created with workflow / execution / git / gates / codebase / guard / collab / specInjection / dashboard segments
 - [ ] `.workflow/specs/` initialized with convention files
 - [ ] Research completed (if enabled) — 4 parallel agents spawned
 - [ ] User knows next step is `/maestro-roadmap` (light) or `/maestro-roadmap --mode full` (spec package)

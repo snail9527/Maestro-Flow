@@ -1,4 +1,9 @@
-# Workflow: specs-load
+---
+name: spec-load
+alias: spec-load
+---
+
+# Workflow: spec-load
 
 Load spec files filtered by category. Supports project, global, team, and personal scopes.
 

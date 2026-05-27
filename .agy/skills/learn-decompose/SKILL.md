@@ -27,8 +27,8 @@ $ARGUMENTS — target path/module and optional flags.
 - `--save-spec`: `Skill("spec-add")` for each new pattern
 - `--save-wiki`: create wiki note per dimension group
 
-**Storage read**: target files + `coding-conventions.md` + `specs/learnings.md` (dedup)
-**Storage write**: `.workflow/knowhow/KNW-decompose-{slug}-{date}.md` + append `specs/learnings.md`
+**Storage read**: target files + `coding-conventions.md` + `.workflow/specs/learnings.md` (dedup)
+**Storage write**: `.workflow/knowhow/KNW-decompose-{slug}-{date}.md` + append `.workflow/specs/learnings.md`
 </context>
 
 <state_machine>
@@ -49,7 +49,7 @@ S_RESOLVE:
   → S_RESOLVE     WHEN: unresolvable                     DO: ask_question
 
 S_DEDUP:
-  → S_ANALYZE     DO: read coding-conventions.md + specs/learnings.md → build known pattern set
+  → S_ANALYZE     DO: read coding-conventions.md + .workflow/specs/learnings.md → build known pattern set
 
 S_ANALYZE:
   → S_CROSSREF    DO: A_PARALLEL_DIMENSION_ANALYSIS
@@ -61,7 +61,7 @@ S_CATALOG:
   → S_PERSIST     DO: write KNW-decompose report (grouped by dimension: pattern table + details)
 
 S_PERSIST:
-  → END           DO: append specs/learnings.md [+ spec-add if --save-spec] [+ wiki note if --save-wiki]
+  → END           DO: append .workflow/specs/learnings.md [+ spec-add if --save-spec] [+ wiki note if --save-wiki]
 
 </transitions>
 
@@ -88,7 +88,7 @@ For each finding, match against known pattern set:
 | Status | Condition |
 |--------|-----------|
 | documented | Already in coding-conventions.md |
-| known | In specs/learnings.md |
+| known | In .workflow/specs/learnings.md |
 | new | Not seen before |
 
 Flag contradictions (finding conflicts with documented convention). Merge duplicates across agents (same pattern found by multiple dimensions).
@@ -108,7 +108,7 @@ Flag contradictions (finding conflicts with documented convention). Merge duplic
 <success_criteria>
 - [ ] 4 dimension agents spawned in parallel, findings with anchors
 - [ ] Cross-reference: documented/known/new status assigned
-- [ ] Pattern catalog written + specs/learnings.md appended
+- [ ] Pattern catalog written + .workflow/specs/learnings.md appended
 </success_criteria>
 
 <next_step_routing>

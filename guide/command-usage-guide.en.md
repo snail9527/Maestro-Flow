@@ -31,7 +31,7 @@ graph TB
         BS["/maestro-brainstorm"]
         INIT["/maestro-init"]
         RM["/maestro-roadmap"]
-        SG["/maestro-spec-generate"]
+        SG["/maestro-blueprint"]
         UID["/maestro-impeccable"]
     end
 
@@ -165,7 +165,7 @@ graph TB
 ### Project Initialization
 
 ```
-/maestro-init → /maestro-roadmap or /maestro-spec-generate
+/maestro-init → /maestro-roadmap or /maestro-blueprint
 ```
 
 | Step | Command | Purpose | Output |
@@ -173,7 +173,7 @@ graph TB
 | 0 | `/maestro-brainstorm` (optional) | Multi-role brainstorming | guidance-specification.md |
 | 1 | `/maestro-init` | Initialize .workflow/ directory | state.json, project.md, specs/ |
 | 2a | `/maestro-roadmap` | Lightweight roadmap | roadmap.md |
-| 2b | `/maestro-spec-generate` | Full specification chain (7 stages) | PRD + architecture docs + roadmap.md |
+| 2b | `/maestro-blueprint` | 6-stage specification blueprint | PRD + architecture docs + `.workflow/blueprint/` |
 
 ### Milestone Pipeline
 
@@ -190,19 +190,39 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 | Audit | `/maestro-milestone-audit` | audit-report.md | — |
 | Complete | `/maestro-milestone-complete` | archived to milestones/ | — |
 
-**Scope routing**: No args = entire milestone; number = specific phase; text = adhoc/standalone. `--dir` specifies upstream output path directly.
+**Scope routing**: No args = entire milestone; number = specific phase (micro mode); text = macro exploration (macro mode). `--dir` specifies upstream output path directly.
 
-### Five Usage Modes
+### Dual-Layer Analyze
+
+| Layer | Argument | Purpose | Downstream Routing |
+|-------|----------|---------|-------------------|
+| **Macro** | text, e.g. `"user auth system"` | Requirement impact exploration, produces scope_verdict | large→roadmap, medium/small→plan |
+| **Micro** | number, e.g. `1` | Phase-level 6-dimension deep analysis | Directly to plan |
+
+```bash
+# Macro: explore requirement impact before roadmap
+/maestro-analyze "Implement multi-tenancy"     # → scope_verdict: large → suggests roadmap
+
+# Micro: Phase-level deep analysis
+/maestro-analyze 1                              # → 6-dimension scoring → directly to plan
+
+# Pass upstream context
+/maestro-analyze "Auth module" --from brainstorm:BRN-001
+```
+
+### Six Usage Modes
 
 **A. Full milestone**: `analyze → plan → execute → verify` (one shot, all phases)
 
-**B. Per-phase**: `analyze 1 → plan 1 → execute 1` (each phase independently)
+**B. Per-phase**: `analyze 1 → plan 1 → execute 1` (each phase independently, micro layer)
 
 **C. Mixed**: Full analysis + per-phase execution + adhoc mid-stream
 
 **D. Unified planning**: `analyze 1 → analyze 2 → plan → execute` (analyze first, plan once)
 
 **E. Standalone**: `analyze "topic" → plan --dir → execute --dir` (no init/roadmap needed)
+
+**F. Macro exploration**: `analyze "requirement"` → scope_verdict → roadmap or plan (macro layer, use before roadmap)
 
 ---
 
@@ -271,7 +291,7 @@ Discover → Create → Analyze → Plan → Execute → Close
 
 | Chain Name | Command Sequence | Use Case |
 |------------|------------------|----------|
-| `full-lifecycle` | init→spec-generate→...→milestone-audit | Brand new project |
+| `full-lifecycle` | init→blueprint→...→milestone-audit | Brand new project |
 | `roadmap-driven` | init→roadmap→... | Lightweight roadmap |
 | `brainstorm-driven` | brainstorm→init→roadmap→... | Start from brainstorming |
 | `analyze-plan-execute` | analyze→plan→execute | Quick execution |

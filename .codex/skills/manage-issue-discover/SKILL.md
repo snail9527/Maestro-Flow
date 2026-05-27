@@ -155,7 +155,7 @@ Also writes to:
 5. **Discovery Board is Append-Only**: Never clear, modify, or recreate discoveries.ndjson
 6. **Skip on Failure**: If all perspective agents failed, skip dedup
 7. **Evidence Required**: Every finding must have file:line reference -- no speculative issues
-8. **Dedup Before Create**: Never append to issues.jsonl without deduplication
+8. **Dedup Before Create**: Never append to issues.jsonl without deduplication. Every appended record MUST include `source: "discover"` so concurrent writers (e.g. `manage-harvest` uses `source: "harvest"`) can be safely distinguished and deduplicated cross-skill.
 9. **Cleanup Temp Files**: Remove wave-{N}.csv after results are merged
 10. **DO NOT STOP**: Continuous execution until all waves complete
 </invariants>
@@ -247,31 +247,63 @@ Initialize `discovery-state.json`:
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-1.csv`,
   id_column: "id",
-  instruction: buildDiscoverInstruction(sessionFolder, discoveryDir, mode),
+  instruction: DISCOVER_PERSPECTIVE_INSTRUCTION,   // see "Perspective Worker Contract" below
   max_concurrency: maxConcurrency,
   max_runtime_seconds: 3600,
   output_csv_path: `${sessionFolder}/wave-1-results.csv`,
-  output_schema: { // required: id, result_status, findings
-    id: "string", result_status: "completed|failed",
-    findings: "string", issues_found: "string",
-    severity_distribution: "string", error: "string"
+  output_schema: {
+    type: "object",
+    properties: {
+      id:                    { type: "string" },
+      result_status:         { type: "string", enum: ["completed", "failed"] },
+      findings:              { type: "string", maxLength: 500 },
+      issues_found:          { type: "string", description: "JSON array string" },
+      severity_distribution: { type: "string", description: "JSON object string {critical, high, medium, low}" },
+      error:                 { type: "string" }
+    },
+    required: ["id", "result_status", "findings"]
   }
 })
 ```
 
-6. Merge `wave-1-results.csv` into master `tasks.csv` (map `result_status` -> master `status` column)
+6. Merge `wave-1-results.csv` into master `tasks.csv` (map `result_status` -> master `status` column; copy `findings`, `issues_found`, `severity_distribution`, `error`)
 7. Save per-perspective findings to `{discoveryDir}/{perspective}-findings.json`
 8. Update `discovery-state.json` with completed perspectives
 9. Delete temporary files: `wave-1.csv` and `wave-1-results.csv`
 
-**Perspective scan agent protocol**:
-- Scan all source files matching scope_glob
-- Identify concrete issues with file:line references
-- Rate each finding: critical / high / medium / low
-- Provide brief fix direction for each finding
-- Report affected_components[]
-- Share cross-cutting discoveries via discovery board
-- Output issues_found as JSON array + severity_distribution as JSON object
+#### Perspective Worker Contract (DISCOVER_PERSPECTIVE_INSTRUCTION)
+
+```
+You are a perspective scanner for ONE dimension. Your perspective, scope_glob, and description come from your CSV row.
+
+REQUIRED STEPS:
+  1. Read shared discoveries: {sessionFolder}/discoveries.ndjson (may be empty)
+  2. Scan all files matching scope_glob using Read/Grep/Glob (read-only)
+  3. For each finding: capture title, severity (critical|high|medium|low), description, file:line location, fix_direction, affected_components[]
+  4. Append cross-cutting patterns to discoveries.ndjson (dedup by type+key)
+  5. Call report_agent_job_result EXACTLY ONCE
+
+TERMINATION CONTRACT (mandatory — NO worker may end without calling report_agent_job_result):
+  - Success path → result_status=completed (issues_found may be empty array if nothing found)
+  - Timeout path → near max_runtime_seconds, STOP and report completed with partial issues_found (do NOT report failed for timeout — partial work is valuable)
+  - Failure path → unrecoverable error (cannot read scope, parse failure) → result_status=failed with error message
+  - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
+
+OUTPUT (return via report_agent_job_result; must match output_schema):
+  {
+    "id": "<your row id>",
+    "result_status": "completed" | "failed",
+    "findings": "<one-sentence summary, max 500 chars>",
+    "issues_found": "<JSON array string: [{\"title\":\"...\",\"severity\":\"...\",\"description\":\"...\",\"location\":\"file:line\",\"fix_direction\":\"...\",\"affected_components\":[...]}]>",
+    "severity_distribution": "<JSON object string: {\"critical\":N,\"high\":N,\"medium\":N,\"low\":N}>",
+    "error": "<message if failed, else empty>"
+  }
+
+CONSTRAINTS:
+  - Every finding MUST have a concrete file:line reference. No speculative issues.
+  - Do NOT write to tasks.csv, wave-*.csv, results.csv, or issues.jsonl (orchestrator owns those).
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 #### Wave 2: Dedup + Issue Creation (Single Agent)
 
@@ -285,9 +317,68 @@ spawn_agents_on_csv({
    ...
    ```
 5. Write `wave-2.csv` with `prev_context` column
-6. Execute `spawn_agents_on_csv` for dedup agent
+6. Execute:
+
+```javascript
+spawn_agents_on_csv({
+  csv_path: `${sessionFolder}/wave-2.csv`,
+  id_column: "id",
+  instruction: DEDUP_INSTRUCTION,            // see "Dedup Worker Contract" below
+  max_concurrency: 1,
+  max_runtime_seconds: 1800,
+  output_csv_path: `${sessionFolder}/wave-2-results.csv`,
+  output_schema: {
+    type: "object",
+    properties: {
+      id:                    { type: "string" },
+      result_status:         { type: "string", enum: ["completed", "failed"] },
+      findings:              { type: "string", maxLength: 500 },
+      issues_found:          { type: "string", description: "JSON array of deduplicated issues with ISS-* IDs" },
+      severity_distribution: { type: "string" },
+      error:                 { type: "string" }
+    },
+    required: ["id", "result_status", "findings"]
+  }
+})
+```
+
 7. Merge results into master `tasks.csv` (map `result_status` -> master `status` column)
 8. Delete temporary files: `wave-2.csv` and `wave-2-results.csv`
+
+#### Dedup Worker Contract (DEDUP_INSTRUCTION)
+
+```
+You are the dedup + issue creation worker. Your prev_context contains all wave-1 perspective findings.
+
+REQUIRED STEPS:
+  1. Parse prev_context — extract every issues_found JSON from upstream rows
+  2. Deduplicate: group by file path, compare descriptions (>80% overlap or same file:line → keep higher severity)
+  3. Assign collision-safe ID per unique issue: ISS-YYYYMMDD-NNN
+  4. Build full issue record (severity→priority: critical→1/high→2/medium→3/low→4; source="discover"; tags=[perspective])
+  5. Append deduplicated records to .workflow/issues/issues.jsonl AND {discoveryDir}/discovery-issues.jsonl
+  6. Call report_agent_job_result EXACTLY ONCE
+
+TERMINATION CONTRACT (mandatory):
+  - Success → result_status=completed with issues_found = final deduped JSON array
+  - Timeout → near max_runtime_seconds, persist partial dedup, report completed with note in findings
+  - Failure → file write error, parse error → result_status=failed
+  - NEVER skip report_agent_job_result.
+
+OUTPUT (must match output_schema):
+  {
+    "id": "<your row id>",
+    "result_status": "completed" | "failed",
+    "findings": "<pre-dedup count → post-dedup count summary>",
+    "issues_found": "<JSON array of final deduplicated issues>",
+    "severity_distribution": "<JSON object: {critical, high, medium, low}>",
+    "error": "<message if failed, else empty>"
+  }
+
+CONSTRAINTS:
+  - Append-only writes to issues.jsonl. Never overwrite existing records.
+  - Every record MUST include source: "discover".
+  - Do NOT call spawn_agents_on_csv (no recursion).
+```
 
 **Dedup agent protocol**:
 - Merge all perspective findings from prev_context into single list

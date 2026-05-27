@@ -47,6 +47,19 @@ Read .workflow/codebase/doc-index.json
 Extract: components[], features[], requirements[], architecture_decisions[]
 ```
 
+**Degradation path — doc-index.json missing:**
+
+```
+If .workflow/codebase/doc-index.json does NOT exist:
+  1. Emit WARNING: "doc-index.json missing — sync cannot perform impact analysis."
+  2. Prompt user with two choices:
+     (a) Run `/manage-codebase-rebuild` to build doc-index, then re-run sync (recommended)
+     (b) Fall back to git-diff-only mode: skip Steps 3-5, emit raw changed-file
+         list from Step 2 as the sync output (no component/feature mapping)
+  3. If user picks (b): set DEGRADED_MODE = true and continue with git diff only.
+  4. If user picks (a) or no answer: exit with code E002.
+```
+
 ### Step 4: Impact Chain Traversal
 
 For each `changed_file` in `changed_files[]`:

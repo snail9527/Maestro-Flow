@@ -1,5 +1,9 @@
 # Tool Spec Reference
 
+<reference>
+Tool specs are a **subtype of knowhow** (`tool: true` frontmatter on knowhow documents). For the full knowhow data model, lifecycle, and management commands, see `knowhow.md`. This file documents only the tool-specific subset.
+</reference>
+
 Shared reference for tool spec registration and execution commands.
 
 ## Storage

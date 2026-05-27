@@ -98,6 +98,7 @@ export const en: LocaleStrings = {
     confirmLabelBackup: 'Backup:',
     confirmLabelCodexHooks: 'Codex Hooks:',
     confirmLabelCodexMcp: 'Codex MCP:',
+    confirmLabelAgyHooks: 'Agy Hooks:',
     confirmSkipped: 'skipped',
 
     // Codex Hooks
@@ -110,6 +111,14 @@ export const en: LocaleStrings = {
     codexHooksWinWarning: 'Warning: Codex hooks are not yet supported on Windows.',
     codexHooksFeatureFlagHint: 'Add codex_hooks = true to [features] in ~/.codex/config.toml to enable hooks.',
 
+    // Agy Hooks (Antigravity)
+    agyHooksLevelDescriptions: {
+      none: 'No hooks',
+      minimal: 'spec-injector (PreToolUse on invoke_subagent)',
+      standard: '+ session/skill/keyword context (PreInvocation) + delegate-monitor (PostToolUse) + team/telemetry/coordinator (Stop) + preflight/spec guards',
+      full: '+ workflow-guard (PreToolUse on shell/file writes)',
+    },
+
     // Execution
     execPreparing: 'Preparing...',
     execScanning: 'Scanning disabled items...',
@@ -119,6 +128,7 @@ export const en: LocaleStrings = {
     execWritingVersion: 'Writing version marker...',
     execInstallingHooks: 'Installing {level} hooks...',
     execInstallingCodexHooks: 'Installing Codex {level} hooks...',
+    execInstallingAgyHooks: 'Installing Agy {level} hooks...',
     execInstallingStatusline: 'Installing statusline...',
     execRegisteringMcp: 'Registering MCP server...',
     execRegisteringCodexMcp: 'Registering Codex MCP server...',

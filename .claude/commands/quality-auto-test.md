@@ -15,7 +15,7 @@ allowed-tools:
 Run unified automated testing via CSV layer pipeline. Reads project state to auto-select the optimal scenario source — PRD specs (when spec package exists), coverage gaps (when Nyquist audit found gaps), or code exploration (default). All sources converge into a CSV pipeline: discover infrastructure → plan → build scenarios.csv → write tests per layer (spawn_agents_on_csv parallel) → execute → diagnose failures (spawn_agents_on_csv parallel) → iterate → report.
 
 Key mechanisms:
-- **Intelligent routing**: Reads `.tests/`, `.workflow/.spec/`, `verification.json` to auto-select source — no mode flag needed
+- **Intelligent routing**: Reads `.tests/`, `.workflow/blueprint/`, `verification.json` to auto-select source — no mode flag needed
 - **CSV parallel test writing**: Per-layer `spawn_agents_on_csv` — each agent writes one test file independently
 - **CSV parallel failure diagnosis**: Failed scenarios dispatched via `spawn_agents_on_csv` for classification + fix
 - **Unified iteration engine**: Nested inner loop (fix test_defects via diagnosis CSV, max 3/layer) + outer loop (adaptive strategy, max N iterations)
@@ -40,13 +40,13 @@ Phase or task: $ARGUMENTS (required — phase number)
 
 **Intelligent routing** (auto-detected from project state):
 
-| Priority | Condition | Route | Equivalent to |
-|----------|-----------|-------|---------------|
+| Priority | Condition | Route | Reference skill |
+|----------|-----------|-------|-----------------|
 | 1 | Active session exists (state.json status=running) | Resume | — |
 | 2 | --re-run flag + previous failures | Re-run | — |
-| 3 | Spec package exists (REQ-*.md) | spec | quality-business-test |
-| 4 | Nyquist gaps exist (verification.json) | gap | quality-test-gen |
-| 5 | Default | code | quality-integration-test |
+| 3 | Spec package exists (REQ-*.md) | spec | quality-business-test (separate skill) |
+| 4 | Nyquist gaps exist (verification.json) | gap | quality-test-gen (separate skill) |
+| 5 | Default | code | quality-integration-test (separate skill) |
 
 Flags, artifact context resolution, and output formats defined in workflow auto-test.md.
 

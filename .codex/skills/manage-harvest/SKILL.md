@@ -1,7 +1,7 @@
 ---
 name: manage-harvest
 description: Extract knowledge from artifacts into wiki/spec/issues
-argument-hint: "[<session-id|path>] [--to wiki|spec|issue|auto] [--source <type>] [--recent N] [--dry-run] [-y]"
+argument-hint: "[<session-id|path>] [--to wiki|spec|issue|auto] [--source <type>] [--recent N] [--dry-run] [-y] [--prune] [--age N]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
 
@@ -31,6 +31,8 @@ $ARGUMENTS — session-id, path, or empty for scan mode.
 - `--dry-run` — Preview without writing
 - `-y` — Skip confirmations
 - `--min-confidence N` — Minimum 0.0-1.0 (default: 0.5)
+- `--prune` — State hygiene mode: classify artifacts, graduate harvested → knowhow, archive from state.json, prune accumulated_context
+- `--age N` — Graduation age threshold in days (default: 14). Used with `--prune`
 
 **Source registry:**
 | Source | Scan Path | Key Files |
@@ -46,7 +48,7 @@ $ARGUMENTS — session-id, path, or empty for scan mode.
 </context>
 
 <execution>
-Follow '~/.maestro/workflows/harvest.md' Stages 1–8.
+Follow '~/.maestro/workflows/harvest.md' Stages 1–8 (standard mode) or Stage 9 (`--prune` mode).
 
 **Key invariants:**
 1. **Read-only until Stage 6** — extraction/classification in-memory only
@@ -62,9 +64,11 @@ Follow '~/.maestro/workflows/harvest.md' Stages 1–8.
 - Quality enforcement rules → `quality` category
 - Wiki: `maestro wiki create --type <type> --slug harvest-<source_type>-<short_id>`
 - Spec: `maestro wiki append spec-<file> --body "<content>" --keywords "<kws>"` (unified write path) or `Skill({ skill: "spec-add", args: "<category> <content>" })`
-- Issue: append to `issues.jsonl` matching canonical schema
+- Issue: append to `issues.jsonl` matching canonical schema, with `source: "harvest"` field (distinguishes from `manage-issue-discover`, which uses `source: "discover"` — required for cross-skill dedup when both write concurrently)
 
 **Next steps:** `/manage-wiki health`, `maestro wiki list --type note`, `/wiki-connect --fix`, `/wiki-digest`, `/manage-issue list --source harvest`
+
+**Prune mode** (`--prune`): Classifies artifacts (active/graduated/stale/protected), graduates harvested artifacts to wiki knowhow, archives from `artifacts[]` → `artifact_archive[]`, prunes resolved entries from accumulated_context. Files on disk are never deleted. Always backs up state.json before writing.
 </execution>
 
 <error_codes>
@@ -88,4 +92,8 @@ Follow '~/.maestro/workflows/harvest.md' Stages 1–8.
 - [ ] harvest-log.jsonl updated with provenance
 - [ ] harvest-report-{date}.md written
 - [ ] No source artifacts modified
+- [ ] If --prune: artifacts classified (active/graduated/stale/protected)
+- [ ] If --prune: graduated artifacts → knowhow + artifact_archive[]
+- [ ] If --prune: accumulated_context pruned (resolved deferred/blockers, deduplicated decisions)
+- [ ] If --prune: state.json backed up before modification
 </success_criteria>

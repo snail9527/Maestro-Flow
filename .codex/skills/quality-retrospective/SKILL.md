@@ -8,7 +8,7 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 <purpose>
 Multi-lens retrospective for completed phases. Context-Agent Fork loads phase artifacts once;
 four parallel lens agents (technical, process, quality, decision) analyze independently;
-synthesizer distills insights; outputs are routed to spec stubs, knowhow tips, issues, and specs/learnings.md.
+synthesizer distills insights; outputs are routed to spec stubs, knowhow tips, issues, and .workflow/specs/learnings.md.
 
 ```
 +------------------------------------------------------------------+
@@ -76,9 +76,16 @@ When `-y`: Accept all routing recommendations without prompting. Route all insig
 
 **Storage read (never modified)** — all resolved via `state.json.artifacts[]`:
 ```
+# D-007 milestone reverse lookup — phase N may belong to a milestone different from current
+target_milestone = resolve_milestone(target_phase)  # see below
 related = artifacts.filter(a =>
-  a.phase === target_phase && a.milestone === current_milestone
+  a.phase === target_phase && a.milestone === target_milestone
 ).sort_by(completed_at asc)
+
+resolve_milestone(phase_number):
+  for ms in state.json.milestones[]:
+    if str(phase_number) in ms.phase_slugs: return ms.id
+  return state.json.current_milestone   # fallback
 ```
 Each artifact's type determines its outputs at `.workflow/{a.path}/`:
 - **execute** → index.json, plan.json, .task/TASK-*.json, .summaries/TASK-*-summary.md
@@ -125,7 +132,7 @@ Each artifact's type determines its outputs at `.workflow/{a.path}/`:
 7. **Archive before overwrite**: Move existing retrospective.{md,json} to `.history/` with timestamp before writing new ones
 8. **Spec learnings.md backward-compat**: Append to it only if it already exists -- never create it
 9. **Route confirmation**: Unless `-y`, present routing table and ask per-group before writing spec/issue/knowhow
-10. **Lessons always written**: Append to `specs/learnings.md` regardless of `--no-route` -- routing only controls spec/issue/knowhow creation
+10. **Lessons always written**: Append to `.workflow/specs/learnings.md` regardless of `--no-route` -- routing only controls spec/issue/knowhow creation
 </invariants>
 
 <execution>
@@ -168,7 +175,7 @@ spawn_agent({
   task_name: "ctx",
   fork_turns: "none",
   message: `Load and summarize all phase ${targetPhase} artifacts for retrospective.
-    1. Query state.json artifacts[] for phase === ${targetPhase} && milestone === current_milestone
+    1. Query state.json artifacts[] for phase === ${targetPhase} && milestone === resolve_milestone(${targetPhase}) [D-007 reverse lookup via state.json.milestones[].phase_slugs; fallback to current_milestone if phase unmatched]
     2. Load per-artifact outputs (execute→index/plan/tasks/summaries, verify→verification.json, review→review.json, debug→understanding/evidence, test→uat/tests)
     3. Filter issues.jsonl for this phase; read state.json for project context
     EXPECTED: Goals vs outcomes, completion rates, verification/review/UAT results, issue counts, key metrics`
@@ -287,6 +294,6 @@ Next steps: `$manage-status`, `$manage-issue "list --source retrospective"`, `$m
 - [ ] Synthesizer produces deduplicated insights with stable INS-ids
 - [ ] Routing applied per insight (spec/issue/knowhow/none) with confirmation
 - [ ] retrospective.{md,json} written to phase directory
-- [ ] Lessons appended to specs/learnings.md regardless of --no-route flag
+- [ ] Lessons appended to .workflow/specs/learnings.md regardless of --no-route flag
 - [ ] Existing retrospective archived before overwrite
 </success_criteria>

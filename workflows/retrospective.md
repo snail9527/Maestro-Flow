@@ -2,7 +2,7 @@
 
 Multi-lens 复盘 of completed phase artifacts. Consumes existing execution outputs (verification.json, review.json, issues.jsonl, .summaries/, state.json, uat.md, plan.json) and routes distilled insights into the spec / note / issue / knowhow stores.
 
-This is a **post-execution analysis** workflow. It reads only — until the routing stage, where it writes new spec stubs, issue rows, memory entries, and knowhow entries. It never modifies existing phase artifacts.
+This is a **post-execution analysis** workflow. It reads only — until the routing stage, where it writes new spec stubs, issue rows, memory entries, and knowhow entries. It **does not modify existing phase artifacts**; it writes to the spec / issue / knowhow stores as configured outputs (new entries appended; pre-existing phase outputs such as verification.json, review.json, uat.md, .summaries/ are never altered).
 
 ---
 
@@ -481,8 +481,8 @@ If `mode == "range"` or `--all`, loop Stages 3-8 per phase, then print aggregate
       "summary": "Refresh-on-use prevents replay attacks. Implemented in src/auth/refresh.ts; should become a project-wide convention.",
       "confidence": "high",
       "evidence_refs": [
-        ".workflow/scratch/plan-auth-2026-04-15/verification.json#gaps[2]",
-        ".workflow/scratch/plan-auth-2026-04-15/.summaries/TASK-005-summary.md:42"
+        ".workflow/scratch/20260415-plan-P1-auth/verification.json#gaps[2]",
+        ".workflow/scratch/20260415-plan-P1-auth/.summaries/TASK-005-summary.md:42"
       ],
       "tags": ["auth", "jwt", "security"],
       "routed_to": "spec",
@@ -508,7 +508,7 @@ Refresh-on-use prevents replay attacks. Implemented in src/auth/refresh.ts; shou
 - **Phase**: 1 (01-auth)
 - **Lens**: technical
 - **Confidence**: high
-- **Evidence**: .workflow/scratch/plan-auth-2026-04-15/verification.json#gaps[2]
+- **Evidence**: .workflow/scratch/20260415-plan-P1-auth/verification.json#gaps[2]
 - **Routed to**: spec (coding-conventions.md#INS-a1b2c3d4)
 
 </spec-entry>

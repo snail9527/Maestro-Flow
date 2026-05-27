@@ -15,10 +15,16 @@ import { C, SYM, SP, wrapCursor, parseNumberKey, KeyHints, SectionHeader } from 
 interface HooksConfigProps {
   level: HookLevel;
   onLevelChange: (level: HookLevel) => void;
+  /** Override section title (default: t.install.hooksTitle for Claude). */
+  title?: string;
+  /** Override per-level descriptions (default: Claude). Codex/Agy pass their own. */
+  descriptions?: Record<string, string>;
 }
 
-export function HooksConfig({ level, onLevelChange }: HooksConfigProps) {
+export function HooksConfig({ level, onLevelChange, title, descriptions }: HooksConfigProps) {
   const [index, setIndex] = useState(() => HOOK_LEVELS.indexOf(level));
+  const descMap = descriptions ?? t.install.hooksLevelDescriptions;
+  const sectionTitle = title ?? t.install.hooksTitle;
 
   useInput(
     (input, key) => {
@@ -40,14 +46,14 @@ export function HooksConfig({ level, onLevelChange }: HooksConfigProps) {
 
   return (
     <Box flexDirection="column">
-      <SectionHeader title={t.install.hooksTitle} />
+      <SectionHeader title={sectionTitle} />
 
       <Box flexDirection="column" marginTop={SP.sectionGap}>
         {HOOK_LEVELS.map((lvl, i) => {
           const isActive = lvl === level;
           const isHighlighted = i === index;
           const label = lvl.charAt(0).toUpperCase() + lvl.slice(1);
-          const desc = t.install.hooksLevelDescriptions[lvl];
+          const desc = descMap[lvl];
 
           return (
             <Box key={lvl}>

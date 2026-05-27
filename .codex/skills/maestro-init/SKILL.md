@@ -1,7 +1,7 @@
 ---
 name: maestro-init
 description: Initialize project with auto state detection
-argument-hint: "[-y] [--from-brainstorm SESSION-ID]"
+argument-hint: "[-y] [--from <source>]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
@@ -16,12 +16,12 @@ When `-y`: After config questions, run research without further interaction. Exp
 ```bash
 $maestro-init ""
 $maestro-init "-y"
-$maestro-init "--from-brainstorm 20260318-brainstorm-auth"
+$maestro-init "--from brainstorm:20260318-brainstorm-auth"
 ```
 
 **Flags**:
 - `-y`: Skip interactive questioning; extract from provided document
-- `--from-brainstorm SESSION-ID`: Import vision/goals/constraints from brainstorm guidance-specification.md
+- `--from <source>`: Load upstream context package (brainstorm:ID, @file, or path). Consumes context-package.json. Alias: `--from-brainstorm`
 
 **Output**: `.workflow/` directory with project.md, state.json, config.json, specs/
 
@@ -41,7 +41,7 @@ $maestro-init "--from-brainstorm 20260318-brainstorm-auth"
 
 Extract flags from arguments:
 - `-y` flag presence
-- `--from-brainstorm SESSION-ID` value
+- `--from <source>` value (or `--from-brainstorm SESSION-ID` alias)
 - Remaining text as project description
 
 ### Step 2: Detect Project State
@@ -55,7 +55,7 @@ Classify as:
 
 ### Step 3: Gather Project Information
 
-**If `--from-brainstorm`**:
+**If `--from` (or `--from-brainstorm`)**:
 - Read `.workflow/.brainstorm/{SESSION-ID}/guidance-specification.md`
 - Extract these fields from the document (match by heading or frontmatter key):
   - `## Vision` or `vision:` → project.md Core Value Proposition
@@ -132,7 +132,7 @@ If project state is **empty** (greenfield, no source files found in Step 2):
 
 ### Step 10: Completion Report
 
-Display created files and next steps: `$maestro-roadmap --mode full` (full spec), `$maestro-roadmap` (light), `$manage-status`, `$maestro-brainstorm`, `$maestro-quick`.
+Display created files and next steps: `$maestro-blueprint` (full spec), `$maestro-roadmap` (roadmap), `$manage-status`, `$maestro-brainstorm`, `$maestro-quick`.
 
 </execution>
 
@@ -142,7 +142,7 @@ Display created files and next steps: `$maestro-roadmap --mode full` (full spec)
 |------|----------|-------------|----------|
 | E001 | error | No arguments when -y requires document | Ask user for document reference |
 | E002 | error | .workflow/ already exists | Show status, suggest manage-status |
-| E003 | error | Brainstorm session not found | List available sessions |
+| E003 | error | Context source not found (--from / --from-brainstorm) | List available sessions |
 | W001 | warning | Could not detect tech stack | Continue with manual input |
 
 </error_codes>

@@ -32,7 +32,7 @@ status: draft
 generated_at: {timestamp}
 version: 1
 dependencies:
-  - ../spec-config.json
+  - ../blueprint-config.json
   - ../product-brief.md
   - ../requirements/_index.md
 ---
@@ -246,9 +246,9 @@ date: {timestamp}
 
 | Variable | Source | Description |
 |----------|--------|-------------|
-| `{session_id}` | spec-config.json | Session identifier |
+| `{session_id}` | blueprint-config.json | Session identifier |
 | `{timestamp}` | Runtime | ISO8601 generation timestamp |
 | `{product_name}` | product-brief.md | Product/feature name |
 | `{NNN}` | Auto-increment | ADR/requirement number |
 | `{slug}` | Auto-generated | Kebab-case from decision title |
-| `{has_codebase}` | spec-config.json | Whether existing codebase exists |
+| `{has_codebase}` | blueprint-config.json | Whether existing codebase exists |

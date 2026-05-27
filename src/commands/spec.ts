@@ -181,12 +181,21 @@ export function registerSpecCommand(program: Command): void {
         for (const file of result.created) console.log(`  + ${file}`);
       }
 
+      if (result.migrated.length > 0) {
+        console.log('\nFrontmatter added (migrated):');
+        for (const file of result.migrated) console.log(`  ~ ${file}`);
+      }
+
       if (result.skipped.length > 0) {
         console.log('\nSkipped (already exist):');
         for (const file of result.skipped) console.log(`  - ${file}`);
       }
 
-      if (result.directories.length === 0 && result.created.length === 0) {
+      if (
+        result.directories.length === 0 &&
+        result.created.length === 0 &&
+        result.migrated.length === 0
+      ) {
         console.log('\nSpec system already initialized. No changes made.');
       }
     });

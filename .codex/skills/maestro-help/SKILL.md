@@ -42,13 +42,13 @@ $ARGUMENTS 匹配关键词 → 路由到对应模式：
 
 | 字段 | 内容 |
 |------|------|
-| `commands[]` | 55 个 slash 命令（name, command, category, description, source） |
+| `commands[]` | 56 个 slash 命令（name, command, category, description, source） |
 | `skills[]` | 10 个 Skill（name, category, description, source） |
 | `agents[]` | 22 个 Agent（name, category, description） |
 | `cli_commands[]` | 21 个终端命令（command, description, category） |
 | `guide_files[]` | 17 个 Guide 文档索引 |
 | `essential_commands[]` | 10 个核心命令 |
-| `workflows` | 4 大工作流模板（main_pipeline, quick, issue_loop, init_paths） |
+| `workflows` | 拓扑 + 6 条合法路径 (Path A-F) + 3 个辅助流程 |
 
 ## Project State Detection
 
@@ -96,7 +96,7 @@ Mode 3 (Smart Recommendations) 需要检测项目状态：
 
 Guide 映射：
 - analyze/plan/execute/verify → `guide/command-usage-guide.md`
-- init/roadmap → `guide/quick-start-guide.md`
+- init/roadmap/blueprint → `guide/quick-start-guide.md`
 - ralph → `guide/maestro-ralph-guide.md`
 - maestro (协调器) → `guide/maestro-coordinator-guide.md`
 - delegate → `guide/delegate-async-guide.md`
@@ -109,9 +109,11 @@ Guide 映射：
 | 当前状态 | 推荐命令 | 原因 |
 |---------|---------|------|
 | 无 .workflow/ | `/maestro-init` | 项目未初始化 |
-| init 完成，无 roadmap | `/maestro-roadmap` | 需要路线图 |
-| roadmap 完成 | `/maestro-analyze` | 开始分析 |
-| analyze 完成 | `/maestro-plan` | 进入规划 |
+| init 完成，无上游 context | `/maestro-brainstorm` 或 `/maestro-analyze "topic"` | 先探索再规划；brainstorm 发散，analyze 宏观探索影响面 |
+| analyze 完成，scope_verdict=large | `/maestro-roadmap --from analyze:ANL-xxx` | 大范围需求，需要 Milestone > Phase 分解 |
+| analyze 完成，scope_verdict=medium/small | `/maestro-plan --from analyze:ANL-xxx` | 跳过 roadmap 直达规划（Path C） |
+| roadmap 完成，phase=pending | `/maestro-analyze 1` | 微观分析：Phase 级深入探索 |
+| analyze (微观) 完成 | `/maestro-plan 1` | Phase 级规划 |
 | plan 完成 | `/maestro-execute` | 开始执行 |
 | execute 完成 | `/maestro-verify` | 验证成果 |
 | verify 有 gaps | `/maestro-analyze --gaps` | 重新分析 |
@@ -123,15 +125,23 @@ Guide 映射：
 
 根据任务类型推荐工作流和命令序列：
 
-**新项目**:
-- 最简: `/maestro-init` → `/maestro-roadmap "目标" -y`
-- 头脑风暴: `/maestro-brainstorm "描述"` → `/maestro-init --from-brainstorm ANL-xxx`
-- 完整规范: `/maestro-init` → `/maestro-spec-generate`
+**Path A — 完整新项目**:
+- `brainstorm` → `blueprint`(可选) → `analyze "topic"`(宏观) → `roadmap` → `analyze 1`(微观) → `plan 1` → `execute` → `verify`
 
-**功能开发**:
-- 标准: analyze → plan → execute → verify
+**Path B — 旧项目大功能**:
+- `analyze "feature X"`(宏观) → `roadmap` → `analyze 1`(微观) → `plan 1` → `execute` → `verify`
+
+**Path C — 中等功能（跳过 roadmap）**:
+- `analyze "feature X"` → `plan --from analyze:ANL-xxx` → `execute` → `verify`
+
+**Path D — 小改动**:
+- `plan "fix auth bug"` → `execute` → `verify`
 - 快速: `/maestro-quick "功能描述"`
 - 全自动: `/maestro -y "功能描述"`
+
+**Path E/F — 纯文档/纯探索**:
+- `blueprint "project idea"` → (供人阅读)
+- `brainstorm "idea"` → (供人决策)
 
 **Bug 修复**:
 - 快速: `/maestro-quick "Bug 描述"`
@@ -149,14 +159,14 @@ Guide 映射：
 |------|------|---------|
 | `/maestro` | 智能协调器 | 不确定用哪个命令时 |
 | `/maestro-init` | 初始化项目 | 首次使用 |
-| `/maestro-roadmap` | 路线图 | 初始化后规划 |
-| `/maestro-analyze` | 分析 | 开始 Phase 分析 |
-| `/maestro-plan` | 规划 | 分析完成后 |
+| `/maestro-brainstorm` | 头脑风暴 | 新项目发散探索、多角色创意 |
+| `/maestro-blueprint` | 规格文档化 | 正式 7-phase 收敛规格链 |
+| `/maestro-analyze` | 双层分析 | 宏观: `"topic"` 探索影响面；微观: `1` Phase 级深入 |
+| `/maestro-roadmap` | 路线图编排 | scope_verdict=large 时，Milestone > Phase 分解 |
+| `/maestro-plan` | 规划 | 分析完成后，支持 `--from analyze:ANL-xxx` 直达 |
 | `/maestro-execute` | 执行 | 计划完成后 |
 | `/maestro-verify` | 验证 | 执行完成后 |
 | `/maestro-quick` | 快速任务 | 简单任务跳过管线 |
-| `/quality-review` | 代码审查 | 执行后质量检查 |
-| `/manage-issue` | Issue 管理 | 追踪和解决 Bug |
 
 快速上手路径：
 1. `maestro install --force`
@@ -175,7 +185,7 @@ Guide 映射：
 
 - **Workflow (15)**: analyzer, planner, executor, verifier, reviewer, debugger, research-agent, roadmapper, plan-checker, phase-researcher, project-researcher, research-synthesizer, codebase-mapper, nyquist-auditor, integration-checker, external-researcher, collab-planner
 - **Team (2)**: supervisor, worker
-- **Planning (1)**: conceptual-planning-agent
+- **Brainstorm (2)**: role-design-author, cross-role-reviewer
 - **CLI (1)**: cli-explore-agent
 - **UI (1)**: ui-design-agent
 

@@ -1,7 +1,7 @@
 {
   "_template_note": "Template for business-test-report.json. Fields marked with {placeholder} are filled at runtime.",
   "phase": "{phase}",
-  "spec_ref": "{spec_ref}",
+  "blueprint_ref": "{blueprint_ref}",
   "spec_mode": "full|degraded",
   "completed_at": "{ISO timestamp}",
   "execution_mode": "gen-code|agent",

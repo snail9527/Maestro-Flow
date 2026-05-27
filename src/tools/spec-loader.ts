@@ -10,6 +10,12 @@ import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync } from 
 import { join } from 'node:path';
 import { parseSpecEntries, formatSpecEntries, type SpecEntryParsed } from './spec-entry-parser.js';
 import { paths } from '../config/paths.js';
+import {
+  SPEC_SEED_DOCS,
+  formatSeedFrontmatter,
+  hasFrontmatter,
+  renderSeedContent,
+} from './spec-seeds.js';
 
 // ============================================================================
 // Types
@@ -470,18 +476,9 @@ function stripFrontmatter(raw: string): string {
 /** Directories already checked this process — skip re-checking. */
 const autoInitChecked = new Set<string>();
 
-/** Minimal seed files (filename + header). */
-const AUTO_INIT_SEEDS: Array<[string, string]> = [
-  ['coding-conventions.md', '# Coding Conventions\n\n## Entries\n\n'],
-  ['architecture-constraints.md', '# Architecture Constraints\n\n## Entries\n\n'],
-  ['learnings.md', '# Learnings\n\n## Entries\n\n'],
-  ['debug-notes.md', '# Debug Notes\n\n## Entries\n\n'],
-  ['test-conventions.md', '# Test Conventions\n\n## Entries\n\n'],
-  ['review-standards.md', '# Review Standards\n\n## Entries\n\n'],
-];
-
 /**
- * Auto-create a specs directory with seed files if it does not exist.
+ * Auto-create a specs directory with seed files if it does not exist,
+ * and migrate existing files that lack a YAML frontmatter block.
  * Applies to every layer (global, baseline, team, personal).
  *
  * For project-local dirs: only runs when `.workflow/` already exists
@@ -493,8 +490,6 @@ const AUTO_INIT_SEEDS: Array<[string, string]> = [
 function autoInitSeeds(specsDir: string): void {
   if (autoInitChecked.has(specsDir)) return;
   autoInitChecked.add(specsDir);
-
-  if (existsSync(specsDir)) return;
 
   // For project-local paths, only auto-init when .workflow/ already exists.
   // Global path (under ~/.maestro/) always qualifies.
@@ -510,11 +505,20 @@ function autoInitSeeds(specsDir: string): void {
   }
 
   try {
-    mkdirSync(specsDir, { recursive: true });
-    for (const [filename, content] of AUTO_INIT_SEEDS) {
-      const filePath = join(specsDir, filename);
+    if (!existsSync(specsDir)) {
+      mkdirSync(specsDir, { recursive: true });
+    }
+    for (const doc of SPEC_SEED_DOCS) {
+      const filePath = join(specsDir, doc.filename);
       if (!existsSync(filePath)) {
-        writeFileSync(filePath, content, 'utf-8');
+        writeFileSync(filePath, renderSeedContent(doc), 'utf-8');
+        continue;
+      }
+      // Migrate: legacy stubs lack the YAML frontmatter block — prepend it.
+      const raw = readFileSync(filePath, 'utf-8');
+      if (!hasFrontmatter(raw)) {
+        const merged = `${formatSeedFrontmatter(doc.frontmatter)}\n\n${raw.replace(/^\s+/, '')}`;
+        writeFileSync(filePath, merged, 'utf-8');
       }
     }
   } catch {

@@ -2,12 +2,21 @@
  * Spec Init
  *
  * Initialize .workflow/specs/ directory with frontmatter-enabled seed documents.
- * Idempotent: skips existing files, only creates missing ones.
+ * Idempotent: creates missing files, and migrates existing files that lack a
+ * YAML frontmatter block by prepending the seed's frontmatter (body preserved).
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type SpecScope, resolveSpecDir } from './spec-loader.js';
+import {
+  SPEC_SEED_DOCS,
+  formatSeedFrontmatter,
+  hasFrontmatter,
+  renderSeedContent,
+  findSeedByFilename,
+  type SpecSeedDoc,
+} from './spec-seeds.js';
 
 // ============================================================================
 // Types
@@ -15,201 +24,9 @@ import { type SpecScope, resolveSpecDir } from './spec-loader.js';
 
 export interface InitResult {
   created: string[];
+  migrated: string[];
   skipped: string[];
   directories: string[];
-}
-
-interface SeedDoc {
-  filename: string;
-  frontmatter: {
-    title: string;
-    readMode: string;
-    priority: string;
-    category: string;
-    keywords: string[];
-  };
-  body: string;
-}
-
-// ============================================================================
-// Seed Documents
-// ============================================================================
-
-const SEED_DOCS: SeedDoc[] = [
-  {
-    filename: 'coding-conventions.md',
-    frontmatter: {
-      title: 'Coding Conventions',
-      readMode: 'required',
-      priority: 'high',
-      category: 'coding',
-      keywords: ['style', 'naming', 'import', 'pattern', 'convention', 'formatting'],
-    },
-    body: `# Coding Conventions
-
-## Formatting
-
-## Naming
-
-## Imports
-
-## Patterns
-
-## Entries
-
-`,
-  },
-  {
-    filename: 'architecture-constraints.md',
-    frontmatter: {
-      title: 'Architecture Constraints',
-      readMode: 'required',
-      priority: 'high',
-      category: 'arch',
-      keywords: ['architecture', 'module', 'layer', 'boundary', 'dependency', 'structure'],
-    },
-    body: `# Architecture Constraints
-
-## Module Structure
-
-## Layer Boundaries
-
-## Dependency Rules
-
-## Technology Constraints
-
-## Entries
-
-`,
-  },
-  {
-    filename: 'learnings.md',
-    frontmatter: {
-      title: 'Learnings',
-      readMode: 'optional',
-      priority: 'medium',
-      category: 'learning',
-      keywords: ['bug', 'lesson', 'gotcha', 'learning'],
-    },
-    body: `# Learnings
-
-Add entries with: \`/spec-add learning <description>\`
-
-## Entries
-
-`,
-  },
-  {
-    filename: 'quality-rules.md',
-    frontmatter: {
-      title: 'Quality Rules',
-      readMode: 'required',
-      priority: 'medium',
-      category: 'review',
-      keywords: ['quality', 'lint', 'rule', 'enforcement'],
-    },
-    body: `# Quality Rules
-
-## Entries
-
-`,
-  },
-  {
-    filename: 'debug-notes.md',
-    frontmatter: {
-      title: 'Debug Notes',
-      readMode: 'optional',
-      priority: 'medium',
-      category: 'debug',
-      keywords: ['debug', 'issue', 'workaround', 'root-cause', 'gotcha'],
-    },
-    body: `# Debug Notes
-
-## Entries
-
-`,
-  },
-  {
-    filename: 'test-conventions.md',
-    frontmatter: {
-      title: 'Test Conventions',
-      readMode: 'required',
-      priority: 'high',
-      category: 'test',
-      keywords: ['test', 'coverage', 'mock', 'fixture', 'assertion', 'framework'],
-    },
-    body: `# Test Conventions
-
-## Framework
-
-## Directory Structure
-
-## Naming Conventions
-
-## Patterns
-
-## Entries
-
-`,
-  },
-  {
-    filename: 'ui-conventions.md',
-    frontmatter: {
-      title: 'UI Conventions',
-      readMode: 'optional',
-      priority: 'medium',
-      category: 'ui',
-      keywords: ['ui', 'design', 'color', 'typography', 'layout', 'animation', 'component'],
-    },
-    body: `# UI Conventions
-
-## Color & Theme
-
-## Typography
-
-## Layout & Spacing
-
-## Motion & Animation
-
-## Component Patterns
-
-## Entries
-
-`,
-  },
-  {
-    filename: 'review-standards.md',
-    frontmatter: {
-      title: 'Review Standards',
-      readMode: 'required',
-      priority: 'medium',
-      category: 'review',
-      keywords: ['review', 'checklist', 'gate', 'approval', 'standard'],
-    },
-    body: `# Review Standards
-
-## Entries
-
-`,
-  },
-];
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-function formatFrontmatter(fm: SeedDoc['frontmatter']): string {
-  const keywordsYaml = fm.keywords.map(k => `  - ${k}`).join('\n');
-  return [
-    '---',
-    `title: "${fm.title}"`,
-    `readMode: ${fm.readMode}`,
-    `priority: ${fm.priority}`,
-    `category: ${fm.category}`,
-    'keywords:',
-    keywordsYaml,
-    '---',
-  ].join('\n');
 }
 
 // ============================================================================
@@ -218,35 +35,85 @@ function formatFrontmatter(fm: SeedDoc['frontmatter']): string {
 
 /**
  * Initialize the spec system directory structure and seed documents.
- * Idempotent: creates directories if missing, writes seed files only when absent.
+ * - Creates the specs directory if missing.
+ * - Writes seed files that don't exist.
+ * - Migrates existing seed files that lack a YAML frontmatter block by
+ *   prepending the canonical frontmatter (body content untouched).
  *
  * @param scope  Target scope: 'project' (default), 'global', 'team', or 'personal'.
  * @param uid    Required when scope is 'personal'.
  */
 export function initSpecSystem(projectPath: string, scope: SpecScope = 'project', uid?: string): InitResult {
-  const result: InitResult = { created: [], skipped: [], directories: [] };
+  const result: InitResult = { created: [], migrated: [], skipped: [], directories: [] };
 
   const specsDir = resolveSpecDir(projectPath, scope, uid);
 
-  // Create directory
   if (!existsSync(specsDir)) {
     mkdirSync(specsDir, { recursive: true });
     result.directories.push(specsDir);
   }
 
-  // Write seed documents
-  for (const doc of SEED_DOCS) {
+  for (const doc of SPEC_SEED_DOCS) {
     const filePath = join(specsDir, doc.filename);
 
     if (existsSync(filePath)) {
-      result.skipped.push(filePath);
+      if (migrateMissingFrontmatter(filePath, doc)) {
+        result.migrated.push(filePath);
+      } else {
+        result.skipped.push(filePath);
+      }
       continue;
     }
 
-    const content = formatFrontmatter(doc.frontmatter) + '\n\n' + doc.body;
-    writeFileSync(filePath, content, 'utf-8');
+    writeFileSync(filePath, renderSeedContent(doc), 'utf-8');
     result.created.push(filePath);
   }
 
   return result;
+}
+
+/**
+ * Ensure a single spec file exists in `specsDir` with the correct YAML
+ * frontmatter + body for its filename. No-op if the file already exists
+ * with a frontmatter block. If it exists without one, prepends frontmatter.
+ *
+ * Returns true when the file was created or migrated, false when it was
+ * already in good shape or the filename has no registered seed.
+ */
+export function ensureSpecFile(specsDir: string, filename: string): boolean {
+  const doc = findSeedByFilename(filename);
+  if (!doc) return false;
+
+  if (!existsSync(specsDir)) {
+    mkdirSync(specsDir, { recursive: true });
+  }
+
+  const filePath = join(specsDir, filename);
+  if (!existsSync(filePath)) {
+    writeFileSync(filePath, renderSeedContent(doc), 'utf-8');
+    return true;
+  }
+
+  return migrateMissingFrontmatter(filePath, doc);
+}
+
+// ============================================================================
+// Internal
+// ============================================================================
+
+/**
+ * If the file at `filePath` lacks a YAML frontmatter block, prepend the
+ * canonical frontmatter for the matching seed doc. Body content is preserved.
+ *
+ * Returns true when content was rewritten; false when no change was needed.
+ */
+function migrateMissingFrontmatter(filePath: string, doc: SpecSeedDoc): boolean {
+  const raw = readFileSync(filePath, 'utf-8');
+  if (hasFrontmatter(raw)) return false;
+
+  const fm = formatSeedFrontmatter(doc.frontmatter);
+  // Keep the existing body verbatim, just prepend frontmatter + blank line.
+  const merged = `${fm}\n\n${raw.replace(/^\s+/, '')}`;
+  writeFileSync(filePath, merged, 'utf-8');
+  return true;
 }

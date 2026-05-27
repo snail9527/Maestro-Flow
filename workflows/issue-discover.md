@@ -148,7 +148,7 @@ Display summary: session ID, mode, raw/unique counts, per-perspective breakdown,
 Next steps:
   - manage-issue list --severity critical
   - manage-issue list
-  - manage-issue-discover by-prompt "..."
+  - see also: /manage-issue-discover usage docs (by-prompt mode for focused scans)
 ```
 
 ---
@@ -211,8 +211,7 @@ Display summary: session, prompt, rounds, raw/unique counts, per-dimension + sev
 
 Next steps:
   - manage-issue list --source discovery
-  - manage-issue-discover (full 8-perspective scan)
-  - manage-issue-discover by-prompt "..." (explore another area)
+  - see also: /manage-issue-discover usage docs (full 8-perspective scan and by-prompt mode)
 ```
 
 ---

@@ -23,7 +23,7 @@ generated_at: {timestamp}
 stepsCompleted: []
 version: 1
 dependencies:
-  - spec-config.json
+  - blueprint-config.json
 ---
 
 # Product Brief: {product_name}
@@ -117,7 +117,7 @@ dependencies:
 
 ## References
 
-- Derived from: [spec-config.json](spec-config.json)
+- Derived from: [blueprint-config.json](blueprint-config.json)
 - Next: [Requirements PRD](requirements.md)
 ```
 
@@ -125,7 +125,7 @@ dependencies:
 
 | Variable | Source | Description |
 |----------|--------|-------------|
-| `{session_id}` | spec-config.json | Session identifier |
+| `{session_id}` | blueprint-config.json | Session identifier |
 | `{timestamp}` | Runtime | ISO8601 generation timestamp |
 | `{product_name}` | Seed analysis | Product/feature name |
 | `{executive_summary}` | CLI synthesis | 2-3 sentence summary |

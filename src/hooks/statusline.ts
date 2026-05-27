@@ -169,6 +169,35 @@ interface ArtifactInfo {
   phase: number | null;
   path: string;
   depends_on: string | string[] | null;
+  completed_at: string | null;
+}
+
+/** Latest completed_at timestamp (ms epoch) across a chain, or 0 if none parseable */
+function chainCompletedAt(chain: ArtifactChain): number {
+  let max = 0;
+  for (const a of chain.artifacts) {
+    if (!a.completed_at) continue;
+    const t = Date.parse(a.completed_at);
+    if (!Number.isNaN(t) && t > max) max = t;
+  }
+  return max;
+}
+
+/** Effective status of a chain: in_progress > failed > completed > pending */
+function chainStatus(chain: ArtifactChain): 'in_progress' | 'failed' | 'completed' | 'pending' {
+  if (chain.artifacts.some(a => a.status === 'in_progress')) return 'in_progress';
+  if (chain.artifacts.some(a => a.status === 'failed')) return 'failed';
+  if (chain.allCompleted) return 'completed';
+  return 'pending';
+}
+
+/** The "active" artifact in a chain — the one whose type names the current step */
+function activeArtifact(chain: ArtifactChain): ArtifactInfo {
+  return (
+    chain.artifacts.find(a => a.status === 'in_progress') ??
+    chain.artifacts.find(a => a.status === 'failed') ??
+    chain.artifacts[chain.artifacts.length - 1]
+  );
 }
 
 /** A chain of artifacts linked by depends_on */
@@ -274,7 +303,19 @@ function readWorkflowState(dir: string): WorkflowInfo {
     const milestone = Array.isArray(state.milestones)
       ? state.milestones.find((m: { name?: string; id?: string }) => m.name === state.current_milestone || m.id === state.current_milestone)
       : null;
-    const phases: number[] = milestone?.phases ?? [];
+    const phases: unknown[] = Array.isArray(milestone?.phases) ? milestone.phases : [];
+
+    // Normalize phases — accept both number[] (v2.0) and Array<{id,status,...}> (v1.0)
+    const rawPhases: Array<unknown> = phases;
+    const phaseEntries: Array<{ id: number; status?: string }> = [];
+    for (const p of rawPhases) {
+      if (typeof p === 'number') phaseEntries.push({ id: p });
+      else if (p && typeof p === 'object' && typeof (p as { id?: unknown }).id === 'number') {
+        const obj = p as { id: number; status?: string };
+        phaseEntries.push({ id: obj.id, status: obj.status });
+      }
+    }
+    const phaseIds = phaseEntries.map(p => p.id);
 
     // Filter to current milestone artifacts
     const msArtifacts: ArtifactInfo[] = rawArtifacts
@@ -286,40 +327,59 @@ function readWorkflowState(dir: string): WorkflowInfo {
         phase: a.phase ?? null,
         path: a.path ?? '',
         depends_on: a.depends_on ?? null,
+        completed_at: (a as { completed_at?: string }).completed_at ?? null,
       }));
 
-    if (phases.length > 0 && msArtifacts.length > 0) {
-      result.total = phases.length;
+    if (phaseIds.length > 0) {
+      result.total = phaseIds.length;
+
+      // Prefer v1.0 inline phase.status if present
+      const hasInlineStatus = phaseEntries.some(p => typeof p.status === 'string');
       let completed = 0, inProgress = 0, planned = 0;
 
-      for (const p of phases) {
-        const phaseArts = msArtifacts.filter(a => a.phase === p);
-        if (phaseArts.some(a => a.type === 'execute' && a.status === 'completed')) { completed++; continue; }
-        if (phaseArts.some(a => a.type === 'plan' && a.status === 'completed')) { planned++; inProgress++; continue; }
-        if (phaseArts.length > 0) { inProgress++; }
+      if (hasInlineStatus) {
+        for (const p of phaseEntries) {
+          if (p.status === 'completed') completed++;
+          else if (p.status === 'in-progress' || p.status === 'in_progress' || p.status === 'active') inProgress++;
+        }
+      } else {
+        for (const p of phaseIds) {
+          const phaseArts = msArtifacts.filter(a => a.phase === p);
+          if (phaseArts.some(a => a.type === 'execute' && a.status === 'completed')) { completed++; continue; }
+          if (phaseArts.some(a => a.type === 'plan' && a.status === 'completed')) { planned++; inProgress++; continue; }
+          if (phaseArts.length > 0) { inProgress++; }
+        }
       }
       result.completed = completed;
       result.inProgress = inProgress;
       result.planned = planned;
 
-      // Current phase
-      for (const p of phases) {
-        if (msArtifacts.some(a => a.phase === p && a.status === 'in_progress')) {
-          result.currentPhase = p; break;
-        }
-      }
-      if (!result.currentPhase) {
-        for (const p of phases) {
-          if (!msArtifacts.some(a => a.type === 'execute' && a.phase === p && a.status === 'completed')) {
+      // Current phase — prefer in-progress, then first non-completed
+      if (hasInlineStatus) {
+        const cur = phaseEntries.find(p => p.status === 'in-progress' || p.status === 'in_progress' || p.status === 'active')
+          ?? phaseEntries.find(p => p.status !== 'completed');
+        if (cur) result.currentPhase = cur.id;
+      } else {
+        for (const p of phaseIds) {
+          if (msArtifacts.some(a => a.phase === p && a.status === 'in_progress')) {
             result.currentPhase = p; break;
+          }
+        }
+        if (!result.currentPhase) {
+          for (const p of phaseIds) {
+            if (!msArtifacts.some(a => a.type === 'execute' && a.phase === p && a.status === 'completed')) {
+              result.currentPhase = p; break;
+            }
           }
         }
       }
 
-      // Build chains
-      const { chains, orphans } = buildChains(msArtifacts);
-      result.chains = chains;
-      result.orphans = orphans;
+      // Build chains (only if artifacts exist)
+      if (msArtifacts.length > 0) {
+        const { chains, orphans } = buildChains(msArtifacts);
+        result.chains = chains;
+        result.orphans = orphans;
+      }
 
     } else if (state.phases_summary) {
       // v1 fallback
@@ -520,25 +580,6 @@ export function buildCoordinatorSegment(session: string): string {
 // Chain renderer — session chain for line 2+
 // ---------------------------------------------------------------------------
 
-/** Type abbreviation and color */
-const TYPE_META: Record<string, { abbr: string; color: readonly [number, number, number] }> = {
-  analyze:    { abbr: 'A', color: TEXT_COLORS.model },
-  plan:       { abbr: 'P', color: TEXT_COLORS.milestone },
-  execute:    { abbr: 'E', color: TEXT_COLORS.phase },
-  verify:     { abbr: 'V', color: TEXT_COLORS.coord },
-  brainstorm: { abbr: 'B', color: TEXT_COLORS.team },
-  spec:       { abbr: 'S', color: TEXT_COLORS.dir },
-  review:     { abbr: 'R', color: TEXT_COLORS.ctxAlert },
-  debug:      { abbr: 'D', color: TEXT_COLORS.ctxCrit },
-  test:       { abbr: 'T', color: TEXT_COLORS.ctxOk },
-};
-
-/** Color a type abbreviation */
-function colorType(type: string): string {
-  const meta = TYPE_META[type] ?? { abbr: type[0]?.toUpperCase() ?? '?', color: TEXT_COLORS.task };
-  return ansiFg(meta.color) + meta.abbr + ANSI_RESET;
-}
-
 /** Extract readable slug from artifact path */
 function extractSlug(art: ArtifactInfo): string {
   const b = basename(art.path || '');
@@ -554,39 +595,117 @@ function extractSlug(art: ArtifactInfo): string {
     || art.type;
 }
 
-/** Status suffix */
-function statusSuffix(status: string): string {
-  const map: Record<string, { icon: string; color: readonly [number, number, number] }> = {
-    completed:   { icon: '✓', color: TEXT_COLORS.ctxOk },
-    in_progress: { icon: '●', color: TEXT_COLORS.ctxWarn },
-    failed:      { icon: '✗', color: TEXT_COLORS.ctxCrit },
-    pending:     { icon: '○', color: TEXT_COLORS.separator },
-  };
-  const s = map[status];
-  return s ? ansiFg(s.color) + s.icon + ANSI_RESET : '';
-}
-
-/** Render chain: auth: A→P→E→R→D→T→V ✓ */
+/** Render chain status-first: `slug ✓` or `slug ⚙ execute (3/4)` */
 function renderChain(chain: ArtifactChain): string {
-  const arrow = ansiFg(TEXT_COLORS.separator) + '→' + ANSI_RESET;
   const slug = extractSlug(chain.artifacts[0]);
-  const types = chain.artifacts.map(a => colorType(a.type));
-  const lastArt = chain.artifacts[chain.artifacts.length - 1];
-
   const slugLabel = ansiFg(TEXT_COLORS.task) + slug + ANSI_RESET;
-  const flow = types.join(arrow);
-  const suffix = chain.allCompleted
-    ? ' ' + ansiFg(TEXT_COLORS.ctxOk) + '✓' + ANSI_RESET
-    : ' ' + statusSuffix(lastArt.status);
+  const status = chainStatus(chain);
 
-  return `${slugLabel} ${flow}${suffix}`;
+  if (status === 'completed') {
+    return `${slugLabel} ${ansiFg(TEXT_COLORS.ctxOk)}✓${ANSI_RESET}`;
+  }
+
+  const active = activeArtifact(chain);
+  const done = chain.artifacts.filter(a => a.status === 'completed').length;
+  const total = chain.artifacts.length;
+  const typeLabel = ansiFg(TEXT_COLORS.phase) + active.type + ANSI_RESET;
+
+  if (status === 'failed') {
+    return `${slugLabel} ${ansiFg(TEXT_COLORS.ctxCrit)}✗${ANSI_RESET} ${typeLabel}`;
+  }
+  if (status === 'in_progress') {
+    const progress = ansiFg(TEXT_COLORS.separator) + `(${done}/${total})` + ANSI_RESET;
+    return `${slugLabel} ${ansiFg(TEXT_COLORS.ctxWarn)}⚙${ANSI_RESET} ${typeLabel} ${progress}`;
+  }
+  // pending
+  return `${slugLabel} ${ansiFg(TEXT_COLORS.separator)}○${ANSI_RESET} ${typeLabel}`;
 }
 
-/** Render orphan: brainstorm-ux B ✓ */
+/** Render orphan: same status-first style as chains */
 function renderOrphan(art: ArtifactInfo): string {
   const slug = extractSlug(art);
   const slugLabel = ansiFg(TEXT_COLORS.task) + slug + ANSI_RESET;
-  return `${slugLabel} ${colorType(art.type)} ${statusSuffix(art.status)}`;
+  if (art.status === 'completed') {
+    return `${slugLabel} ${ansiFg(TEXT_COLORS.ctxOk)}✓${ANSI_RESET}`;
+  }
+  const typeLabel = ansiFg(TEXT_COLORS.phase) + art.type + ANSI_RESET;
+  if (art.status === 'failed') {
+    return `${slugLabel} ${ansiFg(TEXT_COLORS.ctxCrit)}✗${ANSI_RESET} ${typeLabel}`;
+  }
+  if (art.status === 'in_progress') {
+    return `${slugLabel} ${ansiFg(TEXT_COLORS.ctxWarn)}⚙${ANSI_RESET} ${typeLabel}`;
+  }
+  return `${slugLabel} ${ansiFg(TEXT_COLORS.separator)}○${ANSI_RESET} ${typeLabel}`;
+}
+
+// ---------------------------------------------------------------------------
+// Filter & cap — keep line 2 focused on active work
+// ---------------------------------------------------------------------------
+
+const CHAIN_DONE_TTL_MS = 48 * 60 * 60 * 1000;  // 48h
+const CHAIN_MAX = 3;
+
+interface FilteredView {
+  chains: ArtifactChain[];
+  orphans: ArtifactInfo[];
+  hidden: number;  // count of items dropped by ttl + cap
+}
+
+function statusRank(s: string): number {
+  // in_progress > failed > completed > pending  (lower = higher priority)
+  if (s === 'in_progress') return 0;
+  if (s === 'failed')      return 1;
+  if (s === 'completed')   return 2;
+  return 3;
+}
+
+/** Drop stale completed items (>48h) and cap total to CHAIN_MAX */
+function filterAndCapChains(chains: ArtifactChain[], orphans: ArtifactInfo[]): FilteredView {
+  const now = Date.now();
+  const totalIn = chains.length + orphans.length;
+
+  // Drop expired completed chains
+  const liveChains = chains.filter(c => {
+    if (chainStatus(c) !== 'completed') return true;
+    const ts = chainCompletedAt(c);
+    return ts > 0 && now - ts < CHAIN_DONE_TTL_MS;
+  });
+
+  // Drop expired completed orphans
+  const liveOrphans = orphans.filter(o => {
+    if (o.status !== 'completed') return true;
+    if (!o.completed_at) return false;  // unknown age + completed → drop
+    const ts = Date.parse(o.completed_at);
+    return !Number.isNaN(ts) && now - ts < CHAIN_DONE_TTL_MS;
+  });
+
+  // Sort: in_progress first, then failed, then completed by recency desc, pending last
+  type Item = { kind: 'chain'; data: ArtifactChain } | { kind: 'orphan'; data: ArtifactInfo };
+  const items: Item[] = [
+    ...liveChains.map<Item>(c => ({ kind: 'chain', data: c })),
+    ...liveOrphans.map<Item>(o => ({ kind: 'orphan', data: o })),
+  ];
+
+  items.sort((a, b) => {
+    const sa = a.kind === 'chain' ? chainStatus(a.data) : a.data.status;
+    const sb = b.kind === 'chain' ? chainStatus(b.data) : b.data.status;
+    const rankDiff = statusRank(sa) - statusRank(sb);
+    if (rankDiff !== 0) return rankDiff;
+    // Same rank → recency desc
+    const ta = a.kind === 'chain' ? chainCompletedAt(a.data) : (a.data.completed_at ? Date.parse(a.data.completed_at) : 0);
+    const tb = b.kind === 'chain' ? chainCompletedAt(b.data) : (b.data.completed_at ? Date.parse(b.data.completed_at) : 0);
+    return tb - ta;
+  });
+
+  const kept = items.slice(0, CHAIN_MAX);
+  const droppedByCap = items.length - kept.length;
+  const droppedByTtl = totalIn - items.length;
+
+  return {
+    chains: kept.filter(i => i.kind === 'chain').map(i => (i as { kind: 'chain'; data: ArtifactChain }).data),
+    orphans: kept.filter(i => i.kind === 'orphan').map(i => (i as { kind: 'orphan'; data: ArtifactInfo }).data),
+    hidden: droppedByCap + droppedByTtl,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -665,31 +784,26 @@ export function formatStatusline(data: StatuslineInput): string {
   if (wf.total > 0) header += ansiFg(TEXT_COLORS.milestone) + ` ${wf.completed}/${wf.total}` + ANSI_RESET;
   if (wf.currentPhase) header += ' ' + ansiFg(TEXT_COLORS.phase) + `${ICONS.phase} P${wf.currentPhase}` + ANSI_RESET;
 
-  // Session chains
+  // Filter (48h TTL on completed) + cap (max 3 visible)
+  const view = filterAndCapChains(wf.chains, wf.orphans);
+
   const chainParts: string[] = [];
-  for (const chain of wf.chains) {
+  for (const chain of view.chains) {
     chainParts.push(renderChain(chain));
   }
-  for (const orphan of wf.orphans) {
+  for (const orphan of view.orphans) {
     chainParts.push(renderOrphan(orphan));
+  }
+  if (view.hidden > 0) {
+    chainParts.push(ansiFg(TEXT_COLORS.separator) + `+${view.hidden}` + ANSI_RESET);
   }
 
   if (chainParts.length === 0) {
     return line1 + '\n' + header;
   }
 
-  // Auto multi-line: ≤2 chains → single line, >2 → one chain per line
-  if (chainParts.length <= 2) {
-    const line2 = header + sep + chainParts.join(dot);
-    return line1 + '\n' + line2;
-  }
-
-  // Multi-line: header on line 2, each chain on its own line
-  const lines = [line1, header];
-  for (const part of chainParts) {
-    lines.push('  ' + part);
-  }
-  return lines.join('\n');
+  // Single-line: header + chains joined by dots (cap=3 keeps it compact)
+  return line1 + '\n' + header + sep + chainParts.join(dot);
 }
 
 /** Entry point — reads stdin JSON, writes formatted statusline to stdout */

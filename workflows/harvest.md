@@ -9,7 +9,7 @@ Unlike `retrospective.md` which is phase-scoped and post-execution, harvest oper
 ## Prerequisites
 
 - `.workflow/` initialized (`.workflow/state.json` exists)
-- At least one artifact source present (analysis, brainstorm, debug, lite-plan, lite-fix, scratchpad, or active session)
+- At least one artifact source present (analysis, brainstorm, import, debug, lite-plan, lite-fix, scratchpad, or active session)
 - For wiki routing: `maestro wiki` CLI available
 
 ---
@@ -27,16 +27,21 @@ Unlike `retrospective.md` which is phase-scoped and post-execution, harvest oper
 /manage-harvest <target> --to issue                  → force all findings to issue
 /manage-harvest <target> --to auto                   → auto-classify routing (default)
 /manage-harvest <target> --dry-run                   → preview without writing
+/manage-harvest --prune                              → classify artifacts, graduate to knowhow, archive from state.json
+/manage-harvest --prune --age 14                     → only graduate artifacts older than 14 days
+/manage-harvest --prune --dry-run                    → preview prune plan without modifying state.json
 ```
 
 | Flag | Effect |
 |------|--------|
 | `--to <target>` | Force routing target: `wiki`, `spec`, `issue`, `auto` (default: auto) |
-| `--source <type>` | Filter by source type: `analysis`, `brainstorm`, `debug`, `lite-plan`, `lite-fix`, `scratchpad`, `session`, `all` |
+| `--source <type>` | Filter by source type: `analysis`, `brainstorm`, `import`, `debug`, `lite-plan`, `lite-fix`, `scratchpad`, `session`, `all` |
 | `--recent N` | Only scan artifacts updated within last N days (default: 30) |
 | `--dry-run` | Preview extracted items without writing to any store |
 | `-y` / `--yes` | Skip confirmation prompts, accept all routing |
 | `--min-confidence N` | Minimum extraction confidence 0.0-1.0 (default: 0.5) |
+| `--prune` | State hygiene mode: classify artifacts, graduate harvested ones to knowhow, archive from state.json, prune accumulated_context. **Note:** `harvest --prune` *promotes* artifacts to knowhow (and trims state.json); this differs from `knowhow.md`'s `prune` operation which *deletes* knowhow entries. The two `--prune` flags share a name but operate on different stores in opposite directions. |
+| `--age N` | Graduation age threshold in days (default: 14). Only artifacts older than N days are prune candidates. Used with `--prune` |
 
 ---
 
@@ -44,10 +49,11 @@ Unlike `retrospective.md` which is phase-scoped and post-execution, harvest oper
 
 ```
 Verify .workflow/ exists (else E001). Parse flags and first non-flag token:
-  mode: "scan" (no target) | "session" (ID match) | "path" (explicit path)
+  mode: "scan" (no target) | "session" (ID match) | "path" (explicit path) | "prune" (--prune flag)
   Defaults: target_filter=auto, source_filter=all, recent_days=30,
-            dry_run=false, auto_yes=false, min_confidence=0.5
+            dry_run=false, auto_yes=false, min_confidence=0.5, age_threshold=14
 Invalid --to → E002. Invalid --source → E003.
+If --prune: mode = "prune", jump to Stage 9 (skip Stages 2-8).
 ```
 
 ---
@@ -61,12 +67,13 @@ Scan `.workflow/` for harvestable artifacts. Each source type has a known struct
 | Source Type | Scan Path | Key Files | ID Pattern |
 |-------------|-----------|-----------|------------|
 | `analysis` | `.workflow/.analysis/ANL-*/` | `conclusions.json`, `*.md` | `ANL-*` |
-| `brainstorm` | `.workflow/scratch/brainstorm-*/` | `guidance-specification.md`, `brainstorm-*.md` | directory name |
+| `brainstorm` | `.workflow/scratch/*-brainstorm-*/` | `guidance-specification.md`, `*/analysis.md`, `design-research.md` | directory name |
 | `lite-plan` | `.workflow/.lite-plan/*/` | `plan.json`, `plan-overview.md` | directory name |
 | `lite-fix` | `.workflow/.lite-fix/*/` | `fix-plan.json` | directory name |
 | `debug` | `.workflow/.debug/*/` | `debug-log.md`, `hypothesis-*.md` | directory name |
 | `scratchpad` | `.workflow/.scratchpad/` | `*.md`, `*.json` | filename |
 | `session` | `.workflow/active/WFS-*/` | `workflow-session.json` | `WFS-*` |
+| `import` | `.workflow/scratch/*-import-*/` | `context-package.json`, `source.*` | directory name |
 | `knowhow` | `.workflow/knowhow/` | `*.md`, `digest-*.md` | filename |
 
 Scan each source type (filtered by `--source`). For each matching directory/file within `--recent` window, extract: `source_type`, `id`, `path`, `title` (from JSON or H1), `updated_at`, `summary`, `file_count`.
@@ -125,11 +132,17 @@ Parse content to identify discrete knowledge items. Each source type has specifi
 - `risks[]` → each risk is a fragment
 - Markdown sections with `## ` headings → section-level fragments
 
-**Brainstorm (`guidance-specification.md` + notes):**
-- `## Options` or `## Approaches` → each option is a fragment
-- `## Decision` or `## Recommendation` → decision fragment
-- `## Trade-offs` → trade-off fragments
-- Action items (lines starting with `- [ ]` or `TODO`) → task fragments
+**Brainstorm (`guidance-specification.md` + `{role}/analysis.md` + `design-research.md`):**
+- guidance §4-§N Role Decisions tables → each row is a decision fragment
+- guidance §10 Feature Decomposition rows → each feature is a fragment
+- guidance §12 Cross-Role Resolutions table → each resolution is a decision fragment
+- `{role}/analysis.md` §2 Decision Digest tables → decision / interface / position fragments by role
+- `{role}/analysis.md` §3 Cross-Cutting Foundations subsections → architectural / data-model / pitfall fragments by role
+- `{role}/analysis.md` §4 File Index → navigate to sub-files:
+  - `{role}/analysis-F-{id}-{slug}.md` → per-feature decision fragments (one file = one fragment)
+  - `{role}/findings-{slug}.md` → finding / discovery fragments
+- `{role}/analysis.md` §5 Outstanding TODOs → task fragments
+- `design-research.md` "Extractable Patterns" sections → pattern reference fragments
 
 **Lite-plan (`plan.json`):**
 - `tasks[]` → each with rationale → decision fragments
@@ -140,6 +153,14 @@ Parse content to identify discrete knowledge items. Each source type has specifi
 - `root_cause` → bug fragment
 - `fix_strategy` → pattern fragment
 - `verification` → test/validation fragment
+
+**Import (`context-package.json` + `source.*`):**
+- `requirements[]` → each requirement is a feature fragment
+- `constraints[]` → each constraint is a decision fragment
+- `non_goals[]` → each non-goal is a scope fragment
+- `insights[]` → each insight is a knowledge fragment
+- `domain.terminology[]` → each term is a terminology fragment
+- `open_questions[]` → each question is a task/investigation fragment
 
 **Debug (`debug-log.md`, `hypothesis-*.md`):**
 - Final diagnosis → bug fragment
@@ -173,6 +194,8 @@ fragment = {
 ```
 
 Filter by `--min-confidence`.
+
+**Context Package shortcut**: If any artifact has a `context-package.json` (check `state.json.artifacts[].context_package`), harvest can use it as a pre-extracted summary — skip detailed file parsing and directly convert context-package fields to fragments. The per-item `ref` field provides traceability to original sources.
 
 ---
 
@@ -351,3 +374,154 @@ Next:
   → Connect wiki graph: Skill({ skill: "wiki-connect", args: "--fix" })
   → View specs: Skill({ skill: "spec-load", args: "--role implement" })
 ```
+
+---
+
+## Stage 9: state_hygiene (--prune)
+
+When `--prune` flag is present, skip Stages 2-8 and run state.json hygiene instead. Manages three concerns: **artifact graduation** (harvested → archived via knowhow), **accumulated_context pruning** (remove resolved/stale entries), and **integrity validation**.
+
+### 9a. Load state
+
+```
+Read .workflow/state.json → { artifacts[], accumulated_context{}, current_milestone, milestones[] }
+Read .workflow/harvest/harvest-log.jsonl → build harvested_map: { [source_id]: { fragment_count, routed_count, last_harvested } }
+Defaults: age_threshold = --age value (default 14 days), dry_run = --dry-run flag
+```
+
+### 9b. Classify artifacts
+
+For each artifact in `artifacts[]`, assign a classification:
+
+| Classification | Criteria | Action |
+|---|---|---|
+| `active` | milestone == current_milestone OR age < age_threshold OR referenced by active plan (type=plan, status=completed, linked execute not completed) | **Keep** in artifacts[] |
+| `graduated` | harvested == true AND not active | **Graduate** → knowhow → archive |
+| `stale` | harvested == false AND not active AND age > age_threshold | **Suggest** harvest first |
+| `protected` | type ∈ {plan, execute} AND linked downstream artifact is active | **Keep** regardless of age |
+
+Age = days since `completed_at` (or `created_at` if never completed).
+
+"Referenced by active plan": artifact X is protected if any plan artifact has `depends_on == X.id` or any execute artifact in same phase is active.
+
+### 9c. Classify accumulated_context
+
+Scan `accumulated_context` sub-arrays:
+
+| Field | Prune Criteria | Keep Criteria |
+|---|---|---|
+| `key_decisions[]` | Entry exists verbatim in `specs/architecture-constraints.md` (deduplicated to spec) | Not yet in specs |
+| `deferred[]` | status ∈ {"resolved", "cancelled", "superseded"} | status ∈ {"open", "deferred"} |
+| `blockers[]` | status == "resolved" | status ∈ {"open", "investigating"} |
+
+### 9d. Preview
+
+```
+=== STATE HYGIENE PLAN ===
+
+  Artifacts (23 total):
+    active:     8   (keep)
+    graduated:  11  (→ knowhow → archive)
+    stale:      3   (suggest harvest first)
+    protected:  1   (keep)
+
+  Accumulated Context:
+    key_decisions:  12 total → 4 prunable (already in specs)
+    deferred:        5 total → 2 prunable (resolved)
+    blockers:        3 total → 1 prunable (resolved)
+
+  Stale artifacts (not yet harvested):
+    ANL-003  analysis  2026-03-15  "Security audit P2"
+    BRN-002  brainstorm 2026-03-10  "Cache strategy"
+    WFS-005  session   2026-03-08  "Feature toggle impl"
+    → Run: /manage-harvest ANL-003 BRN-002 WFS-005  (harvest before graduating)
+
+  Estimated state.json reduction: 23 → 9 artifacts, 20 → 13 context entries
+```
+
+`--dry-run` → display and exit. Otherwise (unless `-y`), AskUserQuestion:
+- "Proceed" — apply all
+- "Graduate only" — archive graduated artifacts, skip accumulated_context prune
+- "Harvest stale first" — run harvest on stale artifacts, then re-classify
+- "Abort"
+
+### 9e. Graduate to knowhow
+
+For each `graduated` artifact:
+
+1. **Build compact summary** from harvest-log entries:
+   - Fragment count, routing breakdown (N wiki, N spec, N issue)
+   - Top 3 fragment titles as representative items
+   - Original path for disk reference
+
+2. **Create knowhow entry**:
+   ```bash
+   maestro wiki create --type knowhow \
+     --slug "graduated-{type}-{short_id}" \
+     --title "Graduated: {type} {id}" \
+     --tags "graduated,{type},{milestone}" \
+     --body "{compact_summary}"
+   ```
+
+3. **Archive in state.json**: Move from `artifacts[]` to `artifact_archive[]`:
+   ```json
+   {
+     "id": "ANL-001",
+     "type": "analyze",
+     "milestone": "M1",
+     "path": "scratch/20260315-analyze-P2-security",
+     "graduated_at": "ISO-8601",
+     "knowhow_ref": "graduated-analyze-ANL-001",
+     "summary": "Security audit P2 — 8 fragments → 3 wiki, 2 spec, 3 issue"
+   }
+   ```
+
+4. **Files on disk**: NOT deleted. The `.workflow/{path}/` directory remains for reference. Only the state.json entry moves.
+
+### 9f. Prune accumulated_context
+
+For each prunable entry identified in 9c:
+- `key_decisions[]`: remove entry, log `[PRUNE] key_decision: "{text}" (deduplicated to spec)`
+- `deferred[]`: remove entry, log `[PRUNE] deferred: "{title}" (status: {status})`
+- `blockers[]`: remove entry, log `[PRUNE] blocker: "{title}" (resolved)`
+
+### 9g. Apply
+
+1. **Backup**: Copy `state.json` → `state.json.backup-prune-{timestamp}`
+2. **Write**: Updated state.json with:
+   - `artifacts[]` = active + protected entries only
+   - `artifact_archive[]` = existing archive + newly graduated
+   - `accumulated_context` = pruned version
+   - `last_pruned`: ISO-8601 timestamp
+3. **Validate**: Re-read and confirm artifact count matches expected
+
+### 9h. Report
+
+Append prune results to harvest report:
+
+```
+=== PRUNE COMPLETE ===
+
+  Graduated:  11 artifacts → knowhow
+  Archived:   11 entries moved to artifact_archive[]
+  Pruned:     4 key_decisions + 2 deferred + 1 blocker = 7 context entries
+
+  State reduction: 23 → 9 artifacts, 20 → 13 context entries
+  Backup: .workflow/state.json.backup-prune-20260521T143022
+
+  Stale (not harvested, action needed):
+    → /manage-harvest ANL-003 BRN-002 WFS-005
+
+  Next:
+    → Review graduated knowhow: maestro wiki list --type knowhow --tags graduated
+    → Re-run prune after harvesting stale: /manage-harvest --prune
+```
+
+### Safety invariants
+
+1. **Never prune current milestone artifacts** — active classification takes precedence
+2. **Never delete files on disk** — only state.json entries move; files remain for reference/audit
+3. **Backup before write** — always create `state.json.backup-prune-{timestamp}`
+4. **Stale before graduate** — stale artifacts are flagged, not silently archived (knowledge would be lost)
+5. **Spec dedup is conservative** — key_decision pruned only if verbatim match found in specs
+6. **Idempotent** — re-running `--prune` with no changes produces empty plan

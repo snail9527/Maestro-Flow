@@ -1,7 +1,7 @@
 ---
 name: maestro-plan
 description: Use when creating, revising, or verifying an execution plan for a phase or task
-argument-hint: [phase] [--collab] [--spec SPEC-xxx] [-y] [--gaps] [--tdd] [--dir <path>] [--revise [instructions]] [--check <plan-dir>]
+argument-hint: [phase] [--collab] [--spec SPEC-xxx] [-y] [--gaps] [--tdd] [--dir <path>] [--from <source>] [--revise [instructions]] [--check <plan-dir>]
 allowed-tools:
   - ask_question
   - define_subagent
@@ -41,12 +41,24 @@ $ARGUMENTS — phase number, or no args for milestone-wide planning, with option
 Scope routing, base flags (`--collab`, `--spec`, `-y`, `--gaps`, `--dir`), output directory format, and artifact registration are defined in workflow plan.md.
 
 **Command-level flags** (extensions beyond workflow base):
+- `--from <source>`: Load upstream context directly (bypasses roadmap requirement):
+  - `analyze:ANL-xxx` → CONTEXT_DIR = artifact path, scope = "standalone"
+  - `blueprint:BLP-xxx` → CONTEXT_DIR = blueprint path, scope = "standalone"
+  - `@file` or `path/` → load context-package.json from path
 - `--revise [instructions]` -- See workflow plan.md § Revise Mode
 - `--check <plan-dir>` -- See workflow plan.md § Check Mode
 
-**Upstream context:**
-- Reads `context.md` from prior analyze artifact (auto-discovered from state.json or via --dir)
-- Reads `conclusions.json` if available (implementation_scope seeds task generation)
+**Upstream context (resolution priority):**
+1. `--from analyze:ANL-xxx` → uses analyze conclusions.implementation_scope directly
+2. `--from blueprint:BLP-xxx` → uses blueprint requirements + architecture
+3. `--dir <path>` → explicit context directory (unchanged)
+4. Numeric arg → scope = "phase", resolve from roadmap (unchanged)
+5. No args + roadmap → scope = "milestone" (unchanged)
+6. No args + no roadmap → search state.json for latest analyze artifact, fallback standalone
+
+**Ad-hoc milestone (D-008):** When scope resolves to "standalone" via the standard standalone resolution (no `--from` source), and `current_milestone == null`, plan auto-creates an adhoc milestone (`type: "adhoc"`) in state.json before proceeding. This ensures downstream milestone-audit/complete have a valid milestone context. See workflow plan.md § "Ad-hoc Milestone Auto-Creation".
+
+**Exception (`--from analyze:ANL-xxx` / `blueprint:BLP-xxx`):** When scope is set to "standalone" by `--from`, skip adhoc milestone auto-creation — the upstream analyze/blueprint artifact already provides the milestone context (or is intentionally milestone-free). Adhoc creation in this path would conflict with the `--from` semantic of "this is a one-shot plan rooted in an existing artifact".
 
 ### Role Knowledge
 `maestro wiki list --category arch` → select relevant → `maestro wiki load`
@@ -124,18 +136,19 @@ Next steps:
   /maestro-plan {phase}         -- Re-plan with modifications
 ```
 
-**Completion status:**
+**Completion (when invoked from ralph):**
+End the step by calling the CLI (no `--- COMPLETION STATUS ---` text block):
 ```
---- COMPLETION STATUS ---
-STATUS: DONE|NEEDS_CONTEXT
-CONCERNS: {description if applicable}
-NEXT: /maestro-execute
---- END STATUS ---
+maestro ralph complete <idx> --status DONE [--evidence scratch/{YYYYMMDD}-plan-P{N}-{slug}/plan.json]
 ```
 
-Status mapping:
-- **DONE** — Plan created/revised and confirmed → NEXT: /maestro-execute
-- **NEEDS_CONTEXT** — Ambiguous requirements, insufficient context to produce plan
+STATUS verdicts (CLI-enforced enum):
+- **DONE** — Plan created/revised and confirmed → next step picks up automatically
+- **DONE_WITH_CONCERNS** — Plan produced but with explicit caveats; pass `--concerns "..."`
+- **NEEDS_RETRY** — Plan failed (tooling error, transient issue); ralph will retry
+- **BLOCKED** — External hard blocker (e.g., upstream artifact missing, dependency unavailable); pass `--reason "..."`
+
+> Ambiguous requirements are NOT a completion status — resolve them in-place via `ask_question` during planning (≤3 rounds), then proceed to DONE. `NEEDS_CONTEXT` has been removed; context shortage is handled by the harness's automatic compaction.
 
 ### Mode: Revise / Check
 

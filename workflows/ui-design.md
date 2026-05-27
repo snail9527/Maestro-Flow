@@ -6,9 +6,9 @@ User reviews via compare.html, selects winner(s), design solidified as code refe
 
 Pipeline position: analyze -> **ui-design** -> plan -> execute -> verify
 
-> **Note:** This is the full self-contained pipeline. When ui-ux-pro-max skill is available,
-> the command routes to `ui-style.md` instead (lightweight delegation).
-> This workflow runs when the skill is absent or `--full` is explicitly requested.
+> **Note:** This is the primary implementation. When the `ui-ux-pro-max` skill is available,
+> the command may delegate to `ui-style.md` for a lightweight path. This workflow is the
+> fallback when the skill is unavailable, and is also used when `--full` is explicitly requested.
 
 ---
 
@@ -24,7 +24,7 @@ Pipeline position: analyze -> **ui-design** -> plan -> execute -> verify
 
 ```
 Input: <phase> (number) OR topic text
-Output: .workflow/scratch/ui-design-{slug}-{date}/
+Output: .workflow/scratch/{YYYYMMDD}-ui-design-{slug}/
 
 Resolve scope:
   number → phase slug from roadmap.md, scope="phase", register with phase
@@ -80,8 +80,8 @@ Show: phase/topic, mode (explore|refine), styleCount, layoutCount, stack, target
 
 Gather from available sources:
 - **2a.** `${PHASE_DIR}/context.md` -- product type, industry, audience, design preferences, locked UI decisions
-- **2b.** `${PHASE_DIR}/brainstorm/` -- ui-designer/analysis.md, product-manager/analysis.md (visual keywords, personas)
-- **2c.** `spec-summary.md` + `requirements/_index.md` (if index.json.spec_ref) -- UI-relevant requirements & acceptance criteria
+- **2b.** `${PHASE_DIR}/brainstorm/ui-designer/analysis.md`, `${PHASE_DIR}/brainstorm/product-manager/analysis.md` (visual keywords, personas)
+- **2c.** `blueprint-summary.md` + `requirements/_index.md` (if index.json.blueprint_ref) -- UI-relevant requirements & acceptance criteria
 - **2d.** `.workflow/codebase/doc-index.json` -- existing design tokens, CSS frameworks, component libraries, brand colors
 
 **2e. Synthesize design brief:**
