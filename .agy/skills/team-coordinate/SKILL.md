@@ -1,17 +1,6 @@
 ---
 name: team-coordinate
 description: Universal team coordination skill with dynamic role generation. Uses team-worker agent architecture with role-spec files. Only coordinator is built-in -- all worker roles are generated at runtime as role-specs and spawned via team-worker agent. Beat/cadence model for orchestration. Triggers on "Team Coordinate ".
-allowed-tools:
-  - ask_question
-  - define_subagent
-  - grep_search
-  - invoke_subagent
-  - manage_subagents
-  - replace_file_content
-  - run_command
-  - send_message
-  - view_file
-  - write_to_file
 agy-subagents:
   - team-worker
 ---

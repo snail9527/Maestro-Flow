@@ -1,5 +1,4 @@
 ---
-role: coordinator
 ---
 
 # Coordinator Role — team-swarm

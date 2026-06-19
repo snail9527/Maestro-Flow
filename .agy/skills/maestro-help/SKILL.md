@@ -1,10 +1,6 @@
 ---
 name: maestro-help
 description: Maestro Flow 命令帮助系统。搜索命令、浏览技能、工作流推荐、新手引导。Triggers on "maestro-help", "帮助", "命令", "怎么用", "skill", "workflow", "maestro 怎么用".
-allowed-tools:
-  - ask_question
-  - grep_search
-  - view_file
 ---
 
 # Maestro Help

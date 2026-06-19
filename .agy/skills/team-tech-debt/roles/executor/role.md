@@ -2,7 +2,6 @@
 role: executor
 prefix: TDFIX
 inner_loop: true
-message_types: [state_update]
 ---
 
 # Tech Debt Executor

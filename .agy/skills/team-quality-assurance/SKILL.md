@@ -1,17 +1,6 @@
 ---
 name: team-quality-assurance
 description: Unified team skill for quality assurance. Full closed-loop QA combining issue discovery and software testing. Triggers on "team quality-assurance", "team qa".
-allowed-tools:
-  - ask_question
-  - define_subagent
-  - grep_search
-  - invoke_subagent
-  - manage_subagents
-  - replace_file_content
-  - run_command
-  - send_message
-  - view_file
-  - write_to_file
 agy-subagents:
   - team-worker
 ---

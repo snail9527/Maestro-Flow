@@ -7,7 +7,6 @@ allowed-tools:
   - run_command
   - view_file
   - write_to_file
-auto-continue: true
 ---
 
 # Codify to Knowhow

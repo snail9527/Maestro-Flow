@@ -1,17 +1,6 @@
 ---
 name: team-testing
 description: Unified team skill for testing team. Progressive test coverage through Generator-Critic loops, shared memory, and dynamic layer selection. Triggers on "team testing".
-allowed-tools:
-  - ask_question
-  - define_subagent
-  - grep_search
-  - invoke_subagent
-  - manage_subagents
-  - replace_file_content
-  - run_command
-  - send_message
-  - view_file
-  - write_to_file
 agy-subagents:
   - team-worker
 ---

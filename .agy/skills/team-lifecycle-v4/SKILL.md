@@ -1,17 +1,6 @@
 ---
 name: team-lifecycle-v4
 description: Full lifecycle team skill — plan, develop, test, review in one coordinated session. Role-based architecture with coordinator-driven beat model. Triggers on "team lifecycle v4".
-allowed-tools:
-  - ask_question
-  - define_subagent
-  - grep_search
-  - invoke_subagent
-  - manage_subagents
-  - replace_file_content
-  - run_command
-  - send_message
-  - view_file
-  - write_to_file
 agy-subagents:
   - team-worker
   - team-supervisor

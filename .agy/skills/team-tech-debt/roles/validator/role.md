@@ -2,7 +2,6 @@
 role: validator
 prefix: TDVAL
 inner_loop: false
-message_types: [state_update]
 ---
 
 # Tech Debt Validator

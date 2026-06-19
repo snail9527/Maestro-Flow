@@ -2,7 +2,6 @@
 role: scanner
 prefix: TDSCAN
 inner_loop: false
-message_types: [state_update]
 ---
 
 # Tech Debt Scanner

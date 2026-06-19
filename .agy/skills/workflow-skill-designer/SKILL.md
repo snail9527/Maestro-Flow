@@ -1,17 +1,6 @@
 ---
 name: workflow-skill-designer
 description: Meta-skill for designing orchestrator+phases structured workflow skills. Creates SKILL.md coordinator with progressive phase loading, TodoWrite patterns, and data flow. Triggers on "design workflow skill", "create workflow skill", "workflow skill designer".
-allowed-tools:
-  - ask_question
-  - define_subagent
-  - grep_search
-  - invoke_subagent
-  - manage_subagents
-  - replace_file_content
-  - run_command
-  - send_message
-  - view_file
-  - write_to_file
 ---
 
 # Workflow Skill Designer

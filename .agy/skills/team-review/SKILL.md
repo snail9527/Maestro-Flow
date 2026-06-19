@@ -1,18 +1,6 @@
 ---
 name: team-review
 description: Unified team skill for code review. 3-role pipeline: scanner, reviewer, fixer. Triggers on team-review.
-allowed-tools:
-  - ask_question
-  - define_subagent
-  - grep_search
-  - invoke_subagent
-  - manage_subagents
-  - mcp__ace-tool__search_context
-  - replace_file_content
-  - run_command
-  - send_message
-  - view_file
-  - write_to_file
 agy-subagents:
   - team-worker
 ---
