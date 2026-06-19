@@ -84,6 +84,37 @@ export function truncateForHistory(s: string, max: number): string {
   return s.length <= max ? s : s.substring(0, max) + '\u2026[truncated]';
 }
 
+/**
+ * Extract the first body line containing a query term, prefixed with its
+ * line number (e.g. "L12: matched context..."). Used by wiki/search output
+ * to show the matched context rather than only the summary.
+ */
+export function extractSnippet(body: string, query: string, maxLen = 50, highlight = false): string | null {
+  if (!body || !query) return null;
+  const lower = body.toLowerCase();
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  for (const term of terms) {
+    const idx = lower.indexOf(term);
+    if (idx === -1) continue;
+    let line = 1;
+    for (let i = 0; i < idx; i++) if (body[i] === '\n') line++;
+    const ls = body.lastIndexOf('\n', idx) + 1;
+    const le = body.indexOf('\n', idx);
+    let raw = body.slice(ls, le === -1 ? body.length : le).trim();
+    if (raw.length > maxLen) raw = raw.slice(0, maxLen) + '...';
+    if (highlight) raw = highlightTerms(raw, terms);
+    return `L${line}: ${raw}`;
+  }
+  return null;
+}
+
+export function highlightTerms(text: string, terms: string[]): string {
+  if (!terms.length) return text;
+  const escaped = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`(${escaped.join('|')})`, 'gi');
+  return text.replace(re, '\x1b[1;33m$1\x1b[0m');
+}
+
 // ---------------------------------------------------------------------------
 // Execution entry reading
 // ---------------------------------------------------------------------------

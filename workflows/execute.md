@@ -1,42 +1,15 @@
 # Execute Workflow
 
-Wave-based parallel execution with atomic commits, breakpoint resume, and optional sync/reflection.
-
-Core principle: **Execute per-plan, not per-phase.** Each plan's wave DAG runs independently. Multiple plans execute sequentially.
+Wave-based parallel execution with atomic commits, breakpoint resume, built-in verification gate, and optional sync/reflection. Execute per-plan, not per-phase.
 
 ---
 
 ## Iron Law
 
-**VERIFY EACH TASK OUTPUT BEFORE MARKING COMPLETE.**
-
-Every task completion requires:
-1. Run convergence criteria checks (not just code review)
-2. Confirm output matches task definition expectations
+NEVER mark a task "completed" without running convergence criteria checks. Every completion requires:
+1. Run convergence criteria checks
+2. Confirm output matches task definition
 3. Evidence of verification in the task summary
-
-No task may be marked "completed" based on agent self-report alone.
-
----
-
-## Red Flags — These Thoughts Mean STOP
-
-If you catch yourself thinking any of these, STOP and verify:
-
-- "The agent said it's done, so it must be done"
-- "I'll batch-verify all tasks at the end instead of per-task"
-- "This task is too simple to need verification"
-- "The warning isn't relevant, I'll ignore it"
-- "Let me mark it complete and fix the issue later"
-
-All of these mean: **run convergence criteria check NOW before marking the task complete**.
-
----
-
-## Prerequisites
-
-- Plan exists in scratch directory: `plan.json` + `.task/TASK-*.json`
-- OR: executionContext handoff received from `/workflow:plan`
 
 ---
 
@@ -69,13 +42,12 @@ For each PLAN_DIR in PLAN_DIRS (sequential):
 | `--method agent\|codex\|gemini\|cli\|auto` | Override execution method (default: config.json.execution.method) |
 | `--executor <tool>` | Default CLI tool: gemini\|codex\|qwen\|opencode\|claude (default: first enabled in cli-tools.json) |
 | `--dir <path>` | Use arbitrary directory instead of phase resolution (skip roadmap validation) |
+| `--skip-verify` | Skip E2.7 verification gate (trust execution output) |
 | `-y` | Auto-approve execution options (skip confirmation prompt) |
 
 ---
 
 ## E0.5: Execution Options Confirmation
-
-**Purpose:** Let user choose how tasks execute. Reads available tools from `delegate-config show --json` to build dynamic options. Supports both menu selection and natural language intent. Skipped when `-y` flag or executionContext already confirmed.
 
 ### Skip conditions
 
@@ -117,9 +89,18 @@ AskUserQuestion({
       header: "Review",
       multiSelect: false,
       options: [
-        { label: "Skip (Recommended)", description: "No code review, proceed to verification" },
-        // One option per enabled CLI tool with review capability:
+        { label: "Skip", description: "No code review" },
         ...availableTools.map(t => ({ label: `${t} Review`, description: `${t} CLI: git diff quality review` }))
+      ]
+    },
+    {
+      question: "Verification gate? (external model checks convergence + structure + anti-patterns)",
+      header: "Verify",
+      multiSelect: false,
+      options: [
+        { label: "Auto (Recommended)", description: `Delegate to ${availableTools[0] || 'first enabled tool'} for convergence + 3-layer structure + anti-pattern check` },
+        ...availableTools.map(t => ({ label: t, description: `${t}: verification gate` })),
+        { label: "Skip", description: "No verification gate" }
       ]
     }
   ]
@@ -146,13 +127,21 @@ Other text parsing — match tool names dynamically from enabled tools:
 
 **Question 2 (Review):** store as `codeReviewTool`
 
-Store: `executionMethod`, `domainRouting`, `codeReviewTool`
+**Question 3 (Verify):**
+
+| Answer | verificationTool |
+|--------|-----------------|
+| "Auto" | First enabled tool from config |
+| Tool name | That tool |
+| "Skip" | `"Skip"` |
+
+`--skip-verify` flag overrides to `"Skip"`.
+
+Store: `executionMethod`, `domainRouting`, `codeReviewTool`, `verificationTool`
 
 ---
 
 ## E1: Load Plan (per PLAN_DIR)
-
-**Purpose:** Build or receive the execution queue for a single plan.
 
 ### From executionContext handoff (preferred, first plan only)
 
@@ -166,6 +155,7 @@ If executionContext is available in memory:
   executorAssignments = executionContext.executorAssignments || {}
   domainRouting = E0.5 domainRouting || executionContext.domainRouting || {}
   codeReviewTool = E0.5 selection || executionContext.codeReviewTool || "Skip"
+  verificationTool = E0.5 selection || executionContext.verificationTool || "Auto"
   Skip disk reload
 ```
 
@@ -179,6 +169,7 @@ defaultExecutor = --executor flag || config.json.execution.default_executor || f
 executorAssignments = plan.json.executor_assignments || {}
 domainRouting = E0.5 domainRouting || built from delegate-config domain tags (frontend→tag match, backend→tag match, default→"agent")
 codeReviewTool = E0.5 selection || "Skip"
+verificationTool = E0.5 selection || "Auto"
 ```
 
 ### Detect completed tasks (breakpoint resume)
@@ -210,8 +201,6 @@ Pass specs_content to each executor agent in E2.
 ---
 
 ## E2: Wave Parallel Execution
-
-**Purpose:** Execute tasks wave by wave, parallel within each wave. Supports multi-backend dispatch — tasks route to Agent or CLI tools (via `maestro delegate`) based on executor resolution.
 
 ### Executor Resolution
 
@@ -295,16 +284,17 @@ For each wave in execution_queue (sequential):
     IF executor == "agent":
       Spawn workflow-executor agent (fresh 200k context) with:
         task definition, phase context, prior wave summaries, specs_content, context.md, analysis.md
-      Agent: implement task → verify convergence → auto-fix (max 3) → checkpoint if blocked
-      On success: atomic commit (if auto-commit), write .summaries/${task_id}-summary.md
-      Update .task/${task_id}.json: status = "completed" | "blocked"
+      Agent internally handles full lifecycle:
+        implement → verify convergence → auto-fix (max 3) → commit → write .summaries/${task_id}-summary.md → update .task/${task_id}.json status
+        (checkpoint if blocked)
+      Main flow: verify agent wrote summary + updated status, collect result
 
     ELSE (CLI path via maestro delegate):
       fixedId = "${PHASE_NUM || 'scratch'}-${PHASE_SLUG}-${task_id}"
       Store fixedId in index.json.execution.delegate_ids[task_id]
       Dispatch: maestro delegate "${prompt}" --to ${executor} --mode write --id ${fixedId}
-      Post-dispatch: verify convergence criteria against file state
-      Write summary, update task status, auto-commit if enabled
+      Main flow post-dispatch: verify convergence criteria against file state
+      Main flow writes: .summaries/${task_id}-summary.md, update .task/${task_id}.json status, auto-commit if enabled
 
     Collect result: { task_id, status, executor, summary_path, commit_hash, delegate_id }
     Clear state.json.current_task_id
@@ -337,8 +327,6 @@ Continue wave (other tasks unaffected)
 
 ## E2.5: Post-Wave Validation
 
-**Purpose:** Validate execution integrity after all waves complete, before sync and reflection. Catches missing summaries, status inconsistencies, and tech stack constraint violations early.
-
 ### Check 1: Summary Existence
 
 ```
@@ -364,8 +352,6 @@ If constraints exist:
 ```
 
 ### Check 4: CLI Supplementary Validation (optional)
-
-**Purpose:** Use external CLI tool for semantic validation that structural checks miss — dead code, unused exports, circular dependencies introduced by execution.
 
 ```
 IF no CLI tools enabled OR completed_tasks.length == 0: skip
@@ -398,8 +384,6 @@ If none critical: log "passed" and continue to E2.6
 
 ## E2.6: Code Review (Optional)
 
-**Purpose:** Run code review on execution output if selected in E0.5.
-
 ```
 If codeReviewTool == "Skip": continue to E3
 
@@ -414,9 +398,127 @@ Wait for completion, log findings summary
 
 ---
 
-## E3: Auto Sync
+## E2.7: Verification Gate
 
-**Purpose:** Update codebase documentation after execution.
+**Skip if** `verificationTool == "Skip"` OR `--skip-verify` flag OR no completed tasks.
+
+### Step 1: Collect Verification Inputs
+
+```
+modified_files = collect all files changed by completed tasks (from .summaries/ + git diff)
+convergence_criteria = collect convergence.criteria from all completed .task/*.json
+success_criteria = index.json.success_criteria (if exists)
+must_haves = success_criteria || convergence_criteria aggregated
+summaries_content = concatenate all .summaries/TASK-*-summary.md
+```
+
+### Step 2: Resolve Verification Tool
+
+```
+IF verificationTool == "Auto": resolve to first enabled tool from delegate-config
+ELSE: use specified tool name
+```
+
+### Step 3: Dispatch Verification (external model)
+
+Single delegate call covers convergence review + structure verify + anti-pattern scan:
+
+```
+Bash({
+  command: 'maestro delegate "PURPOSE: Verify execution output meets all convergence criteria and structural integrity; success = all criteria verified with file:line evidence
+TASK:
+1. CONVERGENCE: For each criterion below, check if the actual code satisfies it — read the files, verify the behavior exists, report status with evidence
+2. STRUCTURE Layer 1 (Existence): Verify all expected output files exist on disk
+3. STRUCTURE Layer 2 (Substance): Verify files have real implementation — flag stubs, placeholders, TODO-only, empty returns
+4. STRUCTURE Layer 3 (Wiring): Verify files are imported and used by the system — flag orphaned files
+5. ANTI-PATTERNS: Scan modified files for TODO/FIXME/HACK, placeholder content, console.log/print debug statements, disabled tests
+MODE: analysis
+CONTEXT: @${modified_files as glob patterns}
+EXPECTED: JSON {
+  convergence: [{ criterion: string, status: \"verified\"|\"failed\"|\"uncertain\", evidence: string }],
+  structure: {
+    existence: [{ path: string, status: \"exists\"|\"missing\" }],
+    substance: [{ path: string, status: \"real\"|\"stub\", evidence: string }],
+    wiring: [{ path: string, status: \"wired\"|\"orphaned\", importers: string[] }]
+  },
+  anti_patterns: [{ type: string, file: string, line: number, severity: \"blocker\"|\"warning\"|\"info\" }],
+  gaps: [{ id: string, type: string, severity: \"critical\"|\"high\"|\"medium\"|\"low\", description: string, fix_direction: string }],
+  overall: \"passed\"|\"gaps_found\"
+}
+CONSTRAINTS: Read-only | Check ALL criteria exhaustively | Evidence must be file:line references | Do NOT assume — verify by reading code
+
+## Convergence Criteria (verify each one)
+${must_haves.map((c, i) => (i+1) + \". \" + c).join(\"\\n\")}
+
+## Modified Files
+${modified_files.join(\"\\n\")}
+
+## Task Summaries (executor self-reports — verify independently)
+${summaries_content}
+" --to ${verificationTool} --mode analysis',
+  run_in_background: true
+})
+```
+
+### Step 4: Process Results
+
+```
+On callback:
+  Parse JSON result from delegate output
+
+  // Write verification.json (downstream compatibility for quality-review, quality-test, etc.)
+  Write ${PLAN_DIR}/verification.json:
+  {
+    "phase": PHASE_NUM,
+    "status": result.overall,
+    "verified_at": ISO_timestamp,
+    "verifier": verificationTool,
+    "must_haves": {
+      "truths": result.convergence,
+      "artifacts": [...result.structure.existence, ...result.structure.substance],
+      "key_links": result.structure.wiring
+    },
+    "gaps": result.gaps,
+    "antipatterns": result.anti_patterns,
+    "coverage_score": verified_count / total_count
+  }
+
+  IF result.overall == "passed":
+    Log "✓ Verification Gate: PASSED — all criteria verified by ${verificationTool}"
+    Continue to E3
+
+  IF result.overall == "gaps_found":
+    Log verification report with per-criterion status
+
+    // Auto-create issues from critical/high gaps
+    For each gap with severity critical|high:
+      Create issue in .workflow/issues/issues.jsonl:
+        id: "ISS-{YYYYMMDD}-{NNN}", status: "registered",
+        priority: severity_to_priority(gap.severity), source: "verification-gate",
+        phase_ref: PHASE_NUM, gap_ref: gap.id
+
+    // Gate decision
+    IF any critical gaps:
+      Set index.json.status = "verification_failed"
+      Log: "✗ Verification Gate: FAILED — {N} critical gaps. Run /maestro-plan --gaps to fix."
+      STOP pipeline (do not proceed to E3)
+    ELSE (medium/low only):
+      Log warnings, continue to E3
+```
+
+### Step 5: Register VRF Artifact
+
+```
+IF verification ran (not skipped):
+  Create VRF artifact in state.json:
+    { id: "VRF-{next_id}", type: "verify", milestone, phase,
+      path: "${PLAN_DIR}/verification.json", status: result.overall == "passed" ? "completed" : "gaps_found",
+      depends_on: EXC_artifact.id, created_at, completed_at }
+```
+
+---
+
+## E3: Auto Sync
 
 ```
 If config.json.codebase.auto_sync_after_execute == true:
@@ -432,8 +534,6 @@ Else:
 ---
 
 ## E4: Reflection (Optional)
-
-**Purpose:** Record strategy observations for future iterations.
 
 ```
 If config.json.workflow.reflection == true:
@@ -459,8 +559,10 @@ If config.json.workflow.reflection == true:
 ## Final State Update
 
 ```
-If all tasks completed:
-  index.json.status = "verifying", set completed_at → "Run /workflow:verify"
+If all tasks completed AND verification passed (or skipped):
+  index.json.status = "verified", set completed_at
+Elif all tasks completed AND verification failed:
+  index.json.status = "verification_failed", set completed_at
 Else:
   index.json.status = "executing" (partial) → "Re-run /workflow:execute to resume"
 
@@ -471,8 +573,6 @@ If NOT SCRATCH_MODE: sync state.json (status, clear current_task_id)
 ---
 
 ## E5: Register Artifact & Extract Learnings (per PLAN_DIR)
-
-**Purpose:** Register execution completion and extract incremental learnings.
 
 ```
 // Register EXC artifact
@@ -508,8 +608,6 @@ Mark artifact.harvested = true; write state.json (atomic)
 ---
 
 ## Breakpoint Resume
-
-The execute workflow is fully resumable:
 
 ```
 State tracked in index.json.execution:

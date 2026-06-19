@@ -1,7 +1,7 @@
 ---
 name: team-swarm
 description: Swarm intelligence team skill — ACO-driven multi-agent exploration with hybrid LLM coordinator + Python optimization controller. Coordinator generates swarm-config from user task, then runs K iterations of N parallel ants guided by pheromone state. Universal task space via config (nodes + scoring rule). Triggers on "team swarm", "swarm intelligence", "蚁群".
-allowed-tools: TeamCreate(*), TeamDelete(*), SendMessage(*), TaskCreate(*), TaskUpdate(*), TaskList(*), TaskGet(*), Agent(*), AskUserQuestion(*), Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*), mcp__ccw-tools__team_msg(*)
+allowed-tools: TeamCreate(*), TeamDelete(*), SendMessage(*), TaskCreate(*), TaskUpdate(*), TaskList(*), TaskGet(*), Agent(*), AskUserQuestion(*), Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*), mcp__maestro__team_msg(*)
 ---
 
 # Team Swarm
@@ -59,7 +59,7 @@ Parse `$ARGUMENTS`:
 - **Session path**: `.workflow/.team/TS-<slug>-<date>/`
 - **Team name**: `swarm`
 - **Script root**: `<skill_root>/scripts/aco.py` (Python 3.10+)
-- **Message bus**: `mcp__ccw-tools__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
 
 ## Worker Spawn Template
 

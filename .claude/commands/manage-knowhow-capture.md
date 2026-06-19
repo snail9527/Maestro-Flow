@@ -13,7 +13,7 @@ allowed-tools:
 ---
 <purpose>
 Capture reusable knowledge into `.workflow/knowhow/` with type-specific structured fields.
-Auto-indexed by WikiIndexer (type=knowhow), searchable via `maestro knowhow search`.
+Auto-indexed by WikiIndexer (type=knowhow), searchable via `maestro search --type knowhow`.
 </purpose>
 
 <required_reading>
@@ -23,7 +23,7 @@ Auto-indexed by WikiIndexer (type=knowhow), searchable via `maestro knowhow sear
 <context>
 $ARGUMENTS — type token + description + optional flags.
 
-**Flags**: `--lang <lang>`, `--source <url>`, `--tag tag1,tag2`, `--title <title>`, `--asset-type <type>`, `--code-paths <paths>`, `--category <cat>`
+**Flags**: `--lang <lang>`, `--source <url>`, `--tag tag1,tag2`, `--title <title>`, `--description <desc>`, `--asset-type <type>`, `--code-paths <paths>`, `--category <cat>`
 
 **Type routing** (first token match):
 
@@ -38,14 +38,17 @@ $ARGUMENTS — type token + description + optional flags.
 | `asset`/`ast`/`资产`/`契约` | asset | AST- | assetType, codePaths, category |
 | `blueprint`/`blp`/`蓝图` | blueprint | BLP- | codePaths, category |
 | `document`/`doc`/`文档` | document | DOC- | (general fallback) |
+| `insight`/`ins`/`洞察`/`经验` | insight | INS- | content, tags, phase (replaces former manage-learn) |
 | Short text + `--tag` | tip | TIP- | — |
-| No args | — | — | AskUserQuestion (9 options) |
+| No args | — | — | AskUserQuestion (10 options) |
 
-**Output**: `.workflow/knowhow/{PREFIX}-{YYYYMMDD}-{HHMM}.md` with YAML frontmatter (title, type, category, created, tags, source, lang, status)
+**Output**: `.workflow/knowhow/{PREFIX}-{YYYYMMDD}-{slug}.md` with YAML frontmatter (title, description, type, category, created, tags, source, lang, status)
 </context>
 
 <execution>
 Follow '~/.maestro/workflows/knowhow.md' completely.
+
+**Description rule**: Every entry MUST have a `description` field in frontmatter — a one-line summary (under 120 chars) for search results. WikiIndexer uses priority chain: `description > content[:240]`. Use `--description` flag value if provided; otherwise auto-generate from content.
 
 **Tags language rule**: Tags must match content language. Chinese content → Chinese tags (如 `认证,令牌,刷新`). English content → English tags. Mixed → bilingual.
 
@@ -77,3 +80,13 @@ Follow '~/.maestro/workflows/knowhow.md' completely.
 - [ ] File written to .workflow/knowhow/ with correct prefix and YAML frontmatter
 - [ ] Confirmation displayed with ID, type, path
 </success_criteria>
+
+<completion>
+### Next-step routing
+
+| Condition | Suggestion |
+|-----------|-----------|
+| Entry captured | `/manage-knowhow list` to view library |
+| Want to connect entries | `/manage-wiki connect` |
+| Want to bridge to specs | `/spec-add <category>` with `--spec-category` |
+</completion>

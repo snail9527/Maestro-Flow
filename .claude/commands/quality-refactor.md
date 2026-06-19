@@ -13,7 +13,7 @@ allowed-tools:
   - AskUserQuestion
 ---
 <purpose>
-Plan and execute targeted refactoring with safety guarantees through analysis, planning, and reflection-driven iteration. Identifies affected files and dependencies, creates a refactoring plan, confirms with the user before execution, then applies changes with test verification after every modification to ensure zero regressions. Each refactoring round records strategy, outcome, and adjustments in reflection-log.md.
+Targeted refactoring with safety guarantees: plan → confirm → execute with test verification per change → reflection-log.md.
 </purpose>
 
 <required_reading>
@@ -33,7 +33,7 @@ If not provided, prompt user for scope.
 1. **Coding specs**: Run `maestro spec load --category coding` to load coding conventions. Apply conventions to all refactored code.
 2. **Review specs**: Run `maestro spec load --category review` to load review standards. Use as quality gate for refactored code.
 3. **Role Knowledge**:
-   - Browse: `maestro wiki list --category coding`
+   - Browse: `maestro search --category coding`
    - Identify task-relevant entries, then load: `maestro wiki load <id1> [id2...]`
 4. All are optional — proceed without if unavailable.
 </context>
@@ -41,14 +41,52 @@ If not provided, prompt user for scope.
 <execution>
 Follow '~/.maestro/workflows/refactor.md' completely.
 
-**Knowledge inquiry on completion:**
-After successful refactoring, ask user once: "Record refactoring pattern as coding convention?" If yes, persist via `Skill("spec-add", "coding \"<title>\" \"<pattern>\" --keywords <kw1>,<kw2>")`.
+### Phase Gates (MANDATORY, BLOCKING)
 
-**Next-step routing on completion:**
-- All tests pass → `/quality-sync` (update codebase docs)
-- Test failures after refactor → `/quality-debug "test failures after refactor in {scope}"`
-- No test suite available → `/quality-auto-test {phase}`
+**GATE 1: Analysis → Plan**
+- REQUIRED: Affected files and dependencies identified.
+- REQUIRED: Refactoring plan created with specific changes.
+- BLOCKED if missing: cannot refactor without identified targets.
+
+**GATE 2: Plan → Execution**
+- REQUIRED: User confirmed refactoring plan.
+- BLOCKED if not confirmed: do not apply changes without approval.
+
+**GATE 3: Execution → Completion**
+- REQUIRED: All changes applied with test verification per modification.
+- REQUIRED: Zero regressions (all tests pass).
+- REQUIRED: reflection-log.md written with strategy and outcomes.
+- BLOCKED if tests fail: fix regressions before completing.
+
+**Knowledge inquiry on completion:**
+After successful refactoring, ask user once: "Record refactoring pattern as coding convention?" If yes → `Skill("spec-add", "coding \"<title>\" \"<pattern>\" --keywords <kw1>,<kw2> --description \"<summary>\"")`.
 </execution>
+
+<completion>
+### Standalone report
+
+```
+--- COMPLETION STATUS ---
+STATUS: DONE|DONE_WITH_CONCERNS|NEEDS_RETRY
+CONCERNS: {description if applicable}
+--- END STATUS ---
+```
+
+### Ralph-invoked completion
+
+End the step by calling the CLI (no text block output):
+```
+maestro ralph complete <idx> --status {STATUS} [--evidence {path}]
+```
+
+### Next-step routing
+
+| Condition | Suggestion |
+|-----------|-----------|
+| All tests pass | `/quality-sync` (update codebase docs) |
+| Test failures after refactor | `/quality-debug "test failures after refactor in {scope}"` |
+| No test suite available | `/quality-auto-test {phase}` |
+</completion>
 
 <error_codes>
 | Code | Severity | Condition | Recovery |

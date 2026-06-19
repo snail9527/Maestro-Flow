@@ -336,11 +336,3 @@ Suggest: status {ISSUE_ID}, update --status in_progress.
 - **Format**: One JSON object per line (JSONL), append-friendly
 - **ID scheme**: `ISS-YYYYMMDD-NNN` (NNN auto-incremented per day)
 
-## Quality Criteria
-
-- Issues directory auto-created if missing
-- ID generation scans both active and history files to avoid collisions
-- Status transitions recorded in issue_history
-- Close operation moves records from active to history JSONL
-- Link creates bidirectional references (issue -> task and task -> issue)
-- List output is filterable and sorted by priority/severity

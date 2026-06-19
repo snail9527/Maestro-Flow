@@ -2,7 +2,7 @@
 name: maestro
 description: Auto-route intent to optimal command chain
 argument-hint: "\"intent text\" [-y] [-c|--continue] [--dry-run] [--super]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -43,7 +43,8 @@ $ARGUMENTS — user intent text, or special flags.
 3. **Decomposition contract shared with maestro-ralph** — broad/lifecycle intents run S_DECOMPOSE producing the SAME additive block (`boundary_contract`, `execution_criteria`, `task_decomposition`). Reference maestro-ralph `A_DECOMPOSE_TASKS`
 4. **Goal is tool-created** — `A_DECOMPOSE_TASKS` calls `create_goal` with sub-goal success criteria. `update_goal` on convergence; held while aborted/paused
 5. **status.json 唯一真源** — 不生成 `goal-checklist.md`；step 含 `command_scope` + `command_path` + `completion_confirmed`
-6. **Topology awareness** — chain catalog 含 brainstorm / blueprint / analyze-macro(text) / analyze(numeric) / roadmap / plan(三路径) / execute / verify / ...
+6. **Topology awareness** — chain catalog 含 grill / brainstorm / blueprint / analyze-macro(text) / analyze(numeric) / roadmap / plan(三路径) / execute / ...
+6.5. **Grill is interactive-only** — auto_mode MUST skip grill stage and route directly to brainstorm; grill requires Socratic Q&A with the user
 7. **D-007 milestone 反查** — 数字 phase 步骤的 `milestone_id` 由 `state.json.milestones[].phase_slugs` 反查
 8. **schema 向后兼容** — decomposition 字段可选；`steps[]` 由 post-goal-audit 动态生长（goal_ref tagged）；既有字段不删不改；`waves` 保留空数组
 9. **Sequential execution** — one step at a time in index order; each step's result read before the next starts
@@ -119,7 +120,7 @@ S_ABORTED:
   → END           DO: A_ABORT_REPORT
 
 S_FALLBACK:
-  → S_CLASSIFY    WHEN: user provides new intent            DO: AskUserQuestion
+  → S_CLASSIFY    WHEN: user provides new intent            DO: request_user_input
   → END           WHEN: user cancels
 
 </transitions>
@@ -154,6 +155,7 @@ Extract:
 
 | task_type | When user intent is about... |
 |-----------|---------------------------|
+| `grill` | Stress-test, challenge assumptions, Socratic questioning on a plan/idea (**skip when auto_mode — grill is interactive-only**) |
 | `quick` | Simple/small task, add a feature, quick change |
 | `blueprint` | Formal spec generation (Product Brief / PRD / Architecture / Epics) |
 | `analyze_macro` | Broad/medium intent w/o numeric phase — explore impact, produce scope_verdict |
@@ -162,7 +164,7 @@ Extract:
 | `plan` | Plan, design, architect a phase |
 | `execute` | Implement, develop, code a phase |
 | `analyze` | Understand, investigate, evaluate code (numeric phase) |
-| `verify` | Check goals met, validate results |
+| `verify` | Check goals met, validate results (routes to quality-review) |
 | `review` | Code quality review |
 | `test` | Run or create tests, UAT |
 | `test_gen` | Generate tests for coverage gaps |
@@ -186,17 +188,17 @@ Extract:
 | `issue_analyze` | Analyze a specific issue |
 | `issue_plan` | Plan fix for an issue |
 | `issue_execute` | Fix issue end-to-end (auto-upgrades to issue-full) |
-| `feature` | Standard feature: plan→execute→verify |
-| `full-lifecycle` | Complete phase: plan→execute→verify→review→test→audit→complete |
+| `feature` | Standard feature: plan→execute→review |
+| `full-lifecycle` | Complete phase: plan→execute→review→test→audit→complete |
 | `brainstorm-driven` | Start from exploration/brainstorm |
 | `spec-driven` | From spec/requirements (heavy, with init) |
 | `roadmap-driven` | From requirements (light, with init) |
 | `analyze-plan-execute` | Fast track: analyze→plan→execute |
-| `execute-verify` | Resume after planning |
+| `execute-review` | Resume after planning |
 | `review-fix` | Fix review-blocked issues |
 | `quality-loop` | Full quality improvement cycle |
 | `quality-loop-partial` | Partial quality fix |
-| `quality-fix` | Analyze gaps→plan→execute→verify |
+| `quality-fix` | Analyze gaps→plan→execute→review |
 | `deploy` | Verify then release |
 | `milestone-close` | Close/transition milestone |
 | `milestone-release` | Release milestone with version tag |
@@ -208,7 +210,8 @@ Extract:
 1. `issue_id` present → prefer issue chains
 2. UI/design/界面/页面/原型 → prefer `ui_design`
 3. 正式规格/spec-generate/7-phase → `blueprint` (single-step) 或 `blueprint-driven`
-4. 头脑风暴/探索 → `brainstorm-driven`
+4. 压力测试/拷问/grill/stress-test → `grill` (single-step); **auto_mode → skip grill, route to `brainstorm-driven` instead**
+5. 头脑风暴/探索 → `brainstorm-driven`
 5. Broad/medium intent + 无数字 phase → `analyze_macro`（产 scope_verdict）；后续 large→roadmap链；medium/small→`plan_from_analyze`
 6. 已有 analyze artifact 直达 plan → `plan_from_analyze`
 7. 已有 blueprint artifact 直达 plan → `plan_from_blueprint`
@@ -232,16 +235,14 @@ Read `.workflow/state.json` and route by condition:
 | No phases | `brainstorm-driven` |
 | pending + has context | `plan` |
 | pending, no context | `analyze` |
-| exploring/planning + has plan | `execute-verify` |
+| exploring/planning + has plan | `execute-review` |
 | exploring/planning, no plan | `plan` |
-| executing, all tasks done | `verify` |
+| executing, all tasks done | `review` |
 | executing, tasks remain | `execute` |
-| verifying, passed + no review | `review` |
-| verifying, passed + BLOCK | `review-fix` |
-| verifying, passed + UAT pending | `test` |
-| verifying, passed + UAT passed | `milestone-close` |
-| verifying, passed + UAT failed | `debug` |
-| verifying, not passed | `quality-loop-partial` |
+| reviewing, verdict == BLOCK | `review-fix` |
+| reviewing, verdict != BLOCK + UAT pending | `test` |
+| reviewing, verdict != BLOCK + UAT passed | `milestone-close` |
+| reviewing, verdict != BLOCK + UAT failed | `debug` |
 | testing, UAT passed | `milestone-close` |
 | testing, UAT not passed | `debug` |
 | completed | `milestone-close` |
@@ -258,7 +259,7 @@ Read `.workflow/state.json` and route by condition:
 
 ### A_CLARIFY_INTENT
 
-1. `AskUserQuestion` with available chain types
+1. `request_user_input` with available chain types
 2. Re-classify with user response
 
 ### A_DECOMPOSE_TASKS
@@ -266,7 +267,7 @@ Read `.workflow/state.json` and route by condition:
 与 maestro-ralph `A_DECOMPOSE_TASKS` 共享分解契约。Condensed:
 
 1. 分类意图广度。narrow / 单步 / `{status,init,quick}` 链跳过
-2. broad/medium → `AskUserQuestion` ≤3 轮：Scope / Constraints / Definition of Done
+2. broad/medium → `request_user_input` ≤3 轮：Scope / Constraints / Definition of Done
 3. 派生 `execution_criteria` + `task_decomposition`（每个 sub-goal 含 `done_when` + `evidence` + `lifecycle` + `completion_confirmed: false`）
 4. **status.json 唯一真源**：写入 `boundary_contract` / `execution_criteria` / `task_decomposition`；不生成 markdown 清单
 5. 链路末尾（evidence 产出步骤后、milestone-complete/close-out 前）追加 `decision:post-goal-audit`。S_DECISION_EVAL 据此动态生长 `steps[]`
@@ -281,7 +282,10 @@ Read `.workflow/state.json` and route by condition:
 
 1. Read `.workflow/state.json` 获取 phase / milestone（D-007 反查 `phase_slugs`）；读最新 macro analyze artifact 注入 `scope_verdict` + `analyze_macro_id`；读最新 blueprint artifact 注入 `blueprint_id`
 2. Resolve chain's skill list from Chain Map (see appendix)
-3. Create `.workflow/.maestro/maestro-{YYYYMMDD-HHMMSS}/status.json`（与 ralph 共用 schema）:
+3. **Prevalidate via `Bash("maestro ralph skills --platform codex --json --quiet")`** 一次性拉取所有可用 codex skills（global `~/.codex/skills/` + project `.codex/skills/`，project 覆盖 global），匹配 skill 名得到：
+   - 命中 → `command_scope = "global" | "project"`，`command_path = <绝对 SKILL.md 路径>`
+   - 未命中 → `command_scope = "missing"`, `command_path = null`
+4. Create `.workflow/.maestro/maestro-{YYYYMMDD-HHMMSS}/status.json`（与 ralph 共用 schema）:
    ```json
    {
      "session_id", "source": "maestro", "intent", "task_type", "chain_name",
@@ -295,7 +299,7 @@ Read `.workflow/state.json` and route by condition:
        "skill": "", "args": "",
        "stage": "", "scope": null,
        "command_scope": "global|project|missing|null",
-       "command_path": "~/.claude/commands/{name}.md | .claude/commands/{name}.md | null",
+       "command_path": "~/.codex/skills/{name}/SKILL.md | .codex/skills/{name}/SKILL.md | null",
        "milestone_id": null, "source_artifact_ref": null,
        "status": "pending", "goal_ref": null,
        "completion_confirmed": false, "completion_status": null,
@@ -309,8 +313,8 @@ Read `.workflow/state.json` and route by condition:
    }
    ```
    Decomposition fields written ONLY if A_DECOMPOSE_TASKS produced them (additive)
-4. Validate: 所有 step 的 `command_scope != "missing"`；否则 raise E006 列出缺失 skill
-5. Initialize tracking:
+5. Validate: 所有 step 的 `command_scope != "missing"`；否则 raise E006 列出缺失 skill
+6. Initialize tracking:
    - If decomposed: goal already registered by A_DECOMPOSE_TASKS. Else: `create_goal({ objective: "Maestro {chain}: {N} steps [{skill list}]" })`
    - `update_plan({ plan: steps.map(step => ({ step, status: "pending" })) })`
 
@@ -350,7 +354,7 @@ S_DECISION_EVAL 入口；镜像 maestro-ralph `A_GOAL_AUDIT_EVALUATE`。Condense
 
 ### A_APPLY_GOAL_FIX
 
-**Dynamic step-growth core** (mirrors maestro-ralph). For each unmet sub-goal (grouped by target_phase), insert before the post-goal-audit node a scoped mini-loop `$maestro-plan --gaps {phase} "G{n}: {gap}" → $maestro-execute {phase} → $maestro-verify {phase}`, each tagged `goal_ref: "G{n}"`, type `"skill"`. Re-append `decision:post-goal-audit {retry+1}`. Reindex, increment retry, persist + `update_plan`. `steps[]` grew.
+**Dynamic step-growth core** (mirrors maestro-ralph). For each unmet sub-goal (grouped by target_phase), insert before the post-goal-audit node a scoped mini-loop `$maestro-plan --gaps {phase} "G{n}: {gap}" → $maestro-execute {phase}`, each tagged `goal_ref: "G{n}"`, type `"skill"`. Re-append `decision:post-goal-audit {retry+1}`. Reindex, increment retry, persist + `update_plan`. `steps[]` grew.
 
 ### A_APPLY_GOAL_DONE
 
@@ -384,6 +388,7 @@ S_DECISION_EVAL 入口；镜像 maestro-ralph `A_GOAL_AUDIT_EVALUATE`。Condense
 
 | Chain | Command + Args |
 |-------|---------------|
+| `grill` | `maestro-grill "{intent}"` |
 | `status` | `manage-status` |
 | `init` | `maestro-init` |
 | `blueprint` | `maestro-blueprint "{intent}"` |
@@ -394,7 +399,7 @@ S_DECISION_EVAL 入口；镜像 maestro-ralph `A_GOAL_AUDIT_EVALUATE`。Condense
 | `plan_from_analyze` | `maestro-plan --from analyze:{analyze_macro_id}` |
 | `plan_from_blueprint` | `maestro-plan --from blueprint:{blueprint_id}` |
 | `execute` | `maestro-execute {phase}` |
-| `verify` | `maestro-verify {phase}` |
+| `verify` | `quality-review {phase}` |
 | `test_gen` | `quality-auto-test {phase}` |
 | `auto_test` | `quality-auto-test {phase}` |
 | `test` | `quality-test {phase}` |
@@ -439,26 +444,27 @@ S_DECISION_EVAL 入口；镜像 maestro-ralph `A_GOAL_AUDIT_EVALUATE`。Condense
 
 | Chain | Steps (→ = sequential, [B] = context-producing barrier) |
 |-------|---------------------------------------|
-| `feature` | [B] maestro-plan → [B] maestro-execute → maestro-verify |
-| `quality-fix` | [B] maestro-analyze --gaps → [B] maestro-plan --gaps → [B] maestro-execute → maestro-verify |
-| `deploy` | maestro-verify → maestro-milestone-release |
-| `blueprint-driven` | maestro-init → [B] maestro-blueprint → [B] maestro-plan --from blueprint:{BLP} → [B] maestro-execute → maestro-verify |
-| `analyze-macro-driven` | [B] maestro-analyze "{intent}" → ◆ post-analyze-scope → (large: [B] maestro-roadmap --from analyze:{ANL} → [B] maestro-analyze {phase} → [B] maestro-plan {phase}) / (medium\|small: [B] maestro-plan --from analyze:{ANL}) → [B] maestro-execute → maestro-verify |
-| `brainstorm-driven` | [B] maestro-brainstorm → [B] maestro-plan → [B] maestro-execute → maestro-verify |
-| `ui-craft-build` | maestro-impeccable build → [B] maestro-plan → [B] maestro-execute → maestro-verify |
-| `roadmap-driven` | maestro-init → [B] maestro-roadmap → [B] maestro-plan → [B] maestro-execute → maestro-verify |
-| `next-milestone` | [B] maestro-roadmap → [B] maestro-plan → [B] maestro-execute → maestro-verify |
-| `full-lifecycle` | [B] maestro-plan → [B] maestro-execute → maestro-verify → quality-review → quality-test → maestro-milestone-audit → maestro-milestone-complete |
-| `execute-verify` | [B] maestro-execute → maestro-verify |
+| `feature` | [B] maestro-plan → [B] maestro-execute → quality-review |
+| `quality-fix` | [B] maestro-analyze --gaps → [B] maestro-plan --gaps → [B] maestro-execute → quality-review |
+| `deploy` | quality-review → maestro-milestone-release |
+| `blueprint-driven` | maestro-init → [B] maestro-blueprint → [B] maestro-plan --from blueprint:{BLP} → [B] maestro-execute → quality-review |
+| `analyze-macro-driven` | [B] maestro-analyze "{intent}" → ◆ post-analyze-scope → (large: [B] maestro-roadmap --from analyze:{ANL} → [B] maestro-analyze {phase} → [B] maestro-plan {phase}) / (medium\|small: [B] maestro-plan --from analyze:{ANL}) → [B] maestro-execute → quality-review |
+| `grill-brainstorm` | [B] maestro-grill → [B] maestro-brainstorm --from grill:{GRL} → [B] maestro-plan → [B] maestro-execute → quality-review (**auto_mode: skip grill step, fall back to brainstorm-driven**) |
+| `brainstorm-driven` | [B] maestro-brainstorm → [B] maestro-plan → [B] maestro-execute → quality-review |
+| `ui-craft-build` | maestro-impeccable build → [B] maestro-plan → [B] maestro-execute → quality-review |
+| `roadmap-driven` | maestro-init → [B] maestro-roadmap → [B] maestro-plan → [B] maestro-execute → quality-review |
+| `next-milestone` | [B] maestro-roadmap → [B] maestro-plan → [B] maestro-execute → quality-review |
+| `full-lifecycle` | [B] maestro-plan → [B] maestro-execute → quality-review → quality-test → maestro-milestone-audit → maestro-milestone-complete |
+| `execute-review` | [B] maestro-execute → quality-review |
 | `analyze-plan-execute` | [B] maestro-analyze -q → [B] maestro-plan --dir {scratch_dir} → [B] maestro-execute --dir {scratch_dir} |
-| `quality-loop` | maestro-verify → quality-review → quality-test → quality-debug --from-uat → [B] maestro-plan --gaps → [B] maestro-execute |
-| `quality-loop-partial` | [B] maestro-plan --gaps → [B] maestro-execute → maestro-verify |
+| `quality-loop` | quality-review → quality-test → quality-debug --from-uat → [B] maestro-plan --gaps → [B] maestro-execute |
+| `quality-loop-partial` | [B] maestro-plan --gaps → [B] maestro-execute → quality-review |
 | `review-fix` | [B] maestro-plan --gaps → [B] maestro-execute → quality-review |
 | `milestone-close` | maestro-milestone-audit → maestro-milestone-complete |
 | `milestone-release` | maestro-milestone-audit → maestro-milestone-release |
 | `phase_transition` | maestro-milestone-audit → maestro-milestone-complete |
 | `issue-full` | [B] maestro-analyze --gaps → [B] maestro-plan --gaps → [B] maestro-execute → quality-review → manage-issue close |
-| `issue-quick` | [B] maestro-plan --gaps → [B] maestro-execute → manage-issue close |
+| `issue-quick` | [B] maestro-plan --gaps → [B] maestro-execute → quality-review → manage-issue close |
 
 > When S_DECOMPOSE ran, a `decision:post-goal-audit` node is appended as the final node (after the last evidence-producing step; before milestone-complete/close-out if the chain ends with one). `[B]` now denotes a context-producing skill (artifacts read into `session.context`) — execution is still sequential (no parallelism; spawning removed).
 

@@ -2,7 +2,7 @@
 name: manage-knowhow
 description: Manage knowhow entries (workflow and system)
 argument-hint: "[list|search|view|edit|delete|prune] [query|id|file] [--store workflow|system|all] [--tag tag] [--type type]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -49,7 +49,7 @@ Default to `list` if no arguments. Parse first token as subcommand.
 ### Step 3: Execute Subcommand
 
 **list**: Show entries from both stores (or filtered by `--store`, `--tag`, `--type`).
-- Workflow: use `maestro wiki list --type knowhow --json` or read `.workflow/wiki-index.json`, display ID, type, category, date, tags, title
+- Workflow: use `maestro search --type knowhow --json` or read `.workflow/wiki-index.json`, display ID, type, category, date, tags, title
 - System: list `.md` files in system memory directory
 
 **search `<query>`**: Full-text grep across both stores. Rank by match count.
@@ -73,7 +73,7 @@ After write operations, verify:
 <error_codes>
 | Code | Severity | Description |
 |------|----------|-------------|
-| E001 | error | No stores found — for workflow store run `Skill({ skill: "manage-knowhow-capture" })`; for system store run `Skill({ skill: "manage-memory-capture" })` or create MEMORY.md |
+| E001 | error | No stores found — for workflow store run `$manage-knowhow-capture`; for system store run `$manage-memory-capture` or create MEMORY.md |
 | E002 | error | Entry ID or filename not found |
 | E003 | error | Prune requires at least one filter flag |
 | E004 | error | Cannot delete MEMORY.md — use `edit` subcommand instead |

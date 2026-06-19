@@ -26,7 +26,9 @@ Maestro 知识沉淀分两种：**约束**和**积累**。约束是编码规范�
 │   ├── AST-*.md                    # 代码资产（API 契约、数据模型）
 │   ├── BLP-*.md                    # 架构蓝图
 │   └── DOC-*.md                    # 长文档（通用兜底）
-└── wiki-index.json                 # 统一索引（WikiIndexer 自动生成）
+├── wiki-index.json                 # 统一索引（WikiIndexer 自动生成）
+└── codebase/
+    └── knowledge-graph.db          # CodeGraph 知识图谱（SQLite，kg CLI 查询）
 ```
 
 </details>
@@ -107,6 +109,7 @@ summary: "Use when implementing OAuth 2.0 login for public clients."
 |------|------|
 | `/wiki-digest` | 语义主题聚类 + 知识覆盖热力图 + gap 分析 |
 | `/wiki-connect` | 发现孤立节点和缺失连接，修复图联通性 |
+| `/manage-knowledge-audit` | 审计 spec/knowhow/artifact 三存储 — 矛盾检测、过期淘汰、孤立清理（keep/deprecate/delete 三态决策） |
 | `/learn-decompose` | 从代码中提取设计模式，写入 spec 和 wiki |
 | `/learn-follow` | 引导式阅读代码/wiki，提取 pattern 并构建理解 |
 
@@ -155,22 +158,81 @@ summary: "Use when testing payment endpoints for retry safety."
 
 ---
 
+## 统一搜索
+
+`maestro search` 是唯一的用户级搜索入口，基于 BM25 全文检索跨 spec/knowhow/issue 所有知识类型。
+
+```bash
+maestro search "auth token"                       # 全文搜索
+maestro search "auth" --type spec                  # 仅搜索 spec
+maestro search "auth" --category coding            # 按分类过滤
+```
+
+**已废弃**（请勿使用）：`spec search`、`knowhow search`、`wiki search` — 已被统一搜索替代。
+
+---
+
 ## 自动注入机制
 
 | Hook | 触发时机 | 行为 |
 |------|---------|------|
 | `spec-injector` | PreToolUse:Agent | agent 类型 → category → 加载 spec + keyword 条目 + knowhow 工具 |
-| `keyword-spec-injector` | UserPromptSubmit | prompt 关键词 → 匹配 spec-entry keywords → 注入（最多 5 条/次） |
+| `keyword-spec-injector` | UserPromptSubmit | prompt 关键词 → 匹配 spec-entry keywords → 注入（最多 5 条/次）+ KG 符号查找 |
+| `kg-sync` | UserPromptSubmit | 源文件变更 → CodeGraph 增量同步（30 秒冷却） |
+| `kg-context-injector` | PreToolUse:Agent | prompt 中的符号名 → CodeGraph 查询 → 注入调用关系和文件位置 |
 
 | Agent 类型 | 映射 Category |
 |---|---|
-| code-developer, tdd-developer | coding, learning |
-| workflow-planner | arch |
-| workflow-reviewer | review |
-| debug-explore-agent | debug |
-| test-fix-agent | coding, test |
+| code-developer, workflow-executor, universal-executor | coding, learning, ui |
+| tdd-developer, test-fix-agent | coding, test |
+| impeccable-agent, ui-design-agent | coding, ui |
+| cli-lite-planning-agent, action-planning-agent, workflow-planner | arch, coding |
+| workflow-reviewer, workflow-verifier | review, coding |
+| team-supervisor, workflow-roadmapper | arch |
+| team-worker, general-purpose | coding, learning |
+| debug-explore-agent, workflow-debugger | debug |
 
-Session 级去重：同一条目不会重复注入。
+Session 级去重：同一条目不会重复注入。所有注入使用统一 `<maestro-context>` 格式封装。
+
+---
+
+## MaestroGraph 知识图谱集成
+
+Maestro 内置 MaestroGraph 引擎（基于 web-tree-sitter WASM），提供函数级调用图、符号查询、知识跨源搜索等 24 项能力。无需安装额外依赖。
+
+```bash
+# 初始化索引
+maestro kg sync
+
+# 搜索
+maestro kg query "函数名或关键词"
+```
+
+KG 通过 Hook 自动保持新鲜：`kg-sync`（UserPromptSubmit 增量同步）+ `kg-context-injector`（Agent 启动注入）。仅在首次使用时需手动 `maestro kg sync`。
+
+### kg CLI 子命令
+
+| 子命令 | 功能 | 示例 |
+|--------|------|------|
+| `kg stats` | 图谱统计信息（节点数、边数、模块分布） | `maestro kg stats` |
+| `kg search <pattern>` | 搜索符号/函数 | `maestro kg search "UserService"` |
+| `kg context <node>` | 节点上下文（调用者、被调用者、依赖） | `maestro kg context "validateToken"` |
+| `kg query <pattern>` | 按名称/类型搜索节点 | `maestro kg query "UserService"` |
+| `kg explain <node>` | 节点详情（依赖、调用者、所在模块） | `maestro kg explain "validateToken"` |
+| `kg path <from> <to>` | 查找两节点间的调用路径 | `maestro kg path "loginController" "db.query"` |
+| `kg diff` | 对比图谱快照差异 | `maestro kg diff` |
+
+### Wiki 虚拟节点
+
+WikiIndexer 除了索引文件系统中的 spec/knowhow 文档外，还将非文件数据源适配为只读虚拟 WikiEntry 节点：
+
+| 虚拟类型 | 数据源 | 虚拟 kind 前缀 |
+|---------|--------|---------------|
+| 知识图谱节点 | `knowledge-graph.json` | `uakg-node`, `uakg-layer`, `uakg-tour` |
+| Issue 条目 | `issues.jsonl` | `issue` |
+| 会话产物 | `.workflow/scratch/` | `session-artifact` |
+
+虚拟节点与普通 wiki 条目统一出现在搜索结果和 `wiki search` 中，但为只读——不能通过 `wiki edit` 修改。
 
 ---
 
@@ -183,6 +245,14 @@ Session 级去重：同一条目不会重复注入。
 调试记录 ─────┼──→ /manage-harvest ──────────┼─→ knowhow/   ─→ wiki load → 按需
 规划文档 ─────┤    /quality-retrospective    ├─→ issues/    ─→ manage-issue → 追踪
 代码变更 ─────┘    /learn-decompose          └─→ learnings  ─→ keyword-injector → 上下文
+
+                    淘汰清理                    审计                    CodeGraph
+                    ─────                      ─────                  ─────
+specs/     ──┐                              ┌─→ kg search   ─→ 符号搜索
+knowhow/   ──┼──→ /manage-knowledge-audit ──┼─→ kg context  ─→ 调用关系
+artifacts/ ──┘    (三态: keep/deprecate/delete) └─→ kg path    ─→ 调用链追踪
+                                                             ↑ Hook 自动同步
+                                                             kg-sync (UserPromptSubmit)
 ```
 
 Progressive Fill——各阶段自动沉淀：
@@ -192,7 +262,7 @@ maestro-init    → spec-setup（骨架 + 扫描）
 maestro-analyze → 锁定决策 → arch，代码模式 → coding
 maestro-plan    → 设计约定 → coding/arch，测试策略 → test
 maestro-execute → 经验教训 → learning，根因 → debug
-maestro-verify  → 质量发现 → review
+maestro-execute → 内置验证（E2.7）→ 质量发现 → review
 ```
 
 <details>

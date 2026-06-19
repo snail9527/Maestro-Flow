@@ -13,14 +13,9 @@ allowed-tools:
   - AskUserQuestion
 ---
 <purpose>
-Generate a milestone/phase roadmap from requirements or upstream context. Produces `.workflow/roadmap.md` with Milestone > Phase hierarchy ready for maestro-analyze and maestro-plan.
+Generate milestone/phase roadmap from requirements or upstream context. Three modes: create (default), revise (`--revise`), review (`--review`). For formal spec documents, use `/maestro-blueprint`.
 
-Operation modes:
-- **Create** (default): Build roadmap from requirements or upstream context
-- **Revise** (`--revise`): Modify existing roadmap while preserving completed phase progress
-- **Review** (`--review`): Health assessment of current roadmap (read-only)
-
-For formal specification documents (Product Brief, PRD, Architecture, Epics), use `/maestro-blueprint` instead.
+Pipeline: brainstorm/blueprint/analyze → **roadmap** → analyze {phase} → plan → execute.
 </purpose>
 
 <required_reading>
@@ -36,13 +31,16 @@ For formal specification documents (Product Brief, PRD, Architecture, Epics), us
 $ARGUMENTS -- requirement text, @file reference, or upstream context source.
 
 **Flags:**
-- `-y` / `--yes`: Auto mode — skip interactive questions, use recommended defaults
-- `-c` / `--continue`: Resume from last checkpoint
-- `-m progressive|direct|auto`: Decomposition strategy (default: auto)
-- `--from <source>`: Load upstream context package (brainstorm:ID, blueprint:BLP-xxx, analyze:ANL-xxx, @file, or path). Consumes context-package.json
-- `--from-brainstorm SESSION-ID`: (backward compat alias for `--from brainstorm:ID`)
-- `--revise [instructions]`: Revise existing roadmap. If instructions provided, apply directly. If omitted, ask user. Preserves completed phase progress.
-- `--review`: Roadmap health assessment (read-only)
+
+| Flag | Effect | Default |
+|------|--------|---------|
+| `-y` / `--yes` | Auto mode — skip interactive questions, use recommended defaults | false |
+| `-c` / `--continue` | Resume from last checkpoint | false |
+| `-m progressive\|direct\|auto` | Decomposition strategy | auto |
+| `--from <source>` | Load upstream context package (brainstorm:ID, blueprint:BLP-xxx, analyze:ANL-xxx, @file, or path). Consumes context-package.json | — |
+| `--from-brainstorm SESSION-ID` | Backward compat alias for `--from brainstorm:ID` | — |
+| `--revise [instructions]` | Revise existing roadmap. If instructions provided, apply directly. If omitted, ask user. Preserves completed phase progress. | — |
+| `--review` | Roadmap health assessment (read-only) | — |
 
 **Input types:**
 - Direct text: `"Implement user authentication system with OAuth and 2FA"`
@@ -50,35 +48,22 @@ $ARGUMENTS -- requirement text, @file reference, or upstream context source.
 - Context import: `--from brainstorm:BRN-001` or `--from analyze:ANL-xxx` or `--from blueprint:BLP-xxx`
 - No args + `--revise` / `--review`: Operate on existing `.workflow/roadmap.md`
 
-**Pipeline position:**
-```
-maestro-brainstorm ─┐
-maestro-blueprint  ─┤ (optional upstream, parallel)
-maestro-analyze    ─┘ context-package.json
-        ↓
-maestro-roadmap → .workflow/roadmap.md (Milestone > Phase hierarchy)
-        ↓
-maestro-analyze {phase} → maestro-plan → maestro-execute → maestro-verify
-```
+### Pre-load
 
-### Pre-load specs
-1. **Architecture specs**: Run `maestro spec load --category arch` to load architecture constraints. Use as context for phase decomposition — ensures roadmap respects documented decisions and boundaries.
-2. Optional — proceed without if unavailable.
+1. **Specs**: `maestro spec load --category arch` — load architecture constraints for phase decomposition
+2. **Wiki search**: `maestro search "{requirement keywords}" --json` → prior knowledge
+3. All optional — proceed without if unavailable
 </context>
 
 <interview_protocol>
-Interview the user relentlessly until shared understanding is reached. Active only in interactive mode; skip when `-y/--yes`, `--revise`, `--review`, `-c/--continue`, or input is already specific (clear requirement + mode).
+Follows @~/.maestro/workflows/interview-mechanics.md standard.
 
-- One decision per turn via AskUserQuestion with 2–4 options + a (Recommended) default. The user controls termination — keep interviewing until convergence; they can interrupt naturally or via `Other` at any time.
-- Search-first when uncertain: before asking, resolve via `state.json`, existing `roadmap.md`, `project.md`, `maestro spec load`, `maestro wiki search`, Glob/Grep/Read, or — for open-ended multi-file scans — spawn `Agent(subagent_type: Explore)` / `maestro delegate ... --role explore`. Never ask what code or memory can verify; never bounce your own ambiguity back to the user — search first, then ask only what truly needs human judgment.
-- Writeback cadence: each settled decision is immediately appended/updated in the `Roadmap Decisions` section at the top of `.workflow/roadmap.md` (create the section if absent). Do NOT batch writeback to the end — partial decisions must already be on disk before the next question.
-- Walk the decision dependency tree strictly: mode → requirement scope → decomposition strategy → phase dependencies/order. Do not open the next branch until the current one is settled.
-- Scope guard: only decide the shape of the roadmap. Do not pre-resolve intra-phase task breakdown — that belongs to `plan`.
-
-Decision points: scope (MVP / complete / phased) → strategy (progressive / direct / auto) → milestone boundaries → phase dependencies and order.
-
-Exit: on consensus or explicit user signal to proceed, finalize the `Roadmap Decisions` section (rows already populated incrementally). Schema:
-`| # | Decision | Choice | Source (user / code / default) |`
+**Interaction mode**: convergent menu-driven
+**Decision tree** (strict order): mode (create / revise / review) → requirement scope (MVP / complete / phased) → decomposition strategy (progressive / direct / auto) → milestone boundaries → phase dependencies and order
+**Scope guard**: only roadmap shape; do not pre-resolve intra-phase task breakdown (belongs to plan)
+**Writeback target**: .workflow/roadmap.md "Roadmap Decisions" section (create if absent)
+**Additional skip conditions**: --revise, --review (skip to respective mode)
+**Exit condition**: on consensus or explicit user signal → finalize Roadmap Decisions section
 </interview_protocol>
 
 <execution>
@@ -91,16 +76,74 @@ Sub-modes:
 - **Revise** (`--revise`): Follow workflow roadmap.md "Mode: Revise" section
 - **Review** (`--review`): Follow workflow roadmap.md "Mode: Review" section
 
-### Next-step routing on completion
+### Phase Gates (MANDATORY, BLOCKING — Create mode)
+
+**GATE 1: Input → Decomposition**
+- REQUIRED: Requirement parsed with goal, constraints, stakeholders.
+- REQUIRED: Upstream context loaded via --from (if specified).
+- BLOCKED if missing: cannot decompose without parsed requirement.
+
+**GATE 2: Decomposition → Refinement**
+- REQUIRED: Milestones defined with deliverable targets.
+- REQUIRED: Phases defined within milestones with dependencies.
+- REQUIRED: Every Active requirement from project.md mapped to exactly one phase.
+- REQUIRED: No circular dependencies in phase ordering (E003 if detected).
+- BLOCKED if incomplete: finish milestone/phase decomposition before refinement.
+
+**GATE 3: Refinement → Completion**
+- REQUIRED: User approved roadmap (or auto-approved with -y).
+- REQUIRED: `.workflow/roadmap.md` written with Milestone > Phase hierarchy.
+- REQUIRED: Artifact registered in state.json with milestone entries.
+- BLOCKED if missing: do not report completion without written roadmap.
+
+### Artifact Verification (before completion)
+
+```
+REQUIRED_ARTIFACTS = [
+  ".workflow/roadmap.md"    // Milestone > Phase hierarchy with progress table
+]
+```
+If missing: DO NOT report completion.
+
+</execution>
+
+<completion>
+### Standalone report
+
+```
+=== ROADMAP READY ===
+Milestones: {count}
+Phases: {total_phases}
+Strategy: {progressive|direct|auto}
+Output: .workflow/roadmap.md
+--- COMPLETION STATUS ---
+Status: {DONE|DONE_WITH_CONCERNS}
+Concerns: {if any}
+```
+
+### Ralph-invoked completion
+
+End the step by calling the CLI (no text block output):
+```
+maestro ralph complete <idx> --status {STATUS} [--evidence {path}]
+```
+
+Status verdicts:
+- **DONE** — Normal completion
+- **DONE_WITH_CONCERNS** — Completed with caveats; pass `--concerns`
+- **NEEDS_RETRY** — Tooling error / transient issue; ralph will retry
+- **BLOCKED** — External hard blocker; pass `--reason`
+
+### Next-step routing
 
 | Condition | Suggestion |
 |-----------|-----------|
-| Roadmap approved, need analysis | /maestro-analyze 1 |
-| Simple project, ready to plan | /maestro-plan 1 |
-| Need UI design first | /maestro-impeccable build |
-| View project dashboard | /manage-status |
-| Need formal spec documents | /maestro-blueprint |
-</execution>
+| Roadmap approved, need analysis | `/maestro-analyze 1` |
+| Simple project, ready to plan | `/maestro-plan 1` |
+| Need UI design first | `/maestro-impeccable build` |
+| View project dashboard | `/manage-status` |
+| Need formal spec documents | `/maestro-blueprint` |
+</completion>
 
 <error_codes>
 | Code | Severity | Condition | Recovery |

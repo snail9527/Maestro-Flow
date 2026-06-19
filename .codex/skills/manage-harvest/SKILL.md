@@ -2,7 +2,7 @@
 name: manage-harvest
 description: Extract knowledge from artifacts into wiki/spec/issues
 argument-hint: "[<session-id|path>] [--to wiki|spec|issue|auto] [--source <type>] [--recent N] [--dry-run] [-y] [--prune] [--age N]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -56,17 +56,17 @@ Follow '~/.maestro/workflows/harvest.md' Stages 1–8 (standard mode) or Stage 9
 3. **Stable fragment IDs** — `HRV-{8 hex}` from `hash(source_id + content_hash)`
 4. **Never modify source artifacts** — purely extractive
 5. **Confidence filtering** — below threshold logged but not routed
-6. **Spec format enforcement** — all spec routing must use `<spec-entry>` closed-tag format with `roles`, `keywords`, `date`, `source="harvest"` attributes
+6. **Spec format enforcement** — all spec routing must use `<spec-entry>` closed-tag format with `title`, `description`, `keywords`, `date`, `source="harvest"` attributes
 
 **Routing rules:**
 - Universal design patterns → `coding` or `arch` category
 - Component-level pitfalls → `learning` category
 - Quality enforcement rules → `quality` category
 - Wiki: `maestro wiki create --type <type> --slug harvest-<source_type>-<short_id>`
-- Spec: `maestro wiki append spec-<file> --body "<content>" --keywords "<kws>"` (unified write path) or `Skill({ skill: "spec-add", args: "<category> <content>" })`
+- Spec: `maestro wiki append spec-<file> --body "<content>" --keywords "<kws>"` (unified write path) or `$spec-add "<category> <content>"`
 - Issue: append to `issues.jsonl` matching canonical schema, with `source: "harvest"` field (distinguishes from `manage-issue-discover`, which uses `source: "discover"` — required for cross-skill dedup when both write concurrently)
 
-**Next steps:** `/manage-wiki health`, `maestro wiki list --type note`, `/wiki-connect --fix`, `/wiki-digest`, `/manage-issue list --source harvest`
+**Next steps:** `$manage-wiki health`, `maestro search --type note`, `$wiki-connect --fix`, `$wiki-digest`, `$manage-issue list --source harvest`
 
 **Prune mode** (`--prune`): Classifies artifacts (active/graduated/stale/protected), graduates harvested artifacts to wiki knowhow, archives from `artifacts[]` → `artifact_archive[]`, prunes resolved entries from accumulated_context. Files on disk are never deleted. Always backs up state.json before writing.
 </execution>

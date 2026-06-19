@@ -63,10 +63,28 @@ export interface SpecAnalyticsConfig {
   retentionWeeks?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Cross-Workspace Sharing Types
+// ---------------------------------------------------------------------------
+
+export type WorkspaceShareType = 'spec' | 'knowhow' | 'domain' | 'codebase';
+
+export interface WorkspaceLink {
+  name: string;
+  path: string;
+  share: WorkspaceShareType[];
+}
+
+export interface WorkspaceConfig {
+  linked: WorkspaceLink[];
+}
+
 export interface StatuslineConfig {
   style?: string;
   theme?: string;
   nerdFont?: boolean;
+  /** 'compact' = default 2-line; 'expanded' = 3-line (model/coord/task/team + dir/tokens/ctx + workflow) */
+  layout?: 'compact' | 'expanded';
 }
 
 export interface MaestroConfig {

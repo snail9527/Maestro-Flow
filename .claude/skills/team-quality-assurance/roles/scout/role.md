@@ -37,7 +37,7 @@ Scan codebase from multiple perspectives (bug, security, test-coverage, code-qua
 
 ## Phase 3: Multi-Perspective Scan
 
-**Low complexity**: Use `mcp__ace-tool__search_context` for quick pattern-based scan.
+**Low complexity**: Use `` for quick pattern-based scan.
 
 **Medium/High complexity**: CLI fan-out -- one `maestro delegate --mode analysis` per perspective:
 

@@ -1,7 +1,5 @@
 # KnowHow Workflow
 
-Reusable knowledge capture, retrieval, and management for cross-session recovery and knowledge reuse.
-
 ## Dual Store Architecture
 
 | Store | Path | Format | Index |
@@ -93,7 +91,7 @@ Capture reusable knowledge into `.workflow/knowhow/`.
 
 ### Step 2: Generate Content by Type
 
-#### session (KNW-{YYYYMMDD}-{HHMM}.md)
+#### session (KNW-{YYYYMMDD}-{slug}.md)
 
 Extract from current conversation. Sections:
 
@@ -115,13 +113,14 @@ Extract from current conversation. Sections:
 Plan detection priority: IMPL_PLAN.md > TodoWrite > user-stated > inferred.
 Rules: VERBATIM plan, ABSOLUTE paths, decisions include reasoning.
 
-#### template (TPL-{YYYYMMDD}-{HHMM}.md)
+#### template (TPL-{YYYYMMDD}-{slug}.md)
 
 Reusable code or configuration pattern. Sections:
 
 ```markdown
 ---
 title: {descriptive name}
+description: {one-line summary for search results}
 type: template
 lang: {typescript|python|bash|yaml|...}
 tags: [{comma-separated}]
@@ -150,20 +149,14 @@ When and how to use this template.
 Additional context.
 ```
 
-**Field guide:**
-- `lang` — Programming language or config format (required)
-- `Usage` — 1-2 sentences describing when to apply
-- `Parameters` — Placeholder table (optional)
-- `Code` — The actual template, ready to copy
-- `Dependencies` — What's needed before using
-
-#### recipe (RCP-{YYYYMMDD}-{HHMM}.md)
+#### recipe (RCP-{YYYYMMDD}-{slug}.md)
 
 Step-by-step operational guide. Sections:
 
 ```markdown
 ---
 title: {goal summary}
+description: {one-line summary for search results}
 type: recipe
 tags: [{comma-separated}]
 created: {ISO timestamp}
@@ -194,20 +187,14 @@ What success looks like.
 - [[template-xxx]] — Templates used
 ```
 
-**Field guide:**
-- `Goal` — One sentence, actionable
-- `Prerequisites` — Everything needed before starting
-- `Steps` — Numbered, each step verifiable independently
-- `Expected Outcome` — Measurable result
-- `Common Pitfalls` — Known gotchas from experience
-
-#### reference (REF-{YYYYMMDD}-{HHMM}.md)
+#### reference (REF-{YYYYMMDD}-{slug}.md)
 
 External documentation digest. Sections:
 
 ```markdown
 ---
 title: {reference title}
+description: {one-line summary for search results}
 type: reference
 source: {original URL}
 tags: [{comma-separated}]
@@ -236,20 +223,14 @@ last_verified: {ISO date}
 Additional context.
 ```
 
-**Field guide:**
-- `source` — Original URL or document ID (required)
-- `Key Points` — Distilled essentials, not raw dump
-- `Applicable Scenarios` — "Use this when..."
-- `Quick Examples` — Most-used snippets first
-- `last_verified` — When the source was last checked
-
-#### decision (DCS-{YYYYMMDD}-{HHMM}.md)
+#### decision (DCS-{YYYYMMDD}-{slug}.md)
 
 Architecture Decision Record. Sections:
 
 ```markdown
 ---
 title: {decision summary}
+description: {one-line summary for search results}
 type: decision
 status: {proposed|accepted|superseded}
 tags: [{comma-separated}]
@@ -285,20 +266,14 @@ Why this choice over alternatives.
 - [[recipe-xxx]] — Implementation recipe
 ```
 
-**Field guide:**
-- `status` — proposed → accepted → superseded lifecycle
-- `Context` — Enough background for future reader (no assumed knowledge)
-- `Alternatives` — Must list at least 2 rejected options with reasons
-- `Rationale` — The "why" matters more than the "what"
-- `Consequences` — Both positive and negative; be honest about trade-offs
-
-#### tip (TIP-{YYYYMMDD}-{HHMM}.md)
+#### tip (TIP-{YYYYMMDD}-{slug}.md)
 
 Quick note. Minimal structure:
 
 ```markdown
 ---
 title: {tip summary}
+description: {one-line summary for search results}
 type: tip
 tags: [{comma-separated}]
 created: {ISO timestamp}
@@ -328,13 +303,14 @@ Tag quality rules:
 
 ### Step 4: Write File
 
-Write to `.workflow/knowhow/{PREFIX}-{YYYYMMDD}-{HHMM}.md`.
+Write to `.workflow/knowhow/{PREFIX}-{YYYYMMDD}-{slug}.md`.
 
 Frontmatter keys by type:
 
 | Field | session | template | recipe | reference | decision | tip |
 |-------|:-------:|:--------:|:------:|:---------:|:--------:|:---:|
 | title | Y | Y | Y | Y | Y | Y |
+| description | Y | Y | Y | Y | Y | Y |
 | type | Y | Y | Y | Y | Y | Y |
 | tags | Y | Y | Y | Y | Y | Y |
 | created | Y | Y | Y | Y | Y | Y |
@@ -367,7 +343,7 @@ maestro wiki list --type knowhow --role plan  # decisions only
 
 ```
 store_knowhow { operation: "search", query: "deploy" }
-store_knowhow { operation: "add", type: "template", title: "...", body: "..." }
+store_knowhow { operation: "add", type: "template", title: "...", description: "...", body: "..." }
 ```
 
 ### Type Label Reference
@@ -385,8 +361,6 @@ store_knowhow { operation: "add", type: "template", title: "...", body: "..." }
 ---
 
 ## Part D: Learning Insights Container (specs/learnings.md)
-
-A special container file at `.workflow/specs/learnings.md` holds multiple `<spec-entry>` sub-entries for atomic learning insights. This replaces the former `lessons.jsonl` approach.
 
 ### Container Format
 

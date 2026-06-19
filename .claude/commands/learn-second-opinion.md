@@ -12,12 +12,8 @@ allowed-tools:
   - AskUserQuestion
 ---
 <purpose>
-Structured second-opinion on code, decisions, or plans. Three modes:
-- **review** (default): 3 parallel agents (pragmatist, purist, strategist)
-- **challenge**: single adversarial agent — break assumptions, propose alternatives
-- **consult**: interactive Q&A — agent studies target, answers your questions
-
-Findings persist to `.workflow/specs/learnings.md` as `<spec-entry>` blocks.
+Structured second-opinion on code, decisions, or plans via three modes: review (3 parallel agents),
+challenge (adversarial), or consult (interactive Q&A). Findings persist to learnings.md.
 </purpose>
 
 <context>
@@ -33,7 +29,7 @@ $ARGUMENTS — target and optional mode flag.
 
 **Flags**: `--mode review|challenge|consult` (default: review)
 
-**Pre-load** (optional): `Skill("spec-load")` for conventions + `maestro wiki search "<target topic>"` for related entries.
+**Pre-load** (optional): `Skill("spec-load")` for conventions + `maestro search "<target topic>"` for related entries.
 
 **Output**: `.workflow/knowhow/KNW-opinion-{slug}-{YYYY-MM-DD}.md`
 </context>

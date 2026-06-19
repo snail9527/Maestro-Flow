@@ -40,6 +40,60 @@ export interface LocaleStrings {
     hubFiles: string; // "{count} files"
     hubTools: string; // "{count} tools"
 
+    // Grouped Hub
+    groupCore: string;
+    groupClaude: string;
+    groupCodex: string;
+    groupOther: string;
+    hubScope: string;
+    hubGlobal: string;
+    hubProject: string;
+    hubLastInstall: string;
+    hubExecuteInstall: string;
+    hubExportConfig: string;
+    hubImportConfig: string;
+    hubKeyHints: string;
+
+    // Hub item labels
+    hubLabelComponents: string;
+    hubLabelBackup: string;
+    hubLabelHooks: string;
+    hubLabelMcpServer: string;
+    hubLabelStatusline: string;
+    hubLabelCodexHooks: string;
+    hubLabelCodexMcp: string;
+    hubLabelAgyHooks: string;
+    hubLabelExtraMcp: string;
+
+    // Hub item details
+    hubDetailComponents: string;
+    hubDetailBackup: string;
+    hubDetailHooks: string;
+    hubDetailMcp: string;
+    hubDetailStatusline: string;
+    hubDetailCodexHooks: string;
+    hubDetailCodexMcp: string;
+    hubDetailAgyHooks: string;
+    hubDetailExtraMcp: string;
+
+    // Hooks granular
+    hooksIndividual: string;
+    hooksCustomStatus: string;
+    hooksPresetStatus: string;
+    hooksKeyHints: string;
+
+    // Confirm (new)
+    confirmReady: string;
+    confirmWillInstall: string;
+    confirmSkippedSection: string;
+    confirmKeyHints: string;
+
+    // Execution (new)
+    execTitle: string;
+
+    // Breadcrumb
+    breadcrumbBack: string;
+
     // Components
     componentsTitle: string;
     componentsNone: string;

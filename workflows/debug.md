@@ -1,13 +1,8 @@
 # Debug Workflow
 
-Debug issues using scientific method with subagent isolation. Supports three modes:
+Scientific method debugging with subagent isolation. Three modes: **Standalone** (user describes issue), **From UAT** (`--from-uat`, pre-filled symptoms), **Parallel** (`--parallel`, concurrent agents per gap cluster).
 
-1. **Standalone**: User describes issue, gather symptoms via 5 questions
-2. **From UAT**: --from-uat reads uat.md gaps as pre-filled symptoms (skip gathering). Input-only: does not write back to uat.md/test artifacts (test workflow is the sole caller and owns uat.md writes).
-3. **Parallel**: --parallel spawns one debug agent per gap cluster concurrently
-
-Output: understanding.md + evidence.ndjson per investigation.
-When root causes found, auto-updates originating uat.md with diagnosis.
+Output: `understanding.md` + `evidence.ndjson` per investigation.
 
 ---
 
@@ -43,44 +38,37 @@ All of these mean: **return to Step 3/6 evidence gathering**.
 
 ## Rationalization Table
 
-| Excuse | Why It's Wrong |
-|--------|----------------|
-| "It's probably just a typo" | Typos cause cascading failures; verify before assuming |
-| "The error message says X so it must be X" | Error messages often point to symptoms, not causes |
-| "I fixed something similar before" | Similar symptoms can have completely different root causes |
+| Excuse | Reality |
+|--------|---------|
+| "It's probably just a typo" | Verify before assuming — typos cause cascading failures |
+| "The error message says X so it must be X" | Error messages point to symptoms, not causes |
+| "I fixed something similar before" | Similar symptoms can have different root causes |
 | "The fix works in my test" | One passing test doesn't prove root cause was found |
-| "We don't have time for full investigation" | Quick fixes under pressure create more bugs than they solve |
-| "The code looks correct so it must be something else" | Reading code is not the same as tracing execution |
+| "We don't have time for full investigation" | Quick fixes create more bugs than they solve |
+| "The code looks correct" | Reading code is not tracing execution |
 | "Let me just add a try-catch/null check" | Suppressing errors hides the real problem |
-| "3 failed hypotheses, let me try a 4th guess" | After 3 failures, stop guessing — escalate (see Escalation Rule) |
+| "3 failed hypotheses, let me try a 4th" | After 3 failures, STOP — escalate |
 
 ---
 
 ## Escalation Rule — 3-Strike Architecture Check
 
-After **3 failed hypotheses** (refuted with evidence), STOP proposing more fixes:
+After **3 failed hypotheses**, STOP:
 
-1. **Summarize** all failed hypotheses and their evidence
-2. **Question architecture**: "Is the problem at a deeper level than individual code?"
-3. **Present to user** via AskUserQuestion with the summary and ask:
-   - Continue investigating with different approach?
-   - Re-examine architecture assumptions?
-   - Bring in additional context/expertise?
+1. Summarize all failed hypotheses and evidence
+2. Question architecture: "Is the problem deeper than individual code?"
+3. AskUserQuestion: Continue with different approach? / Re-examine architecture? / Bring in additional context?
 
-Do NOT propose a 4th hypothesis without user confirmation.
+NEVER propose a 4th hypothesis without user confirmation.
 
 ---
 
 ## Backward Tracing Method
 
-When investigating root cause, trace **backward** from symptom to source:
-
-1. **Find** where the incorrect value/behavior first appears
-2. **Trace backward** through the call chain — what called this? What value was passed?
-3. **Continue backward** until you find where correct data becomes incorrect
-4. **Fix at the source**, not at the symptom location
-
-Example: UI shows wrong data → API returns wrong data → service queries wrong table → fix the query, NOT the UI rendering.
+1. **Find** where incorrect value/behavior first appears
+2. **Trace backward** through call chain — what called this? What value was passed?
+3. **Continue** until you find where correct data becomes incorrect
+4. **Fix at the source**, not the symptom location
 
 ---
 
@@ -127,17 +115,16 @@ If resuming: load understanding.md + evidence.ndjson, spawn continuation agent.
 
 ```
 specs_content = maestro spec load --category debug
+→ Pass to debug agents as prior knowledge
 ```
-
-Pass to debug agents as prior knowledge (known issues, root causes, workarounds).
 
 ---
 
 ### Step 2: Load UAT Gaps (if --from-uat)
 
-Skip if --from-uat is not set. Go to Step 3 instead.
+Skip if --from-uat not set → go to Step 3.
 
-Read `{artifact_dir}/uat.md` Gaps section (artifact_dir resolved from artifact registry). For each gap:
+Read `{artifact_dir}/uat.md` Gaps section. For each gap:
 ```yaml
 - test: T-003
   truth: "User can reply to comments"
@@ -158,18 +145,15 @@ Read `{artifact_dir}/uat.md` Gaps section (artifact_dir resolved from artifact r
 | Same flow | T-001 (login) + T-002 (session) -> "auth-flow" cluster |
 | Unrelated | T-005 (nav color) -> standalone "nav-styling" cluster |
 
-**Extract issue references for context enrichment:** For each gap with an `issue_id`, look up the matching issue in `.workflow/issues/issues.jsonl` and attach `issue_context` (severity, feedback, fix_direction, context) to the gap. Pass to debug agent prompts for richer diagnosis.
+**Issue enrichment:** For each gap with `issue_id`, look up in `.workflow/issues/issues.jsonl` and attach `issue_context` to the gap.
 
-If --parallel is set: go to Step 5: Spawn Parallel Debuggers.
-If --parallel is not set: investigate clusters sequentially (Step 6: Spawn Single Debugger per cluster).
+If `--parallel`: → Step 5. Else: → Step 6 (sequential).
 
 ---
 
 ### Step 3: Gather Symptoms (standalone mode only)
 
-Skip if --from-uat is set.
-
-Generate a slug from issue description (lowercase, hyphens, max 40 chars).
+Skip if `--from-uat`. Generate slug from issue description (lowercase, hyphens, max 40 chars).
 
 Ask 5 questions via AskUserQuestion:
 1. "What should happen? (expected behavior)"
@@ -178,14 +162,9 @@ Ask 5 questions via AskUserQuestion:
 4. "When did this start? Did it ever work?"
 5. "How do you trigger this? (reproduction steps)"
 
-Also gather automated context:
-```bash
-git log --oneline -10 2>/dev/null
-git diff --stat HEAD~3 2>/dev/null
-```
+Also gather: `git log --oneline -10`, `git diff --stat HEAD~3`.
 
-Store all responses. Confirm: "Symptoms gathered. Starting investigation..."
-Create debug session directory and proceed to Step 6.
+Store responses → create debug session directory → Step 6.
 
 ---
 
@@ -193,12 +172,8 @@ Create debug session directory and proceed to Step 6.
 
 | Mode | Directory |
 |------|-----------|
-| Phase-scoped (from UAT) | `{ARTIFACT_DIR}/.debug/{gap-slug}/` (ARTIFACT_DIR resolved from artifact registry) |
+| Phase-scoped (from UAT) | `{ARTIFACT_DIR}/.debug/{gap-slug}/` |
 | Standalone | `.workflow/scratch/{YYYYMMDD}-debug-{slug}/` |
-
-Resolve `DEBUG_DIR` from artifact registry:
-- Phase-scoped: look up phase in `.workflow/state.json` artifacts (type=execute), set `DEBUG_DIR = ".workflow/{art.path}/.debug/{gap-slug}/"`. Error if not found.
-- Standalone: `DEBUG_DIR = ".workflow/scratch/{YYYYMMDD}-debug-{slug}/"`
 
 Create the directory.
 
@@ -206,20 +181,16 @@ Create the directory.
 
 ### Step 5: Spawn Parallel Debug Agents
 
-For each cluster, spawn concurrently as general-purpose agent (`run_in_background: false`):
+For each cluster, spawn concurrently (`run_in_background: false`):
 
 - **Input**: cluster name, phase, all gaps (test_id, truth, reason, severity). Mode: `symptoms_prefilled`.
-- **Process**: read source files, form 2-3 hypotheses per gap ranked by likelihood, search code for evidence, log each as NDJSON line, confirm/refute.
-- **Output per gap**: `root_cause`, `fix_direction`, `affected_files` (file:line), `confidence` (multi-factor; also include legacy `confidence_level`: high/medium/low for backward compat), `evidence` summary.
+- **Process**: form 2-3 hypotheses per gap, search code for evidence, log NDJSON, confirm/refute.
+- **Output per gap**: `root_cause`, `fix_direction`, `affected_files` (file:line), `confidence` (multi-factor + legacy `confidence_level`), `evidence` summary.
 - **Files**: `{debug_dir}/evidence-{cluster_slug}.ndjson`, `{debug_dir}/understanding-{cluster_slug}.md`
-
-All agents run concurrently. Collect all results.
 
 ---
 
 ### Step 5.5: CLI Supplementary Evidence Gathering (optional)
-
-**Purpose:** Use external CLI tool for broad codebase evidence collection before spawning debug agents. Provides agents with richer context without consuming their token budget on exploration.
 
 **Skip if** no enabled CLI tools or standalone mode with minimal context.
 
@@ -254,27 +225,18 @@ Pass cli_evidence as supplementary_context to debug agent prompts in Step 5/6
 
 ### Step 6: Spawn Single Debug Agent (sequential mode)
 
-Spawn general-purpose agent (`run_in_background: false`) with:
+Spawn agent (`run_in_background: false`):
 
-- **Input**: slug, description, symptoms (expected, actual, errors, reproduction, timeline). `symptoms_prefilled: {true if from UAT}`, goal: `find_and_fix`.
-- **Process**: form hypotheses ranked by likelihood, test each (design test, execute, log NDJSON evidence, update understanding.md).
-- **Return one of**: `## ROOT CAUSE FOUND` (+ cause, evidence, fix), `## CHECKPOINT REACHED` (+ what's needed from user), `## INVESTIGATION INCONCLUSIVE` (+ what was checked/eliminated).
+- **Input**: slug, description, symptoms. `symptoms_prefilled: {true if from UAT}`, goal: `find_and_fix`.
+- **Process**: form hypotheses, test each, log NDJSON evidence, update understanding.md.
+- **Return**: `## ROOT CAUSE FOUND` | `## CHECKPOINT REACHED` | `## INVESTIGATION INCONCLUSIVE`
 - **Files**: `{$DEBUG_DIR}/understanding.md`, `{$DEBUG_DIR}/evidence.ndjson`
-
-Handle result based on agent output type.
 
 ---
 
 ### Step 7: Collect and Unify Results
 
-For each agent result, extract:
-- root_cause per gap
-- fix_direction per gap
-- affected_files per gap
-- confidence (multi-factor, see 7.1)
-- evidence summary
-
-Build unified diagnosis:
+Build unified diagnosis from all agent results:
 ```json
 {
   "session_id": "{debug session ID}",
@@ -307,19 +269,15 @@ Readiness Gate (blocks Step 9): evidence_completeness ≥ 40% | pressure pass do
 
 ### Step 7.1: Update Issues with Diagnosis
 
-For each diagnosed gap with an `issue_id`, update the corresponding issue in `.workflow/issues/issues.jsonl`:
-- Set `status: "diagnosed"`, `context.suggested_fix: fix_direction`, `context.notes: root_cause`, `updated_at: now()`
+For each diagnosed gap with `issue_id`, update in `.workflow/issues/issues.jsonl`:
+- Set `status: "diagnosed"`, `context.suggested_fix: fix_direction`, `context.notes: root_cause`
 - Append to `issue_history`: `{ from: previous_status, to: "diagnosed", changed_at: now(), actor: "debug-agent" }`
-
-Display: "Updated {count} issues with diagnosis results"
 
 ---
 
 ### Step 8: Update UAT (if --from-uat)
 
-Skip if standalone mode.
-
-For each diagnosed gap, update the uat.md Gaps section:
+Skip if standalone. For each diagnosed gap, update uat.md Gaps:
 ```yaml
 - test: T-003
   truth: "User can reply to comments"
@@ -331,13 +289,9 @@ For each diagnosed gap, update the uat.md Gaps section:
   affected_files: ["src/components/Comments.tsx:42", "src/api/comments.ts:78"]
 ```
 
-This closes the UAT -> debug feedback loop.
-
 ---
 
 ### Step 9: Handle Root Cause Found
-
-Display root cause, evidence, and fix recommendation.
 
 ```
 ------------------------------------------------------------
@@ -364,26 +318,19 @@ Options:
 
 ### Step 10: Handle Checkpoint
 
-Parse checkpoint type and details. Present to user via AskUserQuestion.
-If user provides input: spawn continuation agent with prior state + user response.
-If user wants to pause: save state, exit.
+Present checkpoint to user via AskUserQuestion. Input → spawn continuation agent. Pause → save state, exit.
 
 ---
 
 ### Step 11: Handle Inconclusive
 
-Display what was checked and eliminated. Offer:
-1. Continue investigating (fresh agent with prior state)
-2. Add more context (gather additional symptoms)
-3. Manual investigation (pause session)
+Display what was checked/eliminated. Offer: 1) Continue (fresh agent with prior state) 2) Add context 3) Manual investigation.
 
 ---
 
 ### Step 12: Spawn Continuation Agent
 
-Load prior state (understanding.md + evidence.ndjson).
-Build continuation prompt with user's checkpoint response.
-Handle return the same way (root cause / checkpoint / inconclusive).
+Load prior state (understanding.md + evidence.ndjson) + user checkpoint response. Handle return same as Step 6.
 
 ---
 
@@ -421,13 +368,11 @@ Next steps:
 
 ## Evidence Format
 
-**evidence.ndjson -- one JSON object per line:**
+**evidence.ndjson** — one JSON object per line, append-only:
 
 ```json
 {"timestamp":"2026-03-14T10:30:00+08:00","hypothesis":"JWT token not refreshed on 401","action":"grep for 401 handler","result":"Found handler but no refresh call","conclusion":"confirmed"}
 ```
-
-Each line is a self-contained investigation step. Append-only.
 
 ---
 

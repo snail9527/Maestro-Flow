@@ -12,6 +12,7 @@ export function getCategoryIcon(categoryId: string): string {
     spec: '📋',
     quality: '✅',
     manage: '⚙️',
+    odyssey: '🏔️',
     team: '👥',
     learn: '📖',
     wiki: '🗺️',

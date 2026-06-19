@@ -1,6 +1,6 @@
 {
   "name": "maestro-flow",
-  "version": "0.4.19",
+  "version": "0.5.33",
   "description": "Workflow orchestration CLI with MCP endpoint support and extensible architecture",
   "type": "module",
   "imports": {
@@ -40,7 +40,7 @@
     "dashboard/package.json"
   ],
   "scripts": {
-    "build": "cd dashboard && npx tsc -p tsconfig.node.json && cd .. && tsc && node -e \"const fs=require('fs');const p=require('path');const s='src/tools/impeccable/live/static',d='dist/src/tools/impeccable/live/static';if(fs.existsSync(s)){fs.mkdirSync(d,{recursive:true});for(const f of fs.readdirSync(s)){fs.copyFileSync(p.join(s,f),p.join(d,f))}}\"",
+    "build": "cd dashboard && npx tsc -p tsconfig.node.json && cd .. && tsc && node -e \"const fs=require('fs');const p=require('path');const s='src/tools/impeccable/live/static',d='dist/src/tools/impeccable/live/static';if(fs.existsSync(s)){fs.mkdirSync(d,{recursive:true});for(const f of fs.readdirSync(s)){fs.copyFileSync(p.join(s,f),p.join(d,f))}}\" && node -e \"const fs=require('fs');const p=require('path');for(const [s,d] of [['src/graph/db/schema.sql','dist/src/graph/db/schema.sql'],['src/graph/kg/schema.sql','dist/src/graph/kg/schema.sql']]){if(fs.existsSync(s)){fs.mkdirSync(p.dirname(d),{recursive:true});fs.copyFileSync(s,d)}}\"",
     "dev": "tsc --watch",
     "start": "node bin/maestro.js",
     "mcp": "node bin/maestro-mcp.js",
@@ -59,10 +59,12 @@
     "@inquirer/prompts": "^8.3.2",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "argon2": "^0.44.0",
+    "better-sqlite3": "^12.10.0",
     "chokidar": "^4.0.0",
     "commander": "^13.1.0",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.7.0",
+    "ignore": "^7.0.5",
     "ink": "^6.0.0",
     "ink-big-text": "^2.0.0",
     "ink-gradient": "^4.0.0",
@@ -71,10 +73,13 @@
     "node-cron": "^4.2.1",
     "pg": "^8.20.0",
     "react": "^19.0.0",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.25.3",
     "ws": "^8.19.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.2.14",

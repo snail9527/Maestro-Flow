@@ -231,11 +231,14 @@ When `--tdd` is active:
 
 **Purpose:** Generate the execution plan.
 
-**Rule:** Main flow MUST NOT create/modify TASK files. All planning delegated to planner agent. Upstream analyze results (conclusions.json / implementation_scope) MUST be passed into planner spawn as `explorationContext` in the same step.
+**Rules:**
+- Main flow **MUST** spawn a planner agent (Agent tool) for P3 — inline planning is FORBIDDEN
+- Agent produces both `plan.json` and `.task/TASK-{NNN}.json` — main flow MUST NOT create/modify these files
+- Upstream analyze results (conclusions.json / implementation_scope) MUST be passed into planner spawn as `explorationContext` in the same step
 
 ### Standard Mode (default)
 
-Spawn `workflow-planner` agent with: context.md, spec-ref, doc-index.json, explorationContext (incl. implementationScope from P1 Step 5), clarificationContext, phase goal + success_criteria, templates (plan.json, task.json).
+MUST spawn `workflow-planner` agent with: context.md, spec-ref, doc-index.json, explorationContext (incl. implementationScope from P1 Step 5), clarificationContext, phase goal + success_criteria, templates (plan.json, task.json).
 
 **Task count guard**: Before spawning, assess scope complexity:
 - Single feature / simple change → expect **1-2 tasks** max
@@ -293,12 +296,12 @@ Every TASK-*.json MUST include these fields — they are NOT optional:
 
 - Pre-allocate TASK ID ranges per planner (2-5 planners based on scope): TASK-001..010, TASK-011..020, etc.
 - Create `plan-note.md` for coordination (shared context, ID ranges, no-overlap rules)
-- Spawn N `workflow-collab-planner` agents in parallel, each writing `.task/TASK-{NNN}.json` within assigned range
+- MUST spawn N `workflow-collab-planner` agents in parallel, each writing `.task/TASK-{NNN}.json` within assigned range
 - Merge: collect all task files, build unified plan.json with merged waves, resolve cross-planner dependencies
 
 ### Gap Mode (`--gaps`)
 
-Spawn `workflow-planner` agent with: explorationContext (gap list from P1 Step 7), spec-ref, doc-index.json, phase goal + success_criteria, templates, mode = `gap-fix`.
+MUST spawn `workflow-planner` agent with: explorationContext (gap list from P1 Step 7), spec-ref, doc-index.json, phase goal + success_criteria, templates, mode = `gap-fix`.
 
 Planner: for each gap emit one task — `type: "fix"`, `description`, `action` (concrete fix_direction), `read_first` (affected files), `convergence.criteria` (grep-verifiable), `issue_id` (if source == "issue"); assign IDs and waves; build plan.json.
 

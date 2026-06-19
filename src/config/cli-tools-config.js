@@ -46,4 +46,30 @@ export function selectTool(name, config) {
     }
     return undefined;
 }
+/**
+ * Build proxy environment variable overrides for a specific tool.
+ * Returns an empty object when proxy is disabled globally or for the tool.
+ */
+export function resolveProxyEnv(config, toolName) {
+    const proxy = config.proxy;
+    if (!proxy?.enabled) return {};
+    const toolEntry = config.tools?.[toolName];
+    if (toolEntry?.proxy === false) return {};
+    const env = {};
+    const httpUrl = proxy.httpProxy;
+    const httpsUrl = proxy.httpsProxy ?? httpUrl;
+    if (httpUrl) {
+        env.HTTP_PROXY = httpUrl;
+        env.http_proxy = httpUrl;
+    }
+    if (httpsUrl) {
+        env.HTTPS_PROXY = httpsUrl;
+        env.https_proxy = httpsUrl;
+    }
+    if (proxy.noProxy) {
+        env.NO_PROXY = proxy.noProxy;
+        env.no_proxy = proxy.noProxy;
+    }
+    return env;
+}
 //# sourceMappingURL=cli-tools-config.js.map

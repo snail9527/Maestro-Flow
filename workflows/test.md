@@ -1,44 +1,27 @@
 # Test Workflow (UAT)
 
-Validate built features through conversational UAT testing with persistent state, auto-diagnosis via parallel debug agents, and gap-fix closure loop.
+Conversational UAT testing with persistent state, auto-diagnosis, and gap-fix closure loop.
 
-User tests, Claude records. One test at a time. Plain text responses.
-Severity inferred from natural language -- never ask "how severe is this?"
+**Core**: Show expected behavior, ask if reality matches. One test at a time.
+- "yes" / "y" / "next" / empty / "pass" → pass
+- "skip" / "can't test" / "n/a" → skipped
+- Anything else → logged as issue, severity auto-inferred
 
-**Philosophy: Show expected, ask if reality matches.**
-
-Claude presents what SHOULD happen. User confirms or describes what's different.
-- "yes" / "y" / "next" / empty / "pass" -> pass
-- "skip" / "can't test" / "n/a" -> skipped
-- Anything else -> logged as issue, severity inferred
-
-No Pass/Fail buttons. No severity questions. Just: "Here's what should happen. Does it?"
+NEVER ask "how severe is this?"
 
 ---
 
 ### Step 1: Resolve Target
 
-Determine test target from $ARGUMENTS:
+| Input | Action |
+|-------|--------|
+| Phase number (e.g., "3") | `TARGET_TYPE=phase`, resolve from `state.json` artifacts |
+| Scratch task ID | `TARGET_TYPE=scratch`, `SCRATCH_DIR=.workflow/scratch/{id}/` |
+| Nothing | Check active UAT sessions (Step 2), else prompt user |
 
-**If phase number provided** (e.g., "3"):
-- Set `$TARGET_TYPE = "phase"`
-- Resolve phase dir: look up `phaseNum` in `.workflow/state.json` artifacts (type=execute), derive `PHASE_DIR = ".workflow/" + art.path`. Error if not found.
-- Load `$PHASE_DIR/index.json` for context
+**Flags:** `--smoke` (cold-start smoke tests before UAT), `--auto-fix` (auto gap-fix loop on failures)
 
-**If scratch task ID provided:**
-- Set `$TARGET_TYPE = "scratch"`
-- Set `$SCRATCH_DIR = ".workflow/scratch/{id}/"`
-- Load `$SCRATCH_DIR/index.json` for context
-
-**If nothing provided:**
-- Check for active UAT sessions (see Step 2)
-- If none found, prompt user for phase number or scratch task
-
-**Flags:**
-- `--smoke` -- Run cold-start smoke tests before UAT
-- `--auto-fix` -- Auto-trigger gap-fix loop on failures
-
-Validate target exists and has been verified (verification.json present). (E002)
+Validate target exists and has verification.json (E002).
 
 ---
 
@@ -100,18 +83,9 @@ If any smoke test fails: abort UAT, report as blocker, suggest Skill({ skill: "q
 
 ### Step 4: Load Verification Context
 
-Read from target directory:
-- verification.json -- must_haves with truth/artifact/wiring status
-- validation.json -- requirement-to-test mapping
-- index.json -- success_criteria
-- plan.json -- task overview
-- All `.summaries/TASK-*.md` -- execution results
+Read from target directory: `verification.json`, `validation.json`, `index.json`, `plan.json`, `.summaries/TASK-*.md`.
 
-```bash
-ls "$OUTPUT_DIR/.summaries/"*summary*.md 2>/dev/null
-```
-
-Build testable list: user-observable outcomes from success_criteria + must_haves + task accomplishments.
+Build testable list from success_criteria + must_haves + task accomplishments (user-observable outcomes only).
 
 ---
 
@@ -141,16 +115,15 @@ Write test-plan.json to `.tests/`:
 mkdir -p "$OUTPUT_DIR/.tests"
 ```
 
-Focus on USER-OBSERVABLE outcomes, not implementation details.
 Skip internal/non-observable items (refactors, type changes).
 
 ---
 
 ### Step 6: Create UAT File
 
-**Archive previous UAT artifacts** before writing: if `$OUTPUT_DIR/uat.md` exists, move it to `$OUTPUT_DIR/.history/uat-{YYYY-MM-DDTHH-mm-ss}.md`.
+Archive existing `uat.md` → `$OUTPUT_DIR/.history/uat-{YYYY-MM-DDTHH-mm-ss}.md`.
 
-Build test list from test-plan.json. Create file at `$OUTPUT_DIR/uat.md`:
+Create `$OUTPUT_DIR/uat.md`:
 
 ```markdown
 ---
@@ -198,15 +171,11 @@ skipped: 0
 [none yet]
 ```
 
-Proceed to Step 7.
+→ Step 7.
 
 ---
 
 ### Step 7: Present Test
-
-Present current test to user (one at a time):
-
-Read Current Test section from uat.md.
 
 Display:
 
@@ -223,21 +192,17 @@ Expected behavior:
 ------------------------------------------------------------
 ```
 
-Wait for user response (plain text, no AskUserQuestion).
+Wait for user response (plain text).
 
 ---
 
 ### Step 8: Process Response
 
-**If response indicates pass:**
-- Empty response, "yes", "y", "ok", "pass", "next"
-
-**If response indicates skip:**
-- "skip", "can't test", "n/a"
-
-**If response is anything else (issue):**
-- Treat as issue description
-- Infer severity from description (see Severity Inference section)
+| Response | Action |
+|----------|--------|
+| empty / "yes" / "y" / "ok" / "pass" / "next" | Pass |
+| "skip" / "can't test" / "n/a" | Skipped |
+| Anything else | Issue (severity auto-inferred) |
 
 For issues, update Tests section:
 ```yaml
@@ -260,38 +225,23 @@ Append to Gaps section:
 
 **Auto-create Issue from UAT Gap:**
 
-When result is "issue", create an issue in `.workflow/issues/issues.jsonl`:
-- **ID**: `ISS-{YYYYMMDD}-{NNN}` (auto-increment per day from existing entries)
-- **Fields**: `id`, `title` ("UAT: {test.name} - {response}" truncated 100 chars), `status: "registered"`, `priority` (from severity), `severity`, `source: "uat"`, `phase_ref` (if phase-scoped), `gap_ref: test.id`, `description` (expected vs reported), `fix_direction: ""`, `context` (with requirement_ref), `tags: ["uat"]`, `affected_components: []`, `feedback: []`, `issue_history: []`, timestamps, `resolved_at: null`, `resolution: null`
-- Back-reference: set `gap.issue_id = issue_id` in the gap YAML entry
+Append to `.workflow/issues/issues.jsonl`: `ISS-{YYYYMMDD}-{NNN}`, title "UAT: {test.name} - {response}" (max 100 chars), `source: "uat"`, severity/priority from inference. Back-reference: set `gap.issue_id` in gap YAML.
 
-**Batched writes for efficiency:**
-Keep results in memory. Write to file only when:
-1. **Issue found** -- Preserve the problem immediately
-2. **Session complete** -- Final write before artifacts
-3. **Checkpoint** -- Every 5 passed tests (safety net for context reset)
+**Write triggers:** 1) Issue found 2) Session complete 3) Every 5 passed tests (checkpoint).
 
-If more tests remain -> Update Current Test, go to Step 7
-If no more tests -> Go to Step 10
+More tests → Step 7. No more → Step 10.
 
 ---
 
 ### Step 9: Resume From File
 
-Read the full uat.md file.
-Find first test with `result: [pending]`.
-
-Announce progress and continue from pending test.
-Update Current Test section with the pending test.
-Proceed to Step 7.
+Read uat.md → find first `result: [pending]` → update Current Test → Step 7.
 
 ---
 
 ### Step 10: Complete Session
 
-Update uat.md frontmatter: status -> "complete", updated timestamp.
-
-**Archive previous test result artifacts** before writing: if `test-results.json` or `coverage-report.json` exist in `$OUTPUT_DIR/.tests/`, move them to `$OUTPUT_DIR/.history/{name}-{YYYY-MM-DDTHH-mm-ss}.{ext}`.
+Update uat.md: `status: complete`. Archive existing test artifacts → `.history/`.
 
 Write `.tests/test-results.json`:
 ```json
@@ -316,41 +266,17 @@ Write `.tests/coverage-report.json`:
 }
 ```
 
-Update index.json with uat results:
-```json
-{
-  "uat": {
-    "status": "passed|gaps_found",
-    "test_count": N,
-    "passed": N,
-    "gaps": [...]
-  }
-}
-```
+Update index.json with uat results (`status`, `test_count`, `passed`, `gaps`).
 
-If issues == 0 -> go to Step 13 (report, all pass).
-If issues > 0 -> go to Step 11.
+issues == 0 → Step 13. issues > 0 → Step 11.
 
 ---
 
 ### Step 11: Auto-Diagnose
 
-**Spawn parallel debug agents for gap clusters.**
-
-1. **Cluster related gaps**: Group issues by affected component/area.
-   - Same file/module -> one cluster
-   - Same feature/flow -> one cluster
-   - Unrelated -> separate clusters
-
-2. **Spawn one debug agent per cluster** (parallel):
-
-For each cluster, spawn a general-purpose agent with pre-filled symptoms (test ID, expected, reported, severity). Agent investigates source files and returns per gap: `root_cause`, `fix_direction`, `affected_files`, `evidence` (file:line refs). Mode: `symptoms_prefilled`, goal: `find_root_cause`. `run_in_background: false`.
-
-3. **Collect results** from all agents.
-
-**Pass issue_ids to debug context:** gather `issue_id` from each gap in the cluster and include in agent prompt so debug agents can reference/update corresponding issues.
-
-4. **Update uat.md** gaps with diagnosis:
+1. **Cluster gaps** by component/area (same file/module → one cluster, same flow → one cluster)
+2. **Spawn one debug agent per cluster** (parallel, `run_in_background: false`): pre-filled symptoms, `goal: find_root_cause`. Include `issue_id` refs.
+3. **Collect results**, update uat.md gaps:
 ```yaml
 - test: {N}
   truth: "..."
@@ -362,17 +288,11 @@ For each cluster, spawn a general-purpose agent with pre-filled symptoms (test I
   affected_files: ["{file1}", "{file2}"]
 ```
 
-Proceed to Step 12.
-
 ---
 
 ### Step 12: Gap Closure Decision
 
-If AUTO_FIX is set:
-- Skip user prompt, go directly to gap-fix loop.
-
-If AUTO_FIX is not set:
-- Present diagnosis summary and offer options:
+`AUTO_FIX` set → skip prompt, go to gap-fix loop. Otherwise present:
 
 ```
 ### Diagnosis Complete
@@ -396,23 +316,15 @@ Options:
 | 3 / "plan" | Suggest Skill({ skill: "maestro-plan", args: "{phase} --gaps" }) |
 | 4 / "manual" | Done, report results |
 
-**Gap-fix closure loop:**
+**Gap-fix closure loop** (max 2 iterations):
 
-Execute the loop: plan --gaps -> execute -> re-verify.
+1. `maestro-plan {phase} --gaps` → fix tasks
+2. `maestro-execute {phase}` → execute fixes
+3. `maestro-execute {phase}` → re-verify
 
-1. Run Skill({ skill: "maestro-plan", args: "{phase} --gaps" }) -- generates fix tasks from gaps
-2. Run Skill({ skill: "maestro-execute", args: "{phase}" }) -- executes fix tasks
-3. Run Skill({ skill: "maestro-verify", args: "{phase}" }) -- re-verify
+Issue lifecycle: `registered` → `planning` → `executing` → `completed` | `failed`.
 
-If re-verify passes: update uat.md gaps as resolved, report success.
-If re-verify still has gaps: report remaining gaps, suggest manual intervention.
-
-**Issue lifecycle updates during gap-fix loop:**
-- Before plan --gaps: transition issues `registered` -> `planning`
-- Before execute: transition `planning` -> `executing`
-- After re-verify: resolved gaps -> `completed` (with resolution "auto-fixed via gap-fix loop"), unresolved -> `failed`
-
-**Loop limit**: Maximum 2 iterations to prevent infinite loops.
+Pass → update uat.md gaps as resolved. Still gaps → report remaining, suggest manual intervention.
 
 ---
 
@@ -463,8 +375,6 @@ Next steps:
 
 ## Severity Inference
 
-Infer severity from user's natural language:
-
 | User says | Infer |
 |-----------|-------|
 | "crashes", "error", "exception", "fails completely", "can't use" | blocker |
@@ -472,4 +382,4 @@ Infer severity from user's natural language:
 | "works but...", "slow", "weird", "minor issue", "inconsistent" | minor |
 | "color", "spacing", "alignment", "looks off", "typo" | cosmetic |
 
-Default to **major** if unclear. Never ask "how severe is this?" -- just infer and move on.
+Default: **major**. NEVER ask severity — infer and move on.

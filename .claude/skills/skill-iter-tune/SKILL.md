@@ -1,6 +1,6 @@
 ---
 name: skill-iter-tune
-description: Iterative skill tuning via execute-evaluate-improve feedback loop. Uses ccw cli Claude to execute skill, Gemini to evaluate quality, and Agent to apply improvements. Iterates until quality threshold or max iterations. Triggers on "skill iter tune", "iterative skill tuning", "tune skill".
+description: Iterative skill tuning via execute-evaluate-improve feedback loop. Uses maestro delegate Claude to execute skill, Gemini to evaluate quality, and Agent to apply improvements. Iterates until quality threshold or max iterations. Triggers on "skill iter tune", "iterative skill tuning", "tune skill".
 allowed-tools: Skill, Agent, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Read, Write, Edit, Bash, Glob, Grep
 ---
 
@@ -37,11 +37,11 @@ Iterative skill refinement through execute-evaluate-improve feedback loops. Each
 Chain Mode (execution_mode === "chain"):
 
 Phase 2 runs per-skill in chain_order:
-  Skill A → ccw cli → artifacts/skill-A/
+  Skill A → maestro delegate → artifacts/skill-A/
        ↓ (artifacts as input)
-  Skill B → ccw cli → artifacts/skill-B/
+  Skill B → maestro delegate → artifacts/skill-B/
        ↓ (artifacts as input)
-  Skill C → ccw cli → artifacts/skill-C/
+  Skill C → maestro delegate → artifacts/skill-C/
 
 Phase 3 evaluates entire chain output + per-skill scores
 Phase 4 improves weakest skill(s) in chain
@@ -164,14 +164,14 @@ while (true) {
 
   // === Phase 2: Execute ===
   // Read: phases/02-execute.md
-  // Single mode: one ccw cli call for all skills
-  // Chain mode: sequential ccw cli per skill in chain_order, passing artifacts
-  // Snapshot skill → construct prompt → ccw cli --tool claude --mode write
+  // Single mode: one maestro delegate call for all skills
+  // Chain mode: sequential maestro delegate per skill in chain_order, passing artifacts
+  // Snapshot skill → construct prompt → maestro delegate --to claude --mode write
   // Collect artifacts
 
   // === Phase 3: Evaluate ===
   // Read: phases/03-evaluate.md
-  // Construct eval prompt → ccw cli --tool gemini --mode analysis
+  // Construct eval prompt → maestro delegate --to gemini --mode analysis
   // Parse score → write iteration-N-eval.md → check termination
 
   // Check termination
@@ -194,7 +194,7 @@ Read and execute: `Ref: phases/02-execute.md`
 
 - Snapshot skill → `iteration-{N}/skill-snapshot/`
 - Build execution prompt from skill content + test scenario
-- Execute: `ccw cli -p "..." --tool claude --mode write --cd "${iterDir}/artifacts"`
+- Execute: `maestro delegate "..." --to claude --mode write --cd "${iterDir}/artifacts"`
 - Collect artifacts
 
 ### Phase 3: Evaluate Quality (per iteration)
@@ -202,7 +202,7 @@ Read and execute: `Ref: phases/02-execute.md`
 Read and execute: `Ref: phases/03-evaluate.md`
 
 - Build evaluation prompt with skill + artifacts + criteria + history
-- Execute: `ccw cli -p "..." --tool gemini --mode analysis`
+- Execute: `maestro delegate "..." --to gemini --mode analysis`
 - Parse 5-dimension score (Clarity, Completeness, Correctness, Effectiveness, Efficiency)
 - Write `iteration-{N}-eval.md`
 - Check termination: score >= threshold | iter >= max | convergence | error limit
@@ -229,8 +229,8 @@ Read and execute: `Ref: phases/05-report.md`
 | Phase | Document | Purpose | Compact |
 |-------|----------|---------|---------|
 | 1 | [phases/01-setup.md](phases/01-setup.md) | Initialize workspace and state | TodoWrite 驱动 |
-| 2 | [phases/02-execute.md](phases/02-execute.md) | Execute skill via ccw cli Claude | TodoWrite 驱动 + 🔄 sentinel |
-| 3 | [phases/03-evaluate.md](phases/03-evaluate.md) | Evaluate via ccw cli Gemini | TodoWrite 驱动 + 🔄 sentinel |
+| 2 | [phases/02-execute.md](phases/02-execute.md) | Execute skill via maestro delegate Claude | TodoWrite 驱动 + 🔄 sentinel |
+| 3 | [phases/03-evaluate.md](phases/03-evaluate.md) | Evaluate via maestro delegate Gemini | TodoWrite 驱动 + 🔄 sentinel |
 | 4 | [phases/04-improve.md](phases/04-improve.md) | Apply improvements via Agent | TodoWrite 驱动 + 🔄 sentinel |
 | 5 | [phases/05-report.md](phases/05-report.md) | Generate final report | TodoWrite 驱动 |
 
@@ -244,7 +244,7 @@ Read and execute: `Ref: phases/05-report.md`
 1. **Start Immediately**: First action is preference collection → Phase 1 setup
 2. **Progressive Loading**: Read phase doc ONLY when that phase is about to execute
 3. **Snapshot Before Execute**: Always snapshot skill state before each iteration
-4. **Background CLI**: ccw cli runs in background, wait for hook callback before proceeding
+4. **Background CLI**: maestro delegate runs in background, wait for hook callback before proceeding
 5. **Parse Every Output**: Extract structured JSON from CLI outputs for state updates
 6. **DO NOT STOP**: Continuous iteration until termination condition met
 7. **Single State Source**: `iteration-state.json` is the only source of truth
@@ -258,10 +258,10 @@ User Input (skill paths + test scenario)
 Phase 1: Setup
     ↓ workDir, targetSkills[], testScenario, iteration-state.json
     ↓
-┌─→ Phase 2: Execute (ccw cli claude)
+┌─→ Phase 2: Execute (maestro delegate claude)
 │   ↓ artifacts/ (skill execution output)
 │   ↓
-│   Phase 3: Evaluate (ccw cli gemini)
+│   Phase 3: Evaluate (maestro delegate gemini)
 │   ↓ score, dimensions[], suggestions[], iteration-N-eval.md
 │   ↓
 │   [Terminate?]─── YES ──→ Phase 5: Report → final-report.md

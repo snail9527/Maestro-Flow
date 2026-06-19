@@ -14,7 +14,7 @@ Maestro 工作流中用于维护、发布和规范管理的辅助命令。
 
 ### 使用场景
 
-- `/maestro-verify` 暴露了命令步骤缺失
+- `/maestro-execute` 内置验证门控（E2.7）暴露了命令步骤缺失
 - `/quality-review` 发现流程层面的不足
 - 工作流执行偏差，根因指向命令定义不完整
 - Issue 追踪显示同类问题反复出现
@@ -114,7 +114,66 @@ maestro wiki list --type spec --json    # 列出所有 spec 条目
 
 ---
 
-## 四、maestro-milestone-release — 里程碑发布
+## 四、manage-knowledge-audit — 知识审计淘汰
+
+审计 spec / knowhow / artifact 三存储，识别矛盾、过期、孤立和元数据质量问题。与 `/manage-harvest`（写入/提取）对称——harvest 积累知识，audit 清理知识。
+
+### 审计场景（8 类 28 子场景）
+
+| 大类 | 示例子场景 |
+|------|-----------|
+| 显式矛盾 | 同一 topic 的两条 spec 条目结论相反 |
+| 隐式矛盾 | 不同 category 的条目对同一实践给出冲突建议 |
+| 过期条目 | 关联代码已重构，条目内容不再适用 |
+| 元数据质量 | 缺少 category/keywords/date，无法正确路由 |
+| Maestro 特定 | 链引用断裂、artifact 残留、session 孤立产物 |
+| Timeline 产物 | T1-T6 阶段产物未归档或已过期 |
+| Knowhow 漂移 | recipe/template 与实际代码实现不一致 |
+| Artifact 残留 | 临时 scratch 文件未清理 |
+
+### 三态决策模型
+
+| 状态 | 动作 | 适用场景 |
+|------|------|----------|
+| **keep** | 保留不变 | 条目仍然准确有效 |
+| **deprecate** | 标记废弃 | 条目部分过时，保留参考价值 |
+| **delete** | 移入 `.trash/` | 条目完全失效，无保留价值 |
+
+### 标志
+
+| 标志 | 说明 |
+|------|------|
+| `--scope <spec\|knowhow\|artifact\|all>` | 审计范围（必需） |
+| `--level P0\|P1\|P2` | 严重级别过滤 |
+| `--since YYYY-MM-DD` | 仅审计此后修改的条目 |
+| `--milestone <name>` | 限定到特定里程碑 |
+| `--interactive` | 逐条三态决策面板（默认） |
+| `--mark` | 非交互：仅标记不删除 |
+| `--delete` | 非交互：软删除到 `.trash/` |
+| `--purge` | 非交互：物理擦除（仅 artifact，需二次确认） |
+| `--dry-run` | 预览不修改 |
+| `--report` | 仅生成审计报告 |
+
+### 关键不变量
+
+- **备份优先**：任何修改前自动创建备份
+- **废弃优于删除**：文本存储（spec/knowhow）默认 deprecate 而非 delete
+- **purge 需二次确认**：仅 artifact scope 可用，且必须二次确认
+- **救援优先**：删除前提示先执行 harvest 提取未收割的知识
+
+### 常见用法
+
+```bash
+/manage-knowledge-audit --scope all              # 全量审计（交互式）
+/manage-knowledge-audit --scope spec --level P0  # 仅审计 P0 级 spec 问题
+/manage-knowledge-audit --scope knowhow --dry-run # 预览 knowhow 审计
+/manage-knowledge-audit --scope artifact --report # 仅生成 artifact 审计报告
+/manage-knowledge-audit --scope all --mark        # 非交互标记所有问题条目
+```
+
+---
+
+## 五、maestro-milestone-release — 里程碑发布
 
 将已完成里程碑打包发布。执行 semver 版本提升、生成 Changelog、创建 git tag，可选推送远端。是 SDLC 最终交付步骤。
 

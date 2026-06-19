@@ -43,6 +43,18 @@ export interface ToolEntry {
   /** Stale-stream silence window in ms before force-terminating a silent CLI
    *  (undefined = adapter default, 10 min). Overridden by `delegate --timeout`. */
   streamTimeoutMs?: number;
+  /** Per-tool proxy toggle. true = inherit global proxy, false = skip proxy for this tool. */
+  proxy?: boolean;
+}
+
+export interface ProxyConfig {
+  enabled: boolean;
+  /** HTTP proxy URL (e.g. "http://127.0.0.1:7890") */
+  httpProxy?: string;
+  /** HTTPS proxy URL (defaults to httpProxy if omitted) */
+  httpsProxy?: string;
+  /** Comma-separated bypass list (e.g. "127.0.0.1,localhost") */
+  noProxy?: string;
 }
 
 export interface RoleMapping {
@@ -57,6 +69,8 @@ export interface CliToolsConfig {
   tools: Record<string, ToolEntry>;
   /** User-configurable role → tool mappings */
   roles?: Record<string, RoleMapping>;
+  /** Global proxy configuration — injected into CLI subprocess env before spawn */
+  proxy?: ProxyConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +291,79 @@ export function rankToolsByDomain(
   }
 
   return [...exact, ...fullstack, ...rest];
+}
+
+// ---------------------------------------------------------------------------
+// Proxy env resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Build proxy environment variable overrides for a specific tool.
+ * Returns an empty object when proxy is disabled globally or for the tool.
+ */
+export function resolveProxyEnv(
+  config: CliToolsConfig,
+  toolName: string,
+): Record<string, string> {
+  const proxy = config.proxy;
+  if (!proxy?.enabled) return {};
+
+  const toolEntry = config.tools?.[toolName];
+  if (toolEntry?.proxy === false) return {};
+
+  const env: Record<string, string> = {};
+  const httpUrl = proxy.httpProxy;
+  const httpsUrl = proxy.httpsProxy ?? httpUrl;
+
+  if (httpUrl) {
+    env.HTTP_PROXY = httpUrl;
+    env.http_proxy = httpUrl;
+  }
+  if (httpsUrl) {
+    env.HTTPS_PROXY = httpsUrl;
+    env.https_proxy = httpsUrl;
+  }
+  if (proxy.noProxy) {
+    env.NO_PROXY = proxy.noProxy;
+    env.no_proxy = proxy.noProxy;
+  }
+
+  return env;
+}
+
+/**
+ * Quick TCP probe to check if the proxy is reachable.
+ * Returns true if a connection can be established within the timeout.
+ */
+export async function checkProxyReachable(
+  proxyUrl: string,
+  timeoutMs = 3000,
+): Promise<boolean> {
+  let host: string;
+  let port: number;
+  try {
+    const url = new URL(proxyUrl);
+    host = url.hostname;
+    port = Number(url.port) || (url.protocol === 'https:' ? 443 : 80);
+  } catch {
+    return false;
+  }
+
+  const { createConnection } = await import('node:net');
+  return new Promise<boolean>((resolve) => {
+    const socket = createConnection({ host, port, timeout: timeoutMs }, () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on('error', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
 }
 
 /** Load global and workspace configs separately (un-merged) for introspection. */

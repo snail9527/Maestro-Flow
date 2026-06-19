@@ -15,9 +15,15 @@
  *   ### [YYYY-MM-DD] type: Title text
  *
  * Follows the Hono factory pattern used by issues.ts and mcp.ts.
+ *
+ * Scope support: ?scope=project|global|all (default: all)
+ *   - project: .workflow/specs/
+ *   - global: ~/.maestro/specs/
+ *   - all: merge both (project + global)
  */
 import { readFile, writeFile, readdir, mkdir } from 'node:fs/promises';
 import { join, extname, basename } from 'node:path';
+import { homedir } from 'node:os';
 import { Hono } from 'hono';
 
 import { parseFrontmatter, type ParsedFrontmatter } from '../wiki/frontmatter-util.js';
@@ -35,12 +41,15 @@ import { WikiWriter, WikiWriteError } from '../wiki/writer.js';
 export { parseFrontmatter, parseSpecEntries };
 export type { ParsedFrontmatter, SpecEntry };
 
+type SpecScope = 'project' | 'global' | 'all';
+
 interface SpecFileMeta {
   name: string;
   path: string;
   title: string;
   category: string;
   entryCount: number;
+  scope: SpecScope;
 }
 
 const ENTRY_TYPES = [
@@ -53,8 +62,18 @@ type EntryType = (typeof ENTRY_TYPES)[number];
 // File I/O helpers
 // ---------------------------------------------------------------------------
 
+function getGlobalSpecsDir(): string {
+  const maestroHome = process.env.MAESTRO_HOME ?? join(homedir(), '.maestro');
+  return join(maestroHome, 'specs');
+}
+
 async function getSpecsDir(workflowRoot: string): Promise<string> {
   return join(workflowRoot, 'specs');
+}
+
+function parseScope(raw: string | undefined): SpecScope {
+  if (raw === 'project' || raw === 'global') return raw;
+  return 'all';
 }
 
 async function listSpecFiles(specsDir: string): Promise<string[]> {
@@ -140,20 +159,83 @@ export function createSpecsRoutes(
   const resolveRoot = () => typeof workflowRoot === 'function' ? workflowRoot() : workflowRoot;
 
   // -------------------------------------------------------------------------
+  // Helper: load entries from a single specs directory, tagging with scope
+  // -------------------------------------------------------------------------
+
+  async function loadEntriesFromDir(specsDir: string, scope: 'project' | 'global'): Promise<(SpecEntry & { scope: string })[]> {
+    const files = await listSpecFiles(specsDir);
+    const entries: (SpecEntry & { scope: string })[] = [];
+    for (const fileName of files) {
+      const raw = await readSpecFile(specsDir, fileName);
+      const { data, content } = parseFrontmatter(raw);
+      const parsed = parseSpecEntries(content, fileName, data);
+      for (const e of parsed) {
+        entries.push({ ...e, scope });
+      }
+    }
+    return entries;
+  }
+
+  async function loadFilesFromDir(specsDir: string, scope: 'project' | 'global'): Promise<SpecFileMeta[]> {
+    const fileNames = await listSpecFiles(specsDir);
+    const files: SpecFileMeta[] = [];
+    for (const fileName of fileNames) {
+      const raw = await readSpecFile(specsDir, fileName);
+      const { data, content } = parseFrontmatter(raw);
+      const entries = parseSpecEntries(content, fileName);
+      files.push({
+        name: fileName,
+        path: `specs/${fileName}`,
+        title: typeof data.title === 'string' ? data.title : basename(fileName, extname(fileName)),
+        category: typeof data.category === 'string' ? data.category : (FILE_CATEGORY_MAP[basename(fileName, extname(fileName))] ?? 'general'),
+        entryCount: entries.length,
+        scope,
+      });
+    }
+    return files;
+  }
+
+  // -------------------------------------------------------------------------
+  // GET /api/specs/scopes — list available scopes with status
+  // -------------------------------------------------------------------------
+
+  app.get('/api/specs/scopes', async (c) => {
+    try {
+      const projectDir = await getSpecsDir(resolveRoot());
+      const globalDir = getGlobalSpecsDir();
+
+      const projectFiles = await listSpecFiles(projectDir);
+      const globalFiles = await listSpecFiles(globalDir);
+
+      return c.json({
+        scopes: [
+          { scope: 'project', dir: projectDir, exists: projectFiles.length > 0, fileCount: projectFiles.length },
+          { scope: 'global', dir: globalDir, exists: globalFiles.length > 0, fileCount: globalFiles.length },
+        ],
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // GET /api/specs — list all entries across all spec files
+  // ?scope=project|global|all (default: all)
   // -------------------------------------------------------------------------
 
   app.get('/api/specs', async (c) => {
     try {
-      const specsDir = await getSpecsDir(resolveRoot());
-      const files = await listSpecFiles(specsDir);
-      const allEntries: SpecEntry[] = [];
+      const scope = parseScope(c.req.query('scope'));
+      const allEntries: (SpecEntry & { scope: string })[] = [];
 
-      for (const fileName of files) {
-        const raw = await readSpecFile(specsDir, fileName);
-        const { data, content } = parseFrontmatter(raw);
-        const entries = parseSpecEntries(content, fileName, data);
-        allEntries.push(...entries);
+      if (scope === 'project' || scope === 'all') {
+        const specsDir = await getSpecsDir(resolveRoot());
+        allEntries.push(...await loadEntriesFromDir(specsDir, 'project'));
+      }
+      if (scope === 'global' || scope === 'all') {
+        const globalDir = getGlobalSpecsDir();
+        allEntries.push(...await loadEntriesFromDir(globalDir, 'global'));
       }
 
       return c.json({ entries: allEntries });
@@ -165,28 +247,24 @@ export function createSpecsRoutes(
 
   // -------------------------------------------------------------------------
   // GET /api/specs/files — list spec files with metadata
+  // ?scope=project|global|all (default: all)
   // -------------------------------------------------------------------------
 
   app.get('/api/specs/files', async (c) => {
     try {
-      const specsDir = await getSpecsDir(resolveRoot());
-      const fileNames = await listSpecFiles(specsDir);
-      const files: SpecFileMeta[] = [];
+      const scope = parseScope(c.req.query('scope'));
+      const allFiles: SpecFileMeta[] = [];
 
-      for (const fileName of fileNames) {
-        const raw = await readSpecFile(specsDir, fileName);
-        const { data, content } = parseFrontmatter(raw);
-        const entries = parseSpecEntries(content, fileName);
-        files.push({
-          name: fileName,
-          path: `specs/${fileName}`,
-          title: typeof data.title === 'string' ? data.title : basename(fileName, extname(fileName)),
-          category: typeof data.category === 'string' ? data.category : (FILE_CATEGORY_MAP[basename(fileName, extname(fileName))] ?? 'general'),
-          entryCount: entries.length,
-        });
+      if (scope === 'project' || scope === 'all') {
+        const specsDir = await getSpecsDir(resolveRoot());
+        allFiles.push(...await loadFilesFromDir(specsDir, 'project'));
+      }
+      if (scope === 'global' || scope === 'all') {
+        const globalDir = getGlobalSpecsDir();
+        allFiles.push(...await loadFilesFromDir(globalDir, 'global'));
       }
 
-      return c.json({ files });
+      return c.json({ files: allFiles });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 500);
@@ -195,17 +273,21 @@ export function createSpecsRoutes(
 
   // -------------------------------------------------------------------------
   // GET /api/specs/file/:name — read a specific spec file
+  // ?scope=project|global (default: project)
   // -------------------------------------------------------------------------
 
   app.get('/api/specs/file/:name', async (c) => {
     try {
       const name = c.req.param('name');
-      // Sanitize: only allow alphanumeric, hyphens, underscores + .md
       if (!/^[\w-]+\.md$/i.test(name)) {
         return c.json({ error: 'Invalid file name' }, 400);
       }
 
-      const specsDir = await getSpecsDir(resolveRoot());
+      const scope = c.req.query('scope') === 'global' ? 'global' : 'project';
+      const specsDir = scope === 'global'
+        ? getGlobalSpecsDir()
+        : await getSpecsDir(resolveRoot());
+
       let raw: string;
       try {
         raw = await readSpecFile(specsDir, name);
@@ -216,7 +298,7 @@ export function createSpecsRoutes(
       const { data, content } = parseFrontmatter(raw);
       const entries = parseSpecEntries(content, name, data);
 
-      return c.json({ name, content: raw, entries });
+      return c.json({ name, scope, content: raw, entries });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 500);

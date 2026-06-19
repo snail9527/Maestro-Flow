@@ -36,6 +36,11 @@ Maestro 通过 `--role` 替代 `--to` 进行工具选择：
 ```json
 {
   "version": "1.1.0",
+  "proxy": {
+    "enabled": true,
+    "httpProxy": "http://127.0.0.1:7890",
+    "noProxy": "127.0.0.1,localhost"
+  },
   "tools": {
     "gemini": {
       "enabled": true,
@@ -48,7 +53,8 @@ Maestro 通过 `--role` 替代 `--to` 进行工具选择：
       "primaryModel": "claude-sonnet-4-20250514",
       "tags": ["fullstack"],
       "type": "builtin",
-      "settingsFile": "~/.maestro/profiles/claude-review.json"
+      "settingsFile": "~/.maestro/profiles/claude-review.json",
+      "proxy": false
     },
     "codex": {
       "enabled": true,
@@ -135,6 +141,53 @@ Maestro 通过 `--role` 替代 `--to` 进行工具选择：
 
 </details>
 
+---
+
+## 代理配置（Proxy）
+
+通过 `cli-tools.json` 的 `proxy` 字段为 CLI 子进程注入代理环境变量，不影响全局 `$env:HTTP_PROXY`。
+
+### 全局配置
+
+```json
+{
+  "proxy": {
+    "enabled": true,
+    "httpProxy": "http://127.0.0.1:7890",
+    "httpsProxy": "http://127.0.0.1:7891",
+    "noProxy": "127.0.0.1,localhost"
+  }
+}
+```
+
+| 字段 | 说明 | 默认值 |
+|------|------|--------|
+| `enabled` | 是否启用代理注入 | — |
+| `httpProxy` | HTTP 代理地址 | — |
+| `httpsProxy` | HTTPS 代理地址 | 同 `httpProxy` |
+| `noProxy` | 代理旁路列表（逗号分隔） | — |
+
+### Per-tool 开关
+
+在 `ToolEntry` 中设置 `proxy` 字段控制单个工具是否使用代理：
+
+| 值 | 行为 |
+|----|------|
+| `true` 或未设置 | 继承全局 proxy 配置 |
+| `false` | 跳过代理，不注入任何代理环境变量 |
+
+```json
+{
+  "proxy": { "enabled": true, "httpProxy": "http://127.0.0.1:7890" },
+  "tools": {
+    "codex": { "enabled": true, "proxy": true },
+    "claude": { "enabled": true, "proxy": false }
+  }
+}
+```
+
+代理变量（`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 及小写变体）仅注入到 delegate 启动的 CLI 子进程环境中，不修改当前 shell。
+
 ### TUI 管理
 
 ```bash
@@ -216,4 +269,5 @@ delegate 命令参数解析:
 角色映射: 项目 config → 全局 config → DEFAULT_ROLE_MAPPINGS
 工具状态: 项目 config → 全局 config
 settingsFile: ToolEntry → CliRunOptions → AgentConfig → adapter --settings
+proxy: config.proxy + ToolEntry.proxy → resolveProxyEnv() → AgentConfig.env → subprocess
 ```

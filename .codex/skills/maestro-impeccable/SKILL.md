@@ -1,6 +1,6 @@
 ---
 name: maestro-impeccable
-description: Use when designing, auditing, polishing, or improving frontend UI — websites, dashboards, landing pages, components
+description: "Use when designing, auditing, polishing, or improving frontend UI — websites, dashboards, landing pages, components"
 argument-hint: "<command|chain|intent> [target] [flags]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
@@ -153,6 +153,8 @@ Layer 1+2 both did not match, but intent is to build/create a specific thing:
 2. Read workflow file before execution — never execute a command without loading its .md
 3. Interactive gates respected — teach, shape, craft retain user confirmation gates
 4. status.json before chain steps — session created before any chain step runs
+5. **Quality gate enforcement** — score MUST be parsed from critique/audit output (not assumed). P0 count MUST be extracted. Do NOT skip quality gate steps or mark as "passed" without parsing actual score.
+6. **Chain completion verification** — all non-skipped steps MUST be executed (TodoWrite all completed). status.json MUST be updated with status: "completed" and final scores.
 </invariants>
 
 ## Prerequisites

@@ -98,6 +98,7 @@ export const SPECS_API_ENDPOINTS = {
   SPECS: '/api/specs',
   SPECS_FILES: '/api/specs/files',
   SPECS_FILE: '/api/specs/file/:name',
+  SPECS_SCOPES: '/api/specs/scopes',
 } as const;
 
 // ---------------------------------------------------------------------------

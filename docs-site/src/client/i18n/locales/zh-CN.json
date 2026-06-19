@@ -76,6 +76,7 @@
     "experiment": "实验",
     "ui_design": "UI 设计",
     "session": "会话",
+    "odyssey": "Odyssey 深度循环",
     "learn": "学习",
     "wiki": "知识图谱"
   },
@@ -84,6 +85,7 @@
     "spec": "项目规格、代码约定和代码库知识管理",
     "quality": "测试、调试、代码审查、重构和质量保证",
     "manage": "项目状态、记忆管理、代码库文档和问题跟踪",
+    "odyssey": "长周期深度循环命令 — 穷尽迭代、考古溯源、修复泛化、知识沉淀",
     "team": "多智能体协作技能，用于编排并行工作流",
     "learn": "代码模式提取、引导阅读、系统调查、学习复盘和多视角分析",
     "wiki": "知识图谱管理、关联发现和知识摘要生成"
@@ -99,7 +101,7 @@
     "quick_guide_title": "快速指南",
     "quick_guide_step1": "使用 /maestro-brainstorm 探索项目想法，或直接 /maestro-init 初始化项目",
     "quick_guide_step2": "通过 /maestro-roadmap 创建路线图，或 /maestro-blueprint 生成完整规范蓝图",
-    "quick_guide_step3": "使用 /maestro-plan 规划阶段任务，/maestro-execute 执行，/maestro-verify 验证",
+    "quick_guide_step3": "使用 /maestro-plan 规划阶段任务，/maestro-execute 执行（含内置验证门控 E2.7）",
     "quick_guide_step4": "利用 /learn-* 命令持续学习，/wiki-* 命令管理知识图谱"
   },
   "content": {

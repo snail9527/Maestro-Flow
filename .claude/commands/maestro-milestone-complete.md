@@ -13,12 +13,17 @@ allowed-tools:
 ---
 
 <purpose>
-Mark a milestone as complete after its audit has passed. Archives all scratch artifacts to `milestones/{M}/artifacts/`, moves artifact entries from `state.json.artifacts[]` to `milestone_history`, extracts final knowhow, and advances to the next milestone.
+Archive passed milestone: validate, archive artifacts, extract knowhow, advance state.
+Requires audit PASS; produces milestone archive and learnings.
 </purpose>
 
 <required_reading>
 @~/.maestro/workflows/milestone-complete.md
 </required_reading>
+
+<deferred_reading>
+- [state.json](~/.maestro/templates/state.json) — read when updating milestone_history and advancing state
+</deferred_reading>
 
 <context>
 Milestone: $ARGUMENTS (optional -- defaults to current_milestone from state.json).
@@ -36,6 +41,28 @@ Follow '~/.maestro/workflows/milestone-complete.md' completely.
 
 Archive flow steps (validation, directory archival, artifact history, knowhow extraction, state advancement, cleanup) are defined in workflow `milestone-complete.md`.
 
+### Phase Gates (MANDATORY, BLOCKING)
+
+**GATE 1: Validation → Archival**
+- REQUIRED: Audit report verified as PASS (E002 if not).
+- REQUIRED: No incomplete artifacts remain (E003 if any).
+- BLOCKED if: audit not passed (E002) or incomplete artifacts remain (E003) — cannot archive unvalidated milestone.
+
+**GATE 2: Archival → Knowhow Extraction**
+- REQUIRED: Scratch artifacts moved to `milestones/{M}/artifacts/`.
+- REQUIRED: Artifact entries archived to milestone_history in state.json.
+- BLOCKED if missing: artifacts not moved or history not updated — knowhow extraction needs archived artifacts as input.
+
+**GATE 3: Knowhow Extraction → State Advancement**
+- REQUIRED: Knowhow extraction attempted (may produce 0 entries — W001).
+- REQUIRED: `project.md` Context updated with milestone summary.
+- BLOCKED if missing: knowhow extraction not attempted or project.md not updated — state advancement requires completed knowledge capture.
+
+**GATE 4: State Advancement → Completion**
+- REQUIRED: state.json updated — next milestone as current (standard) or current_milestone=null (adhoc).
+- REQUIRED: Roadmap snapshot saved (standard only).
+- BLOCKED if missing: state.json not advanced — project remains stuck on completed milestone.
+
 ### Knowledge Promotion Inquiry
 
 After knowhow extraction (step 4), scan `learnings.md` for promotion candidates:
@@ -46,17 +73,47 @@ After knowhow extraction (step 4), scan `learnings.md` for promotion candidates:
 2. **Convention drift detection**: Compare executed task summaries against `coding-conventions.md` and `architecture-constraints.md`:
    → Ask: "Were any established conventions bypassed during this milestone? Should conventions be updated?"
 
-3. **Wiki island check**: Auto-trigger `wiki-connect --fix` to link newly extracted knowledge.
+3. **Wiki island check**: Auto-trigger `manage-wiki connect --fix` to link newly extracted knowledge.
 
 If user confirms promotion, invoke `Skill({ skill: "spec-add", args: "<category> <content>" })` with promoted content, preserving original date and source traceability.
 
-**Next-step routing on completion:**
-- Cut a release → `/maestro-milestone-release`
-- Next milestone → `/maestro-analyze` or `/maestro-plan 1` (standard milestones only)
-- View state → `/manage-status`
-
 **Adhoc milestone (D-008):** When completing an adhoc milestone, skip roadmap snapshot and do not advance to next milestone. Set `current_milestone = null`, `status = "idle"`. Adhoc milestones are self-contained — no successor in roadmap chain.
 </execution>
+
+<completion>
+### Standalone report
+
+```
+=== MILESTONE COMPLETE ===
+Milestone: {milestone_id}
+Status: ARCHIVED
+Artifacts archived: {count}
+Knowhow extracted: {count} entries
+Next milestone: {next_id | "none (adhoc)"}
+==============================
+```
+
+### Ralph-invoked completion
+
+End the step by calling the CLI (no text block output):
+```
+maestro ralph complete <idx> --status {STATUS} [--evidence {path}]
+```
+
+Status verdicts:
+- **DONE** — Normal completion
+- **DONE_WITH_CONCERNS** — Completed with caveats; pass `--concerns`
+- **NEEDS_RETRY** — Tooling error / transient issue; ralph will retry
+- **BLOCKED** — External hard blocker; pass `--reason`
+
+### Next-step routing
+
+| Condition | Suggestion |
+|-----------|-----------|
+| Cut a release | `/maestro-milestone-release` |
+| Next milestone (standard) | `/maestro-analyze` or `/maestro-plan 1` |
+| View state | `/manage-status` |
+</completion>
 
 <error_codes>
 | Code | Severity | Condition | Recovery |
@@ -64,6 +121,8 @@ If user confirms promotion, invoke `Skill({ skill: "spec-add", args: "<category>
 | E001 | error | Milestone identifier required | Check arguments |
 | E002 | error | Audit not passed | Run maestro-milestone-audit first |
 | E003 | error | Incomplete artifacts remain | Complete remaining work first |
+| W001 | warning | Knowhow extraction produced 0 entries | Review milestone work for missed learnings |
+| W002 | warning | Wiki-connect found unlinked knowledge islands | Run `/manage-wiki --fix` manually |
 </error_codes>
 
 <success_criteria>

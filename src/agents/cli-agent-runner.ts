@@ -85,6 +85,8 @@ export interface CliRunOptions {
   /** Stale-stream silence window (ms) before force-terminating a silent CLI.
    *  Overrides cli-tools.json `streamTimeoutMs`; undefined = adapter default (10 min). */
   streamTimeout?: number;
+  /** Proxy environment variables resolved from cli-tools.json proxy config */
+  proxyEnv?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -576,6 +578,9 @@ export class CliAgentRunner {
       settingsFile: options.settingsFile?.replace(/^~(?=[\\/])/, homedir()),
       reasoningEffort: options.reasoningEffort,
       streamTimeoutMs: options.streamTimeout,
+      ...(options.proxyEnv && Object.keys(options.proxyEnv).length > 0
+        ? { env: options.proxyEnv }
+        : {}),
     };
 
     const agentProcess = await adapter.spawn(config);

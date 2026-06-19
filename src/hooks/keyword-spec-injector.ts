@@ -3,11 +3,15 @@
  *
  * Scans user prompt for keywords, matches against <spec-entry> keyword attributes,
  * injects matching entries as additionalContext. Session dedup prevents re-injection.
+ * Also injects domain term context (compact always + expanded on keyword match).
  */
 
 import { buildKeywordIndex, lookupKeywords, type IndexedEntry } from '../tools/spec-keyword-index.js';
 import { readSpecBridge, markInjected, filterUnjected } from './spec-bridge.js';
 import { logInjectionEvent } from './spec-analytics.js';
+import { wrapMaestroContext, type ContextSection } from './context-format.js';
+import { loadGlossary, type DomainTerm } from '../tools/domain-loader.js';
+import { matchDomainTerms, collectRewriteHints } from '../tools/domain-matcher.js';
 
 // ============================================================================
 // Types
@@ -68,30 +72,46 @@ const MAX_ENTRIES_PER_INJECTION = 5;
  * @param projectPath Working directory for spec file resolution
  * @param sessionId   Session ID for dedup bridge
  */
-export function evaluateKeywordInjection(
+export async function evaluateKeywordInjection(
   prompt: string,
   projectPath: string,
   sessionId: string,
-): KeywordInjectionResult {
-  // 1. Tokenize prompt into candidate keywords
+): Promise<KeywordInjectionResult> {
+  const sections: ContextSection[] = [];
+
+  // ── Domain context (always evaluated) ──────────────────────────────
+  const domainSections = buildDomainSections(prompt, projectPath);
+  sections.push(...domainSections);
+
+  // ── Spec keyword matching ──────────────────────────────────────────
   const promptKeywords = tokenizePrompt(prompt);
-  if (promptKeywords.length === 0) {
-    logInjectionEvent(projectPath, {
-      source: 'keyword-spec-injector',
-      promptSnippet: prompt.slice(0, 300),
-      categories: [],
-      specCount: 0,
-      contentLength: 0,
-      inject: false,
-      reason: 'no-prompt-keywords',
-      totalPromptKeywords: 0,
-    });
-    return { inject: false };
+  let toInject: IndexedEntry[] = [];
+  let matchedKws: string[] = [];
+
+  if (promptKeywords.length > 0) {
+    const index = buildKeywordIndex(projectPath);
+    if (index.size > 0) {
+      const matchedAll = lookupKeywords(index, promptKeywords);
+      if (matchedAll.length > 0) {
+        const unjected = filterUnjected(sessionId, matchedAll);
+        if (unjected.length > 0) {
+          toInject = unjected.slice(0, MAX_ENTRIES_PER_INJECTION);
+          sections.push(buildKeywordSection(toInject));
+          matchedKws = promptKeywords.filter(kw => index.has(kw));
+        }
+      }
+    }
   }
 
-  // 2. Build keyword index from spec files
-  const index = buildKeywordIndex(projectPath);
-  if (index.size === 0) {
+  // ── KG symbol lookup (best-effort) ─────────────────────────────────
+  try {
+    const symbolSection = await evaluateKgSymbolLookup(prompt, projectPath);
+    if (symbolSection) sections.push(symbolSection);
+  } catch { /* best-effort */ }
+
+  // ── Assemble result ────────────────────────────────────────────────
+  const liveSections = sections.filter(s => s.lines.length > 0);
+  if (liveSections.length === 0) {
     logInjectionEvent(projectPath, {
       source: 'keyword-spec-injector',
       promptSnippet: prompt.slice(0, 300),
@@ -99,58 +119,23 @@ export function evaluateKeywordInjection(
       specCount: 0,
       contentLength: 0,
       inject: false,
-      reason: 'empty-keyword-index',
+      reason: 'no-matches',
       totalPromptKeywords: promptKeywords.length,
     });
     return { inject: false };
   }
 
-  // 3. Look up matching entries
-  const matchedAll = lookupKeywords(index, promptKeywords);
-  if (matchedAll.length === 0) {
-    logInjectionEvent(projectPath, {
-      source: 'keyword-spec-injector',
-      promptSnippet: prompt.slice(0, 300),
-      categories: [],
-      specCount: 0,
-      contentLength: 0,
-      inject: false,
-      reason: 'no-keyword-match',
-      totalPromptKeywords: promptKeywords.length,
-    });
-    return { inject: false };
+  const usedChars = liveSections.reduce(
+    (sum, s) => sum + s.lines.reduce((acc, l) => acc + l.length, 0),
+    0,
+  );
+  const content = wrapMaestroContext(liveSections, { used: usedChars, max: usedChars });
+
+  if (toInject.length > 0) {
+    const injectedKeywords = [...new Set(toInject.flatMap(e => e.keywords))];
+    const injectedIds = toInject.map(e => e.id);
+    markInjected(sessionId, injectedKeywords, injectedIds);
   }
-
-  // 4. Filter out already-injected entries (session dedup)
-  const unjected = filterUnjected(sessionId, matchedAll);
-  if (unjected.length === 0) {
-    logInjectionEvent(projectPath, {
-      source: 'keyword-spec-injector',
-      promptSnippet: prompt.slice(0, 300),
-      categories: [],
-      specCount: 0,
-      contentLength: 0,
-      inject: false,
-      reason: 'all-deduped',
-      totalPromptKeywords: promptKeywords.length,
-      dedupFilteredCount: matchedAll.length,
-    });
-    return { inject: false };
-  }
-
-  // 5. Limit to avoid context bloat
-  const toInject = unjected.slice(0, MAX_ENTRIES_PER_INJECTION);
-
-  // 6. Build injection content
-  const content = formatInjectionContent(toInject);
-
-  // 7. Mark as injected
-  const injectedKeywords = [...new Set(toInject.flatMap(e => e.keywords))];
-  const injectedIds = toInject.map(e => e.id);
-  markInjected(sessionId, injectedKeywords, injectedIds);
-
-  // 8. Determine which prompt keywords actually matched
-  const matchedKws = promptKeywords.filter(kw => index.has(kw));
 
   logInjectionEvent(projectPath, {
     source: 'keyword-spec-injector',
@@ -160,10 +145,9 @@ export function evaluateKeywordInjection(
     contentLength: content.length,
     inject: true,
     matchedKeywords: matchedKws,
-    matchedEntryIds: injectedIds,
     matchedEntries: toInject.length,
     totalPromptKeywords: promptKeywords.length,
-    dedupFilteredCount: matchedAll.length - unjected.length,
+    domainTermsMatched: domainSections.length > 0 ? domainSections.reduce((n, s) => n + s.lines.length, 0) : 0,
   });
 
   return {
@@ -224,12 +208,198 @@ function extractCjkTokens(text: string): string[] {
 }
 
 /**
- * Format matched entries for injection as context.
+ * Build a keyword-match section for the unified <maestro-context> block.
+ *
+ * Section label: `keyword[kw1,kw2]` listing the distinct keywords matched.
+ * Each line is compact: `<category> · <keywords> · <title>: <oneline body>`.
  */
-function formatInjectionContent(entries: IndexedEntry[]): string {
-  const sections = entries.map(e =>
-    `--- ${e.file} [${e.keywords.join(', ')}] ---\n\n${e.content}`,
-  );
+function buildKeywordSection(entries: IndexedEntry[]): ContextSection {
+  const allKeywords = [...new Set(entries.flatMap(e => e.keywords))];
+  const label = `keyword[${allKeywords.join(',')}]`;
 
-  return `<spec-keyword-match count="${entries.length}">\n\n${sections.join('\n\n---\n\n')}\n\n</spec-keyword-match>`;
+  const lines = entries.map(e => {
+    const body = e.content
+      .replace(/^#{1,6}\s+.*$/gm, '') // strip markdown headings (title is added separately)
+      .replace(/\s+/g, ' ')
+      .trim();
+    const kws = e.keywords.join(',');
+    const titlePrefix = e.title ? `${e.title}: ` : '';
+    return `${e.category} · ${kws} · ${titlePrefix}${body}`;
+  });
+
+  return { label, lines };
+}
+
+// ============================================================================
+// KG Symbol Lookup
+// ============================================================================
+
+const KG_SYMBOL_PATTERN = /\b[a-z]+[A-Z][a-zA-Z0-9]*\b|\b[a-z]+_[a-z0-9_]+\b/g;
+const KG_MAX_SYMBOLS = 3;
+const KG_MAX_RESULTS_PER_SYMBOL = 2;
+const KG_MAX_CONTENT_LENGTH = 512;
+
+/**
+ * Extract camelCase/snake_case symbols from prompt and look up in KG.
+ * Returns a `kg-symbols` ContextSection or null if nothing found.
+ * Entire function is best-effort — returns null on any failure.
+ */
+async function evaluateKgSymbolLookup(prompt: string, projectPath: string): Promise<ContextSection | null> {
+  const matches = prompt.match(KG_SYMBOL_PATTERN);
+  if (!matches || matches.length === 0) return null;
+
+  const symbols = [...new Set(matches)].slice(0, KG_MAX_SYMBOLS);
+
+  try {
+    const { MaestroGraph } = await import('../graph/kg/engine.js');
+    if (!MaestroGraph.isInitialized(projectPath)) return null;
+
+    const mg = await MaestroGraph.open(projectPath);
+    try {
+      const lines: string[] = [];
+      let totalLen = 0;
+
+      for (const sym of symbols) {
+        if (totalLen >= KG_MAX_CONTENT_LENGTH) break;
+
+        const results = mg.searchCode(sym, { limit: KG_MAX_RESULTS_PER_SYMBOL });
+        for (const node of results) {
+          const line = `[${node.kind}] ${node.name}` +
+            (node.filePath ? ` (${node.filePath}:${node.startLine})` : '') +
+            (node.signature ? ` — ${node.signature}` : '');
+
+          if (totalLen + line.length > KG_MAX_CONTENT_LENGTH) break;
+          lines.push(line);
+          totalLen += line.length;
+        }
+      }
+
+      if (lines.length === 0) return null;
+      return { label: 'kg-symbols', lines };
+    } finally {
+      try { mg.close(); } catch { /* best-effort */ }
+    }
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================================
+// Domain Context Builder
+// ============================================================================
+
+const MAX_COMPACT_CHARS = 800;
+
+function buildDomainSections(prompt: string, projectPath: string): ContextSection[] {
+  const sections: ContextSection[] = [];
+
+  try {
+    const { exists, glossary, activeTerms, isEmpty } = loadGlossary(projectPath);
+    if (!exists || isEmpty || !glossary) return sections;
+
+    // Always: compact summary (core tier only, size-limited)
+    const compactSection = buildDomainCompactSection(activeTerms);
+    if (compactSection) sections.push(compactSection);
+
+    // Keyword-matched: expanded definitions
+    const allTerms = glossary.terms;
+    const { directMatches, propagatedIds } = matchDomainTerms(prompt, allTerms);
+
+    if (directMatches.length > 0) {
+      const expandedSection = buildDomainExpandedSection(directMatches, propagatedIds, allTerms);
+      if (expandedSection) sections.push(expandedSection);
+
+      // Rewrite hints
+      const hints = collectRewriteHints(
+        directMatches.map(m => m.termId),
+        allTerms,
+      );
+      if (Object.keys(hints).length > 0) {
+        const hintLines = Object.entries(hints).map(([from, to]) => `"${from}" → ${to}`);
+        sections.push({ label: 'domain-rewrite', lines: hintLines });
+      }
+    }
+
+    // Resolve spec-entry domain="" attributes for matched domain terms
+    // This is handled at injection assembly time — entries with domain=""
+    // attributes get domain context auto-appended via the expanded section above.
+  } catch { /* domain injection is best-effort */ }
+
+  return sections;
+}
+
+function buildDomainCompactSection(activeTerms: DomainTerm[]): ContextSection | null {
+  const coreTerms = activeTerms.filter(t => (t.tier ?? 'core') === 'core');
+  if (coreTerms.length === 0) return null;
+
+  let summary = '';
+  const parts: string[] = [];
+  for (const t of coreTerms) {
+    const entry = `${t.canonical}=${t.definition}`;
+    if (summary.length + entry.length + 3 > MAX_COMPACT_CHARS) break;
+    summary += (summary ? ' | ' : '') + entry;
+    parts.push(entry);
+  }
+  if (parts.length === 0) return null;
+
+  return { label: 'domain-compact', lines: [summary] };
+}
+
+function buildDomainExpandedSection(
+  directMatches: Array<{ termId: string; canonical: string; definition: string; matchedBy: string; matchedToken: string }>,
+  propagatedIds: string[],
+  allTerms: DomainTerm[],
+): ContextSection | null {
+  const injected = new Set<string>();
+  const lines: string[] = [];
+
+  // Direct matches — full expansion
+  for (const match of directMatches) {
+    if (injected.has(match.termId)) continue;
+    injected.add(match.termId);
+    const term = allTerms.find(t => t.id === match.termId);
+    if (!term) continue;
+
+    const deprecatedTag = term.status === 'deprecated' ? ' [DEPRECATED]' : '';
+    let line = `${term.canonical}${deprecatedTag}: ${term.definition}`;
+    if (term.aliases.length > 0) line += ` | aliases: ${term.aliases.join(', ')}`;
+    if (term.relationships.length > 0) {
+      const relNames = term.relationships.map(rid => {
+        const rel = allTerms.find(t => t.id === rid);
+        return rel ? rel.canonical : rid;
+      });
+      line += ` | → ${relNames.join(', ')}`;
+    }
+    if (term.deprecated_info?.successor_id) {
+      const successor = allTerms.find(t => t.id === term.deprecated_info!.successor_id);
+      line += ` | use instead: ${successor?.canonical ?? term.deprecated_info.successor_id}`;
+    }
+    lines.push(line);
+  }
+
+  // Propagated — compact one-liners
+  for (const relId of propagatedIds) {
+    if (injected.has(relId)) continue;
+    injected.add(relId);
+    const term = allTerms.find(t => t.id === relId);
+    if (!term || (term.status ?? 'active') === 'deprecated') continue;
+    lines.push(`↳ ${term.canonical}: ${term.definition}`);
+  }
+
+  if (lines.length === 0) return null;
+  const matchedNames = directMatches.map(m => m.canonical.toLowerCase());
+  return { label: `domain[${matchedNames.join(',')}]`, lines };
+}
+
+/**
+ * Resolve domain context for a spec-entry's domain="" attribute.
+ * Returns a one-line definition or null if term not found.
+ */
+export function resolveDomainContext(domainId: string, projectPath: string): string | null {
+  try {
+    const { glossary } = loadGlossary(projectPath);
+    if (!glossary) return null;
+    const term = glossary.terms.find(t => t.id === domainId);
+    return term ? `${term.canonical}: ${term.definition}` : null;
+  } catch { return null; }
 }

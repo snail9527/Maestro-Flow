@@ -38,6 +38,10 @@ Resolve baseline: `--since` flag > `state.json.codebase_last_refreshed` > `codeb
 
 Read `.workflow/codebase/doc-index.json` to find doc entries covering changed files. Build affected entry list.
 
+### Step 3.5: KG Impact Analysis (if KG exists)
+
+If `.workflow/codebase/knowledge-graph.json` exists: run `maestro kg diff-wiki --json`. Parse output for `affectedWiki` entries. If any, log WARNING for each: "KG impact: code changes affect [entry.id] — [entry.title]". Log summary: "{directNodes} direct, {impactedNodes} impacted KG nodes, {affectedWiki.length} wiki entries flagged". If KG does not exist: skip silently.
+
 ### Step 4: Refresh Affected Docs
 
 For each affected entry: re-read changed source files, update corresponding doc in `.workflow/codebase/`, update timestamp in `doc-index.json`. With `--deep`: also re-scan adjacent files.
@@ -51,7 +55,7 @@ Update `doc-index.json` timestamps and `state.json.codebase_last_refreshed`. Dis
 | Code | Severity | Description |
 |------|----------|-------------|
 | E001 | fatal | `.workflow/` not initialized |
-| E002 | fatal | No codebase docs exist -- use `Skill({ skill: "codebase-rebuild" })` instead |
+| E002 | fatal | No codebase docs exist -- use `$manage-codebase-rebuild` instead |
 | W001 | warning | No changes detected since last refresh |
 </error_codes>
 
@@ -59,6 +63,8 @@ Update `doc-index.json` timestamps and `state.json.codebase_last_refreshed`. Dis
 - [ ] Preconditions validated (.workflow/ and .workflow/codebase/ exist)
 - [ ] Change detection baseline resolved (--since flag, state.json, or 7-day fallback)
 - [ ] Git changes detected and mapped to doc entries via doc-index.json
+- [ ] KG impact analysis run (if knowledge-graph.json exists)
+- [ ] Affected wiki entries flagged with warnings (if any)
 - [ ] Affected docs refreshed with updated source content
 - [ ] --deep flag triggers adjacent file re-scan
 - [ ] doc-index.json timestamps and state.json codebase_last_refreshed updated

@@ -9,7 +9,7 @@ maestro-brainstorm (optional upstream)
         ↓ ideas, scored options
 maestro-analyze ← THIS
         ↓ analysis.md, discussion.md, conclusions.json, context.md, context-package.json
-maestro-plan → maestro-execute → maestro-verify
+maestro-plan → maestro-execute (includes verification)
 ```
 
 ## Architecture
@@ -49,7 +49,7 @@ $ARGUMENTS: "[phase|topic] [-y] [-c] [-q] [--from <source>]"
 -y / --yes  -- Auto mode, skip interactive scoping, auto-deepen
 -c / --continue -- Resume from existing session
 -q / --quick -- Quick mode, skip exploration + scoring, go straight to decision extraction
---from <source>  -- Load upstream context package (brainstorm:ID, analyze:ID, @file, or path). Replaces --from-brainstorm
+--from <source>  -- Load upstream context package (grill:ID, brainstorm:ID, analyze:ID, @file, or path). Replaces --from-brainstorm
 ```
 
 ## Scope Routing
@@ -105,6 +105,30 @@ Create OUTPUT_DIR.
 
 ---
 
+## Phase Gates (Standard Mode, when `-q` and `--gaps` are BOTH absent)
+
+MANDATORY and BLOCKING. Do NOT advance past a gate until ALL conditions are met.
+
+**GATE 1: Step 4 → Step 5** (Exploration → Discussion)
+- REQUIRED: cli-explore-agent completed (Step 4.1), `exploration-codebase.json` written with ≥1 code anchor
+- REQUIRED: ≥1 maestro delegate CLI call completed (Step 4.2), output in `explorations.json` or `perspectives.json`
+- REQUIRED: Baseline confidence scoring recorded in discussion.md (Step 4.6)
+
+**GATE 2: Step 5 → Step 6** (Discussion → Scoring)
+- REQUIRED: discussion.md contains ≥1 interactive round with user feedback (Step 5.3)
+- REQUIRED: Confidence re-scored ≥1 time with delta shown (Step 5.8)
+- REQUIRED: Pressure pass completed ≥1 time (Step 5.9)
+
+**GATE 3: Step 6 → Step 7** (Scoring → Synthesis)
+- REQUIRED: analysis.md written with all 6 dimensions scored
+- REQUIRED: Each dimension score cites evidence from exploration-codebase.json or explorations.json — NOT from manual file reading
+
+**GATE 4: Step 7 → Step 8** (Synthesis → Decision Extraction)
+- REQUIRED: conclusions.json written with recommendations and decision trail
+- REQUIRED: Intent Coverage Matrix shows no unresolved ❌ items (or user-confirmed deferrals)
+
+---
+
 ## Process
 
 ### Step 1: Parse Input & Initialize Session
@@ -128,6 +152,7 @@ Parse $ARGUMENTS to determine mode and flags:
 4. Find prior analyze artifacts from `state.json.artifacts[]` where type=analyze and same milestone → load their `context.md` to skip already-decided areas
 5. **Load upstream context** (priority order):
    a. If `--from` specified: resolve source → load `context-package.json` (see §9 of workflow-structure-guide.md)
+      - `--from grill:ID` → `state.json.artifacts[type=grill, id=ID].context_package` → load
       - `--from brainstorm:ID` → `state.json.artifacts[type=brainstorm, id=ID].context_package` → load
       - `--from @file` → create import session, delegate extraction → load context-package.json
       - `--from path/` → load `path/context-package.json`
@@ -230,7 +255,9 @@ Orchestrator performs targeted web searches, then hands results to `workflow-pha
 `researchContext` is passed into Step 4.2 CLI Analysis and Step 8 Decision Extraction.
 If `external_research` not selected: `researchContext = null`.
 
-**Step 4.1: Codebase Exploration** (cli-explore-agent)
+**Step 4.1: Codebase Exploration** (cli-explore-agent) — MANDATORY, NOT SUBSTITUTABLE
+
+MUST spawn cli-explore-agent; manual Read/Grep is not a substitute. Produces exploration-codebase.json required for Step 5.
 
 Spawn cli-explore-agent with 3-layer exploration:
 
@@ -242,7 +269,9 @@ Spawn cli-explore-agent with 3-layer exploration:
 
 Output: `exploration-codebase.json` (single) or `explorations/{perspective}.json` (multi-perspective, parallel up to 4)
 
-**Step 4.2: CLI Analysis** (AFTER exploration)
+**Step 4.2: CLI Analysis** (AFTER exploration) — MANDATORY, NOT SUBSTITUTABLE
+
+MUST invoke at least one maestro delegate CLI call. The orchestrator's own analysis is NOT independent verification — CLI tools provide cross-validation from a separate model/perspective.
 
 Build exploration context from Step 4.1 findings, then spawn CLI analysis.
 If `researchContext` is set (from Step 4.0), include it as additional context in each CLI call:
@@ -285,7 +314,7 @@ Append initial Intent Coverage Check to discussion.md.
 
 **Step 4.6: Baseline Confidence Scoring**
 
-Dimensions = the 6 analysis dimensions. Factors (weights): findings_depth(.30), evidence_strength(.25), coverage_breadth(.20), user_validation(.15), consistency(.10). Score each factor per dimension from Round 1 results. Append baseline confidence table to discussion.md. Thresholds: <60% 继续深入 | 60-80% 可选 | 80-95% 接近收敛 | >95% 建议收敛.
+Dimensions = the 6 analysis dimensions. Factors (weights): findings_depth(.30), evidence_strength(.25), coverage_breadth(.20), user_validation(.15), consistency(.10). Score each factor per dimension from Round 1 results. Append baseline confidence table to discussion.md. Thresholds: <60% 继续深入 | 60-80% 需用户确认收敛 | >80% 建议收敛.
 
 ### Step 5: Interactive Discussion Loop
 
@@ -296,20 +325,26 @@ Generate 1-2 sentence recap linking previous round conclusions to current starti
 
 **5.2: Present Findings** from latest exploration/analysis
 
-**5.3: Gather Feedback** (AskUserQuestion, single-select, header: "分析反馈"):
-- **继续深入**: Deepen analysis — auto or user-specified direction
-- **调整方向**: Different focus or specific questions
-- **补充信息**: User has additional context, constraints, or corrections
-- **分析完成**: Sufficient — exit to Phase 4
+**5.3: Gather Feedback**
+
+AskUserQuestion (single-select, header: "分析反馈"):
+- **继续深入** (Recommended) — deepen lowest-confidence dimension
+- **调整方向** — different focus or specific questions
+- **补充信息** — user has additional context, constraints, or corrections
+- **分析完成** — sufficient, exit to scoring
+
+Question text: `Round {N} | Confidence: {overall}% | 最弱: {weakest_dim} ({dim_score}%)`
 
 **5.4: Process Response** (always record user choice + impact to discussion.md):
 
 | Choice | Action |
 |--------|--------|
-| 继续深入 | Sub-question (max 4 options: 3 context-driven + 1 heuristic frame-breaker) → CLI/agent exploration → merge findings |
+| 继续深入 | AskUserQuestion sub-direction (below) → CLI/agent exploration → merge findings |
 | 调整方向 | Capture new direction → new CLI exploration → Record Decision (old vs new, reason, impact) |
 | 补充信息 | Capture user input → integrate → answer questions via CLI if needed → Record corrections |
 | 分析完成 | Exit loop → Record why concluding |
+
+**继续深入 sub-direction**: AskUserQuestion (single-select, header: "深入方向", max 4 options: 3 context-driven from unresolved questions/low-confidence findings/unexplored dimensions + 1 heuristic "换角度审视"). "Other" auto-provided for custom direction.
 
 **5.5: Update discussion.md** after each round:
 - **Append** Round N: user input, direction, Q&A, corrections, new insights
@@ -346,7 +381,7 @@ Re-evaluate factors per dimension. Show delta: `Confidence: {prev}% → {current
 - **Stall Detection**: delta < 5% for 2 consecutive rounds → "分析可能停滞，建议切换方向或收敛"
 
 **5.10: Pre-Synthesis Readiness Gate** (on "分析完成"):
-Block if: ❌ items without deferral | any dimension < 40% | no pressure pass | unresolved contradictions. If blocked → AskUserQuestion: 补充后继续 or 忽略风险并继续 (record `residual_risks[]`).
+Block if: ❌ items without deferral | any dimension < 40% | no pressure pass | unresolved contradictions | overall confidence < 80%. If blocked → AskUserQuestion: 补充后继续 or 忽略风险并继续 (record `residual_risks[]`, note accepted confidence level).
 
 **Auto mode (-y)**: auto-deepen ≤3 rounds, readiness gate auto-overrides with residual risk recording.
 
@@ -602,11 +637,11 @@ Display summary:
 - Key conclusions (if full mode)
 - Session stats
 
-**Next Step Selection** (AskUserQuestion, single-select, header: "Next Step"):
-- **快速执行**: Skill({ skill: "maestro-quick", args: "{task_description} --full" }) — build context from conclusions
-- **进入规划**: Phase mode → Skill({ skill: "maestro-plan", args: "{phase}" }); Scratch mode → Skill({ skill: "maestro-plan", args: "--dir {output_dir}" }) — plan directly against scratch directory
-- **产出Issue**: Convert recommendations to tracked issues
-- **完成**: No further action
+AskUserQuestion (single-select, header: "Next Step"):
+- **快速执行** — build context from conclusions, invoke maestro-quick
+- **进入规划** — phase planning (maestro-plan)
+- **产出Issue** — convert recommendations to tracked issues
+- **完成** — no further action
 
 Handle selection:
 
@@ -697,6 +732,7 @@ Record immediately when any occur:
 > - **Options considered**: [Alternatives]
 > - **Chosen**: [Approach] — **Reason**: [Rationale]
 > - **Rejected**: [Why other options were discarded]
+> - **Evidence Source**: [cli-explore-agent | maestro delegate | user input | exploration-codebase.json anchor] — REQUIRED, manual Read/Grep alone is INVALID
 > - **Impact**: [Effect on analysis]
 ```
 
@@ -723,59 +759,11 @@ Replaceable blocks (overwritten each round):
 - `## Current Understanding` — latest consolidated understanding
 - `## Table of Contents` — updated with new section links
 
-## Six Dimensions
-
-| Dimension | Focus Areas |
-|-----------|------------|
-| Feasibility | Technical difficulty, team capability, time, tooling |
-| Impact | User value, business value, tech debt reduction, DX |
-| Risk | Failure modes, security, scalability, regression |
-| Complexity | Integration points, dependencies, learning curve, testing |
-| Dependencies | External services, internal modules, data, infrastructure |
-| Alternatives | 2+ other approaches with tradeoffs |
-
-## Key Design Principles
-
-1. **Iterative Deepening**: Multi-round discussion (max 5) with user feedback steering direction
-2. **CLI-Assisted Exploration**: cli-explore-agent for codebase + multi-CLI parallel analysis
-3. **Discussion Timeline**: discussion.md as living document — rounds appended, Current Understanding replaced
-4. **Decision Recording Protocol**: Immediate capture of decisions, findings, assumption changes
-5. **Intent Coverage Tracking**: Original user intent checked every round (✅🔄⚠️❌)
-6. **Six-Dimension Scoring**: Feasibility, Impact, Risk, Complexity, Dependencies, Alternatives
-7. **Multi-Perspective Synthesis**: Up to 4 perspectives with convergent/conflicting/unique extraction
-8. **Decision Extraction**: Gray area identification → interactive discussion → Locked/Free/Deferred classification → context.md
-9. **Dual Depth**: Full mode (explore→score→decide) or Quick mode (-q, decide only)
-
-## Quality Criteria
-
-**Full mode:**
-- All 6 dimensions analyzed with evidence-backed scores
-- Discussion timeline has narrative synthesis per round
-- Decision Recording Protocol applied consistently
-- Intent Coverage verified with no unresolved ❌ items
-- Risk matrix populated with identified risks
-- At least 2 alternatives compared with tradeoffs
-- Go/No-Go/Conditional recommendation with confidence level
-- Code references included where relevant (file paths, line numbers)
-- Confidence tracking initialized and re-scored each round
-- Readiness gate checked before synthesis (Step 5.10)
-- Pressure pass completed ≥ 1 time before Step 6
-- Confidence summary with factor decomposition in analysis.md
-
-**Both modes (full + quick):**
-- context.md written with all decisions classified as Locked/Free/Deferred
-- context-package.json written with constraints, requirements, insights, and open_questions
-- Gray areas identified through phase-specific analysis
-- Scope creep redirected to Deferred section
-- Every decision follows Context/Options/Chosen/Reason protocol
-- Prior context loaded and applied (no re-asking decided questions)
-- Upstream context loaded via `--from` when specified (context-package.json consumed)
-
 ## Error Handling
 
 | Error | Resolution |
 |-------|------------|
-| cli-explore-agent fails | Continue with available context, note limitation |
+| cli-explore-agent fails | Retry once. If still fails: log W001 warning in discussion.md, flag all subsequent decisions as LOW CONFIDENCE (evidence gap), continue with available context |
 | CLI timeout | Retry with shorter prompt, or skip perspective |
 | Max rounds reached | Force synthesis, offer continuation |
 | No relevant findings | Broaden search, ask user for clarification |

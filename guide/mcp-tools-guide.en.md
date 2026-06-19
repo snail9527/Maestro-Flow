@@ -266,9 +266,11 @@ Project-level knowledge reuse in `.workflow/knowhow/`. 6 types: session(KNW-), t
 
 ```jsonc
 { "operation": "add", "type": "template", "title": "React Hook Form",
+  "description": "Reusable React Hook Form pattern with validation",
   "body": "import { useForm } from 'react-hook-form'; ...",
   "lang": "typescript", "tags": ["react", "form"] }
 { "operation": "add", "type": "decision", "title": "Use PostgreSQL",
+  "description": "ADR: PostgreSQL selected as primary database over MongoDB",
   "body": "ADR: PostgreSQL as primary database...",
   "status": "accepted", "tags": ["database", "architecture"] }
 { "operation": "search", "query": "authentication middleware" }

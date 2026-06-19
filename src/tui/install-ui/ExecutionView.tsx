@@ -13,6 +13,7 @@ import {
   applyOverlaysPostInstall,
   addMcpServer,
   copyRecursive,
+  injectDocFile,
   createBackup,
   uninstallManifest,
   type ScannedComponent,
@@ -105,6 +106,7 @@ export function ExecutionView({
           selectedComponentIds: config.selectedIds,
         });
         const totalStats: CopyStats = { files: 0, dirs: 0, skipped: 0 };
+        const migrationWarnings: string[] = [];
 
         // 6. Copy components
         const selectedComponents = components.filter((c) =>
@@ -116,7 +118,15 @@ export function ExecutionView({
           const comp = selectedComponents[i];
           setStatus(`Installing ${comp.def.label}...`);
           const beforeFiles = totalStats.files;
-          copyRecursive(comp.sourceFull, comp.targetDir, totalStats, manifest);
+          if (comp.def.build) {
+            const result = comp.def.build(join(pkgRoot, '.claude'), comp.targetDir);
+            totalStats.files += result.files;
+          } else if (comp.def.inject) {
+            const result = injectDocFile(comp.sourceFull, comp.targetDir, totalStats, manifest, comp.def.section);
+            if (result.warning) migrationWarnings.push(result.warning);
+          } else {
+            copyRecursive(comp.sourceFull, comp.targetDir, totalStats, manifest, comp.def.fileFilter);
+          }
           const delta = totalStats.files - beforeFiles;
           setProgress(`(${delta} files)`);
         }

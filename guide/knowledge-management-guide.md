@@ -26,7 +26,9 @@ Maestro 知识沉淀分两种：**约束**和**积累**。约束是编码规范�
 │   ├── AST-*.md                    # 代码资产（API 契约、数据模型）
 │   ├── BLP-*.md                    # 架构蓝图
 │   └── DOC-*.md                    # 长文档（通用兜底）
-└── wiki-index.json                 # 统一索引（WikiIndexer 自动生成）
+├── wiki-index.json                 # 统一索引（WikiIndexer 自动生成）
+└── codebase/
+    └── knowledge-graph.json        # 代码知识图谱（kg CLI 查询）
 ```
 
 </details>
@@ -107,6 +109,7 @@ summary: "Use when implementing OAuth 2.0 login for public clients."
 |------|------|
 | `/wiki-digest` | 语义主题聚类 + 知识覆盖热力图 + gap 分析 |
 | `/wiki-connect` | 发现孤立节点和缺失连接，修复图联通性 |
+| `/manage-knowledge-audit` | 审计 spec/knowhow/artifact 三存储 — 矛盾检测、过期淘汰、孤立清理（keep/deprecate/delete 三态决策） |
 | `/learn-decompose` | 从代码中提取设计模式，写入 spec 和 wiki |
 | `/learn-follow` | 引导式阅读代码/wiki，提取 pattern 并构建理解 |
 
@@ -174,6 +177,38 @@ Session 级去重：同一条目不会重复注入。
 
 ---
 
+## 代码知识图谱集成（KG × Wiki）
+
+当 `maestro kg index` 生成 `knowledge-graph.json` 后，WikiIndexer 自动将 KG 数据索引为虚拟 wiki 条目：
+
+| KG 数据 | Wiki 条目 | virtualKind | 用途 |
+|---------|-----------|-------------|------|
+| GraphNode | `kg-{id}` | `kg-node` | 代码实体（函数、类、模块） |
+| Layer | `kg-layer-{id}` | `kg-layer` | 架构层（CLI、Core、Orchestration） |
+| TourStep | `kg-tour-{order}` | `kg-tour-step` | 代码导览步骤（链表串联） |
+
+**Edge 双层存储**：`related[]` 保存 top-N 关联 ID（用于 wiki 图分析），`ext.kgEdges[]` 保存完整有向异构边（用于语义遍历）。
+
+**搜索降级**：KG 节点在 BM25 中仅索引 title + tags，避免代码标识符污染常规搜索。
+
+**交叉引用**：KG 节点通过 `filePath` 自动匹配 `codebase-comp-*` 条目，建立 `ext.semanticDuplicateOf` 引用。
+
+```bash
+# 查看 KG 索引
+maestro wiki list --keyword kg
+
+# 搜索代码实体
+maestro wiki search "AuthMiddleware"
+
+# 代码变更影响分析
+maestro kg diff-wiki
+
+# KG 节点详情（含关联 wiki 条目）
+maestro kg explain <node-id>
+```
+
+---
+
 ## 知识流转全景
 
 ```
@@ -192,7 +227,7 @@ maestro-init    → spec-setup（骨架 + 扫描）
 maestro-analyze → 锁定决策 → arch，代码模式 → coding
 maestro-plan    → 设计约定 → coding/arch，测试策略 → test
 maestro-execute → 经验教训 → learning，根因 → debug
-maestro-verify  → 质量发现 → review
+maestro-execute → 内置验证（E2.7）→ 质量发现 → review
 ```
 
 <details>

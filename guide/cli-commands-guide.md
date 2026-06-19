@@ -2,7 +2,7 @@
 title: "CLI 终端命令参考"
 ---
 
-Maestro 提供 21 个终端命令，通过 `maestro <command>` 直接调用。覆盖安装、委派、协调、Wiki、Hook、协作等全场景。
+Maestro 提供 24 个终端命令，通过 `maestro <command>` 直接调用。覆盖安装、委派、协调、Wiki、Hook、协作等全场景。
 
 > **别名**: `coord`->`coordinate`、`msg`->`agent-msg`、`kh`->`knowhow`、`bv`->`brainstorm-visualize`、`team`->`collab`。
 
@@ -25,6 +25,7 @@ Maestro 提供 21 个终端命令，通过 `maestro <command>` 直接调用。�
 | `launcher` | -- | Claude Code 启动器 |
 | `spec` | -- | 项目 Spec 管理 |
 | `wiki` | -- | Wiki 知识图谱查询 |
+| `kg` | -- | 代码知识图谱查询 |
 | `hooks` | -- | Hook 管理与运行 |
 | `overlay` | -- | 命令 Overlay 管理 |
 | `collab` | `team` | 人类团队协作 |
@@ -33,6 +34,9 @@ Maestro 提供 21 个终端命令，通过 `maestro <command>` 直接调用。�
 | `brainstorm-visualize` | `bv` | 头脑风暴可视化服务器 |
 | `ext` | -- | 扩展管理 |
 | `tool` | -- | 工具交互（list/exec） |
+| `next` | -- | 单命令推荐引擎 |
+| `ralph` | -- | Ralph CLI 子命令族 |
+| `kg` | -- | 代码知识图谱查询 |
 
 ---
 
@@ -269,7 +273,45 @@ maestro wiki delete <id>
 maestro wiki health | orphans | hubs --limit 10 | backlinks <id> | forward <id> | graph
 ```
 
-> **写保护**：`specs/*.md` 的 body 通过 `wiki update` 禁止修改（403），需使用 `wiki append` / `wiki remove-entry`。`memory/*.md` 支持 CRUD。虚拟条目完全只读。
+> **写保护**：`specs/*.md` 的 body 通过 `wiki update` 禁止修改（403），需使用 `wiki append` / `wiki remove-entry`。`memory/*.md` 支持 CRUD。虚拟条目（issue、codebase、KG）完全只读。
+>
+> **KG 集成**：当 `.workflow/codebase/knowledge-graph.json` 存在时，KG 节点、架构层、代码导览自动作为虚拟条目索引到 wiki，可通过 `wiki search`、`wiki list --keyword kg` 发现。
+
+</details>
+
+<details>
+<summary>maestro kg</summary>
+
+代码知识图谱查询。操作 `.workflow/codebase/knowledge-graph.json`（由 `/manage-codebase-rebuild` 的 KG 管道生成）。
+
+```bash
+# 统计
+maestro kg stats                         # 节点/边/层/导览统计
+maestro kg stats --json                  # JSON 输出
+
+# 搜索
+maestro kg query "认证"                   # 按名称/摘要/标签搜索节点
+maestro kg query "auth" --limit 5 --type module --json
+
+# 节点详情（含 Wiki 双向绑定）
+maestro kg explain <node-id>             # 节点详情 + 出入边 + 关联 wiki 条目
+maestro kg explain <node-id> --json      # JSON 输出（含 wiki 匹配）
+maestro kg explain <node-id> --no-wiki   # 跳过 wiki 交叉引用
+
+# 路径查找
+maestro kg path <from-id> <to-id>        # BFS 最短路径
+maestro kg path <from-id> <to-id> --json
+
+# 变更影响分析
+maestro kg diff                          # git diff 影响的 KG 节点 + 1-hop 扩展
+maestro kg diff --staged                 # 仅暂存区变更
+
+# 变更影响 × Wiki 交叉引用
+maestro kg diff-wiki                     # git 变更 → KG 影响 → 受影响 wiki 条目
+maestro kg diff-wiki --staged --json     # JSON 输出
+```
+
+> **Wiki 集成**：`explain` 自动查询 WikiIndexer，显示与 KG 节点关联的 wiki 条目（通过 virtualKind 匹配和 codePaths/filePath 匹配）。`diff-wiki` 将代码变更的影响面传导到 wiki 层面。
 
 </details>
 
@@ -404,5 +446,84 @@ maestro ext list                        # 列出扩展
 maestro tool list                       # 列出工具
 maestro tool exec read_file '{"path":"README.md"}'
 ```
+
+</details>
+
+---
+
+## 智能路由
+
+<details>
+<summary>maestro next</summary>
+
+单命令推荐引擎 — 解析意图和项目状态，从候选池中评分推荐一个原子命令。
+
+```bash
+maestro next "实现用户认证"           # 推荐并确认
+maestro next "test auth" -y           # 跳过确认直接执行
+maestro next --dry-run "review code"  # 仅显示推荐
+maestro next --top 5 "debug"          # 显示前 5 候选
+maestro next --list                   # 列出全部候选命令池
+```
+
+| 选项 | 说明 |
+|------|------|
+| `-y` / `--yes` | 跳过确认，直接执行推荐命令 |
+| `--dry-run` | 仅显示推荐，不执行 |
+| `--top N` | 显示前 N 个候选（默认 3） |
+| `--list` | 列出可推荐命令池（不含编排器） |
+
+> 与 `/maestro` 和 `/maestro-ralph` 的区别：不创建 session，不写 status.json，不触发链。始终推荐 1 个命令 + 2-3 个备选。
+
+</details>
+
+<details>
+<summary>maestro ralph</summary>
+
+Ralph CLI 子命令族 — 管理 Ralph 自适应生命周期引擎的 session、skill 和执行。
+
+```bash
+maestro ralph session              # 列出活跃 ralph session
+maestro ralph skills               # 列出可用 skill
+maestro ralph skills --platform codex  # 按平台过滤
+maestro ralph next                 # 加载下一步（注入 skill defaults）
+maestro ralph check                # 检查当前 step 状态
+maestro ralph complete N --status DONE  # 标记 step 完成
+```
+
+| 子命令 | 说明 |
+|--------|------|
+| `session` | 列出活跃 session 及状态 |
+| `skills` | 扫描可用 skill（支持 `--platform` 过滤） |
+| `next` | 加载下一步 SKILL.md 并注入 config defaults |
+| `check` | 查询当前 step 执行状态 |
+| `complete` | 标记 step 完成并写入 emit 结果 |
+
+</details>
+
+---
+
+## 知识图谱
+
+<details>
+<summary>maestro kg</summary>
+
+代码知识图谱 CLI — 查询 `.workflow/codebase/knowledge-graph.json` 中的代码结构语义信息。
+
+```bash
+maestro kg stats                    # 图谱统计（节点数、边数、模块分布）
+maestro kg query "UserService"      # 按名称/类型搜索节点
+maestro kg explain "validateToken"  # 节点详情（依赖、调用者、模块）
+maestro kg path "loginController" "db.query"  # 调用路径
+maestro kg diff                     # 对比图谱快照差异
+```
+
+| 子命令 | 说明 |
+|--------|------|
+| `stats` | 图谱统计信息 |
+| `query <pattern>` | 按名称/类型搜索节点 |
+| `explain <node>` | 节点详情 |
+| `path <from> <to>` | 两节点间调用路径 |
+| `diff` | 图谱快照差异 |
 
 </details>

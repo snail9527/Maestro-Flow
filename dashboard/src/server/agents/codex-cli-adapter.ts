@@ -93,6 +93,13 @@ type CodexMessage =
 
 const STDERR_ERROR_RE = /\b(error|fatal)\b/i;
 
+// Rust tracing log format: "2026-06-08T06:37:29.317417Z ERROR rmcp::transport::..."
+// These are diagnostic logs from the codex binary, not process-level failures.
+// RMCP/MCP bootstrap errors (wham/apps, websocket) are non-fatal — codex
+// falls back to alternative transports and continues normal operation.
+const CODEX_NONFATAL_STDERR_RE =
+  /^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+(?:ERROR|WARN|INFO|DEBUG|TRACE)\s+\S+::/;
+
 // ---------------------------------------------------------------------------
 // Native binary resolution — bypass shell/shim layers on Windows
 // ---------------------------------------------------------------------------
@@ -312,7 +319,9 @@ export class CodexCliAdapter extends BaseAgentAdapter {
           // Not JSON — fall through to text classification
         }
 
-        if (STDERR_ERROR_RE.test(trimmed)) {
+        if (CODEX_NONFATAL_STDERR_RE.test(trimmed)) {
+          this.emitEntry(processId, EntryNormalizer.thinking(processId, trimmed));
+        } else if (STDERR_ERROR_RE.test(trimmed)) {
           this.emitEntry(processId, EntryNormalizer.error(processId, trimmed, 'stderr'));
         } else {
           // Codex emits reasoning/progress text to stderr; treat as thinking, not output

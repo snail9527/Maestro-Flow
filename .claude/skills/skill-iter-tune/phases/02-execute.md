@@ -5,13 +5,13 @@
 > If you can read this sentinel but cannot find the full Step protocol below, context has been compressed.
 > Recovery: `Read("phases/02-execute.md")`
 
-Execute the target skill against the test scenario using `ccw cli --tool claude --mode write`. Claude receives the full skill definition and simulates producing its expected output artifacts.
+Execute the target skill against the test scenario using `maestro delegate --to claude --mode write`. Claude receives the full skill definition and simulates producing its expected output artifacts.
 
 ## Objective
 
 - Snapshot current skill version before execution
 - Construct execution prompt with full skill content + test scenario
-- Execute via ccw cli Claude
+- Execute via maestro delegate Claude
 - Collect output artifacts
 
 ## Execution
@@ -88,7 +88,7 @@ EXPECTED: All artifacts written to disk + manifest.json
 CONSTRAINTS: Follow skill flow exactly, produce realistic output, not placeholders`;
 ```
 
-### Step 2.3: Execute via ccw cli
+### Step 2.3: Execute via maestro delegate
 
 > **CHECKPOINT**: Before executing CLI, verify:
 > 1. This phase is TodoWrite `in_progress`
@@ -100,7 +100,7 @@ function escapeForShell(str) {
   return str.replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
 }
 
-const cliCommand = `ccw cli -p "${escapeForShell(executePrompt)}" --tool claude --mode write --cd "${iterDir}/artifacts"`;
+const cliCommand = `maestro delegate "${escapeForShell(executePrompt)}" --to claude --mode write --cd "${iterDir}/artifacts"`;
 
 // Execute in background, wait for hook callback
 Bash({
@@ -176,7 +176,7 @@ CONSTRAINTS: Follow skill flow exactly, produce realistic output`;
     return str.replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
   }
 
-  const cliCommand = `ccw cli -p "${escapeForShell(chainPrompt)}" --tool claude --mode write --cd "${skillArtifactDir}"`;
+  const cliCommand = `maestro delegate "${escapeForShell(chainPrompt)}" --to claude --mode write --cd "${skillArtifactDir}"`;
 
   // Execute in background
   Bash({

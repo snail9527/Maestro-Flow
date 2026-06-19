@@ -21,7 +21,7 @@ $ARGUMENTS — topic text and optional flags.
 
 ### Pre-load specs
 1. **Architecture specs**: `maestro spec load --category arch` — load architecture constraints as context for multi-role design (roles respect documented decisions).
-2. **Role Knowledge**: `maestro wiki list --category arch` → identify relevant entries → `maestro wiki load <id1> [id2...]`
+2. **Role Knowledge**: `maestro search --category arch` → identify relevant entries → `maestro wiki load <id1> [id2...]`
 3. Both optional — proceed without if unavailable.
 
 **Session**: `.workflow/.csv-wave/{YYYYMMDD}-brainstorm-{slug}/`
@@ -40,7 +40,7 @@ $ARGUMENTS — topic text and optional flags.
 Interview the user relentlessly until shared understanding is reached. Active only in interactive mode; skip when `-y/--yes`, `--skip-questions`, `--continue` (existing session), or input is already specific.
 
 - One decision per turn via request_user_input with 2–4 options + a (Recommended) default. The user controls termination — keep interviewing until convergence; they can interrupt naturally at any time.
-- Search-first when uncertain: before asking, resolve via `state.json`, the session directory, `maestro spec load`, `maestro wiki search`, Glob/Grep/Read, or — for open-ended multi-file scans — `maestro delegate ... --role explore`. Never ask what code or memory can verify; never bounce your own ambiguity back to the user — search first, then ask only what truly needs human judgment.
+- Search-first when uncertain: before asking, resolve via `state.json`, the session directory, `maestro spec load`, `maestro search`, Glob/Grep/Read, or — for open-ended multi-file scans — `maestro delegate ... --role explore`. Never ask what code or memory can verify; never bounce your own ambiguity back to the user — search first, then ask only what truly needs human judgment.
 - Writeback cadence: each time a decision settles, immediately append/update its row in `guidance-specification.md` §11 (create the section if absent). Do NOT batch writeback to the end — partial decisions must already be on disk before the next question.
 - Branch jumps allowed: the user may switch freely between mode / role / upstream / sub-pipeline branches; sequence is not enforced, but every decision point must end with a definite answer.
 - Scope guard: only ask about decisions owned by `brainstorm`. Do not pre-resolve roadmap/plan choices.
@@ -210,6 +210,9 @@ CONSTRAINTS:
 5. **9 valid roles only**: data-architect, product-manager, product-owner, scrum-master, subject-matter-expert, system-architect, test-strategist, ui-designer, ux-expert
 6. **Wave 3 is read-only at the agent boundary**: the reviewer emits structured findings (conflicts / gaps / synergies with `patch_targets[]`). The orchestrator (not the agent) applies the patches via Edit.
 7. **DO NOT STOP**: Continuous until all waves complete; only pause at [CHECKPOINT] (skipped with -y).
+8. **Invariant violation = BLOCK** — violating any invariant above blocks the current operation. Do NOT bypass for "efficiency" or "clear intent" reasons.
+9. **Evidence required** — role analysis findings in {role}/analysis.md §2 Decision Digest MUST cite concrete evidence: code references (file:line), API endpoints, data models from codebase exploration. Decisions without evidence are flagged LOW CONFIDENCE.
+10. **Artifact verification before completion** — before reporting completion, verify ALL expected artifacts exist: guidance-specification.md, {role}/analysis.md (per selected role), {role}/analysis-F-*.md (per feature). If any missing: DO NOT report completion.
 </invariants>
 
 <spawn_contract>
@@ -288,7 +291,7 @@ S_CHECK_1 → END        WHEN: user "Abort"
 
 S_DESIGN → S_WAVE_2    WHEN: DESIGN.md exists OR explore completed    DO: A_DESIGN_EXPLORE
 S_DESIGN → S_WAVE_2    WHEN: DESIGN.md already exists (skip explore)
-S_DESIGN → S_WAVE_2    WHEN: explore failed → W004 → continue without
+S_DESIGN → S_WAVE_2    WHEN: explore failed → W004 → retry once. If still fails: flag downstream outputs as LOW CONFIDENCE, continue without
 
 S_WAVE_2 → S_CHECK_2   DO: spawn wave-2 (parallel), merge results — each agent writes {role}/analysis.md + sub-files
 S_WAVE_2 → S_AGGREGATE WHEN: all failed       DO: skip review
@@ -405,8 +408,8 @@ Protocol: read before analysis, append-only, dedup by type+key.
 | Condition | Recovery |
 |-----------|----------|
 | Guidance agent failed | Abort pipeline (W2 depends on guidance) |
-| All role agents failed | Skip review, report partial |
-| Review agent failed | Use analysis files directly, no resolution writeback |
+| All role agents failed | Skip review, report partial. Retry once. If still fails: flag downstream outputs as LOW CONFIDENCE |
+| Review agent failed | Use analysis files directly, no resolution writeback. Retry once. If still fails: flag downstream outputs as LOW CONFIDENCE |
 | Role count > 9 | Cap at 9 with warning |
 | E006 --review-only but no */analysis.md | Run auto mode or single roles first |
 | E007 --review-only but missing guidance-specification.md | Run auto mode first |

@@ -10,10 +10,18 @@ export interface SkillsCmdOptions {
   platform?: SkillPlatform;
 }
 
+const VALID_PLATFORMS: SkillPlatform[] = ['claude', 'codex', 'agent', 'agy'];
+
 export async function runSkills(opts: SkillsCmdOptions): Promise<number> {
-  if (opts.platform && opts.platform !== 'claude' && opts.platform !== 'codex') {
-    console.error(`[ralph skills] --platform must be "claude" or "codex" (got "${opts.platform}")`);
+  if (opts.platform && !VALID_PLATFORMS.includes(opts.platform)) {
+    console.error(`[ralph skills] --platform must be one of: ${VALID_PLATFORMS.join(', ')} (got "${opts.platform}")`);
     return 2;
+  }
+  if (!opts.platform) {
+    console.error(`[ralph skills] WARNING: --platform not specified — returning ALL platforms.`);
+    console.error(`  Available: ${VALID_PLATFORMS.join(', ')}`);
+    console.error(`  Usage: maestro ralph skills --platform <claude|codex|agent|agy>`);
+    console.error('');
   }
   const all = scanAllSkills(undefined, opts.platform ? { platform: opts.platform } : {});
 

@@ -76,6 +76,7 @@
     "experiment": "Experiment",
     "ui_design": "UI Design",
     "session": "Session",
+    "odyssey": "Odyssey",
     "learn": "Learning",
     "wiki": "Wiki"
   },
@@ -84,6 +85,7 @@
     "spec": "Project specifications, conventions, and codebase knowledge management",
     "quality": "Testing, debugging, code review, refactoring, and quality assurance",
     "manage": "Project status, memory management, codebase documentation, and issue tracking",
+    "odyssey": "Long-running deep-cycle commands — exhaustive iteration with archaeology, fix, generalization, and knowledge persistence",
     "team": "Multi-agent team collaboration skills for orchestrated parallel workflows",
     "learn": "Pattern extraction, guided reading, investigation, retrospectives, and multi-perspective analysis",
     "wiki": "Knowledge graph management, connection discovery, and digest generation"
@@ -99,7 +101,7 @@
     "quick_guide_title": "Quick Guide",
     "quick_guide_step1": "Start with /maestro-brainstorm to explore ideas, or /maestro-init to initialize a project",
     "quick_guide_step2": "Create a roadmap with /maestro-roadmap, or generate full specs with /maestro-blueprint",
-    "quick_guide_step3": "Plan tasks with /maestro-plan, execute with /maestro-execute, then verify with /maestro-verify",
+    "quick_guide_step3": "Plan tasks with /maestro-plan, then execute with /maestro-execute (includes built-in verification gate E2.7)",
     "quick_guide_step4": "Use /learn-* commands for continuous learning and /wiki-* commands to manage your knowledge graph"
   },
   "content": {

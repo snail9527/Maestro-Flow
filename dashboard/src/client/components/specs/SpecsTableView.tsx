@@ -88,9 +88,10 @@ function formatTimestamp(ts: string): string {
 }
 
 export function SpecsTableView() {
-  const allEntries = useSpecsStore((s) => s.entries);
+  const rawEntries = useSpecsStore((s) => s.entries);
   const typeFilter = useSpecsStore((s) => s.typeFilter);
   const setTypeFilter = useSpecsStore((s) => s.setTypeFilter);
+  const scopeFilter = useSpecsStore((s) => s.scopeFilter);
   const categoryFilter = useSpecsStore((s) => s.categoryFilter);
   const setCategoryFilter = useSpecsStore((s) => s.setCategoryFilter);
   const keywordFilter = useSpecsStore((s) => s.keywordFilter);
@@ -100,6 +101,11 @@ export function SpecsTableView() {
   const setSelectedEntry = useSpecsStore((s) => s.setSelectedEntry);
   const deleteEntry = useSpecsStore((s) => s.deleteEntry);
   const addEntry = useSpecsStore((s) => s.addEntry);
+
+  const allEntries = useMemo(() => {
+    if (scopeFilter === 'all') return rawEntries;
+    return rawEntries.filter((e) => e.scope === scopeFilter);
+  }, [rawEntries, scopeFilter]);
 
   const [sortField, setSortField] = useState<SortField>('timestamp');
   const [sortDir, setSortDir] = useState<SortDir>('desc');

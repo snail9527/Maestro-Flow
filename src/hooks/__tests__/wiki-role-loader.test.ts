@@ -34,6 +34,7 @@ function writeWikiIndex(entries: Array<{
   title: string;
   summary: string;
   category?: string;
+  specCategory?: string;
   updated: string;
 }>): void {
   writeFileSync(
@@ -205,5 +206,68 @@ describe('loadWikiByCategory — edge cases', () => {
       expect(result!.entryCount).toBe(1);
       expect(result!.content).toContain(`Entry for ${cat}`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// specCategory cross-system alignment
+// ---------------------------------------------------------------------------
+
+describe('loadWikiByCategory — specCategory', () => {
+  it('matches entries by specCategory when category is a knowhow type', () => {
+    writeWikiIndex([
+      { type: 'knowhow', title: 'Recipe with spec alignment', summary: 'Step-by-step auth guide', category: 'recipe', specCategory: 'coding', updated: '2026-05-01' },
+      { type: 'knowhow', title: 'Tip without alignment', summary: 'Quick reminder', category: 'tip', updated: '2026-05-01' },
+    ]);
+
+    const result = loadWikiByCategory(testDir, 'coding');
+    expect(result).not.toBeNull();
+    expect(result!.entryCount).toBe(1);
+    expect(result!.content).toContain('Recipe with spec alignment');
+    expect(result!.content).not.toContain('Tip without alignment');
+  });
+
+  it('matches entries by either category or specCategory', () => {
+    writeWikiIndex([
+      { type: 'spec', title: 'Coding Spec', summary: 'Spec content', category: 'coding', updated: '2026-05-02' },
+      { type: 'knowhow', title: 'Coding Recipe', summary: 'Recipe content', category: 'recipe', specCategory: 'coding', updated: '2026-05-01' },
+      { type: 'knowhow', title: 'Unrelated Tip', summary: 'Tip content', category: 'tip', updated: '2026-05-01' },
+    ]);
+
+    const result = loadWikiByCategory(testDir, 'coding');
+    expect(result).not.toBeNull();
+    expect(result!.entryCount).toBe(2);
+    expect(result!.content).toContain('Coding Spec');
+    expect(result!.content).toContain('Coding Recipe');
+    expect(result!.content).not.toContain('Unrelated Tip');
+  });
+
+  it('does not double-count entries where category and specCategory both match', () => {
+    writeWikiIndex([
+      { type: 'knowhow', title: 'Double Match', summary: 'Both fields match', category: 'coding', specCategory: 'coding', updated: '2026-05-01' },
+    ]);
+
+    const result = loadWikiByCategory(testDir, 'coding');
+    expect(result).not.toBeNull();
+    expect(result!.entryCount).toBe(1);
+  });
+
+  it('returns null when no entries match by category or specCategory', () => {
+    writeWikiIndex([
+      { type: 'knowhow', title: 'Recipe', summary: 'Content', category: 'recipe', specCategory: 'coding', updated: '2026-05-01' },
+    ]);
+
+    const result = loadWikiByCategory(testDir, 'debug');
+    expect(result).toBeNull();
+  });
+
+  it('handles entries without specCategory field gracefully', () => {
+    writeWikiIndex([
+      { type: 'knowhow', title: 'Old Entry', summary: 'No specCategory', category: 'coding', updated: '2026-05-01' },
+    ]);
+
+    const result = loadWikiByCategory(testDir, 'coding');
+    expect(result).not.toBeNull();
+    expect(result!.entryCount).toBe(1);
   });
 });

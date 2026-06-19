@@ -275,7 +275,7 @@ Generate 3 output files from cross-verify results:
 
 1. Copy outputs to scratchDir
 2. Register CLB artifact in state.json (type: collab, scope: adhoc)
-3. Spec enrichment: for each Locked decision → `maestro spec add arch`
+3. Spec enrichment: for each Locked decision → `maestro spec add arch "<title>" "<content>" --keywords <kw> --description "<summary>"`
 4. `update_plan` all steps completed
 5. Display summary:
    ```

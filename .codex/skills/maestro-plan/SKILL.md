@@ -88,7 +88,7 @@ Write resolved milestone into PLN artifact registration and `plan.json.milestone
 **Session**: `.workflow/.csv-wave/{YYYYMMDD}-plan-P{N}-{slug}/`
 **Scratch**: `.workflow/scratch/{YYYYMMDD}-plan-P{N}-{slug}/` (.task/ subdir)
 
-**Pre-load** (optional): context-package.json (via `--from`, takes precedence), context.md (prior analyze), conclusions.json, codebase ARCHITECTURE.md, `maestro wiki search`, `maestro spec load --category arch`, team preflight `maestro collab preflight`.
+**Pre-load** (optional): context-package.json (via `--from`, takes precedence), context.md (prior analyze), conclusions.json, codebase ARCHITECTURE.md, `maestro search`, `maestro spec load --category arch`, team preflight `maestro collab preflight`.
 </context>
 
 <csv_schema>
@@ -108,6 +108,9 @@ Wave 1: N exploration rows (parallel). Wave 2: 1 planning row (sequential).
 3. **Discovery board append-only**: Never modify/delete
 4. **Skip on failure**: If all explorations fail, planner proceeds with available context
 5. **DO NOT STOP**: Continuous until all waves complete
+6. **Invariant violation = BLOCK** — violating any invariant above blocks the current operation.
+7. **Verifiable convergence criteria required** — every task MUST have convergence.criteria[] with grep-verifiable conditions (no subjective language like "well-structured" or "properly implemented"). If any task lacks verifiable criteria: DO NOT report completion — fix the criteria first.
+8. **Artifact verification before completion** — plan.json and .task/TASK-*.json files MUST exist. PLN artifact MUST be registered in state.json. If any missing: DO NOT report completion.
 </invariants>
 
 <state_machine>
@@ -226,7 +229,7 @@ Collision detection against same-milestone plans.
 | Condition | Recovery |
 |-----------|----------|
 | No args and no roadmap and no analyze artifact in state.json | Provide phase number, topic, or run analyze first |
-| --gaps but no gap source | Run maestro-verify first |
+| --gaps but no gap source | Run maestro-execute first |
 | Planning agent fails | Retry once with simplified context |
 | Plan-checker exceeds 3 rounds | Accept with warnings |
 </error_codes>

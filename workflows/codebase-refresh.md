@@ -57,6 +57,26 @@ specs_content = maestro spec load --category arch
 
 Used in Step 4-5 to validate refreshed docs against architectural expectations.
 
+### Step 3.6: KG Impact Analysis (if KG exists)
+
+```
+If .workflow/codebase/knowledge-graph.json exists:
+  Run: maestro kg diff-wiki --json
+  Parse output for affectedWiki entries.
+
+  If affectedWiki is non-empty:
+    Log WARNING for each affected wiki entry:
+      "KG impact: code changes affect [entry.id] — [entry.title] (via [reason])"
+
+    Add affected entry IDs to the refresh queue for human review.
+
+  Log summary: "KG analysis: {directNodes} direct, {impactedNodes} impacted KG nodes,
+    {affectedWiki.length} wiki entries flagged"
+
+If .workflow/codebase/knowledge-graph.json does not exist:
+  Skip silently (KG not generated).
+```
+
 ---
 
 ### Step 4: Re-scan Affected Components

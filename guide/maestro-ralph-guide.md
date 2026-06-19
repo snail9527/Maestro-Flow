@@ -35,6 +35,54 @@ Maestro Ralph 是 Maestro Flow 的**全自动推进引擎**：
 /maestro-ralph status                # 查看进度
 ```
 
+### Ralph CLI 子命令（v0.4.16+）
+
+除 slash 命令外，Ralph 还提供终端 CLI 子命令族：
+
+```bash
+maestro ralph session              # 列出活跃 ralph session
+maestro ralph skills               # 列出可用 skill
+maestro ralph skills --platform codex  # 按平台过滤
+maestro ralph next                 # 加载下一步（注入 skill defaults）
+maestro ralph check                # 检查当前 step 状态
+maestro ralph complete N --status DONE  # 标记 step 完成
+```
+
+| 子命令 | 功能 | 使用场景 |
+|--------|------|----------|
+| `session` | 列出活跃 session 及状态 | 查看当前运行的 ralph 会话 |
+| `skills` | 扫描 `.claude/commands/` 和 `.codex/skills/` 中可用 skill | 调试 skill 发现问题 |
+| `next` | 加载下一步的 SKILL.md 并注入 config defaults | ralph-execute 内部调用 |
+| `check` | 查询当前 step 执行状态 | 监控进度 |
+| `complete` | 标记 step 完成并写入 emit 结果 | ralph-execute 内部调用 |
+
+### 双平台 Skill 支持（v0.4.17+）
+
+Ralph 支持扫描两个平台的 skill 目录：
+
+| 平台 | Skill 目录 | Session 标识 |
+|------|-----------|-------------|
+| Claude | `.claude/commands/` | `platform: "claude"` |
+| Codex | `.codex/skills/` | `platform: "codex"` |
+
+`maestro ralph skills --platform codex` 可过滤只显示 codex 平台 skill。Session JSON 新增 `platform` 和 `cli_tool` 字段标识来源平台。
+
+### Skill Defaults 注入（v0.4.17+）
+
+`maestro ralph next` 加载 step 的 SKILL.md 时，自动注入 `skill-config.json` 中的默认参数。用户无需每次手动指定常用 flag：
+
+```json
+// .workflow/skill-config.json
+{
+  "maestro-execute": { "auto_commit": true },
+  "quality-review": { "dims": "bugs,security" }
+}
+```
+
+### Emit 格式（v0.4.16+）
+
+`A_EXEC_STEP` 输出精简为纯指令格式，不再包含冗余解释性说明。ralph-execute 输出 step 结果时使用统一的 emit 格式，便于下游消费和 session 恢复。
+
 ---
 
 ## 三种节点类型
@@ -135,9 +183,8 @@ brainstorm → init → roadmap → analyze → plan → execute
   "steps": [
     { "index": 0, "type": "skill", "skill": "maestro-plan", "args": "1", "status": "completed" },
     { "index": 1, "type": "skill", "skill": "maestro-execute", "args": "1", "status": "completed" },
-    { "index": 2, "type": "skill", "skill": "maestro-verify", "args": "1", "status": "completed" },
-    { "index": 3, "type": "decision", "skill": "maestro-ralph", "args": "{\"decision\":\"post-verify\",\"retry_count\":0,\"max_retries\":2}", "status": "running" },
-    { "index": 4, "type": "skill", "skill": "quality-review", "args": "1", "status": "pending" }
+    { "index": 2, "type": "decision", "skill": "maestro-ralph", "args": "{\"decision\":\"post-verify\",\"retry_count\":0,\"max_retries\":2}", "status": "running" },
+    { "index": 3, "type": "skill", "skill": "quality-review", "args": "1", "status": "pending" }
   ],
   "current_step": 3
 }

@@ -88,10 +88,10 @@ Read-only status report, then STOP.
 Before generating status output, read worker milestones:
 
 ```javascript
-const progressMsgs = mcp__ccw-tools__team_msg({
+const progressMsgs = mcp__maestro__team_msg({
   operation: "list", session_id: sessionId, type: "progress", last: 50
 })
-const blockerMsgs = mcp__ccw-tools__team_msg({
+const blockerMsgs = mcp__maestro__team_msg({
   operation: "list", session_id: sessionId, type: "blocker", last: 10
 })
 

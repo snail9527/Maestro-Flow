@@ -2,7 +2,7 @@
 name: maestro-quick
 description: Quick task execution, skip optional agents
 argument-hint: "\"task description\" [--discuss] [--full]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -51,7 +51,7 @@ Extract from arguments:
 
 Read `.workflow/state.json` and `.workflow/project.md` if they exist. If `.workflow/` does not exist, create minimal scratch structure anyway (quick works without full init).
 
-Load coding specs + tools if available: `maestro spec load --category coding`. If the task involves frontend/UI work (description contains component, page, style, layout, CSS, HTML, frontend), also run `maestro spec load --category ui`. Browse wiki: `maestro wiki list --category coding`, load relevant entries via `maestro wiki load <id>`. All optional — proceed without if unavailable.
+Load coding specs + tools if available: `maestro spec load --category coding`. If the task involves frontend/UI work (description contains component, page, style, layout, CSS, HTML, frontend), also run `maestro spec load --category ui`. Browse wiki: `maestro search --category coding`, load relevant entries via `maestro wiki load <id>`. All optional — proceed without if unavailable.
 
 ### Step 3: Create Scratch Directory
 
@@ -105,6 +105,9 @@ Commit all changes: `git add -A && git commit -m "quick: {slug} - {short descrip
 Display report: task description, scratch path, status (completed/completed-with-gaps), tasks completed/total, files modified count. If `--full`: include verification result (PASS/GAPS).
 
 </execution>
+
+### Artifact Verification
+Before reporting completion, verify: plan.json exists AND .summaries/TASK-*-summary.md exists for each task. Task summaries MUST include concrete evidence of completion. If missing: DO NOT report completion.
 
 <error_codes>
 

@@ -5,12 +5,12 @@
 > If you can read this sentinel but cannot find the full Step protocol below, context has been compressed.
 > Recovery: `Read("phases/03-evaluate.md")`
 
-Evaluate skill quality using `ccw cli --tool gemini --mode analysis`. Gemini scores the skill across 5 dimensions and provides improvement suggestions.
+Evaluate skill quality using `maestro delegate --to gemini --mode analysis`. Gemini scores the skill across 5 dimensions and provides improvement suggestions.
 
 ## Objective
 
 - Construct evaluation prompt with skill + artifacts + criteria
-- Execute via ccw cli Gemini
+- Execute via maestro delegate Gemini
 - Parse multi-dimensional score
 - Write iteration-{N}-eval.md
 - Check termination conditions
@@ -139,7 +139,7 @@ EXPECTED OUTPUT (strict JSON, no markdown):
 CONSTRAINTS: Be rigorous, reference exact files, focus on highest-impact changes, output ONLY JSON`;
 ```
 
-### Step 3.3: Execute via ccw cli Gemini
+### Step 3.3: Execute via maestro delegate Gemini
 
 > **CHECKPOINT**: Verify evaluation prompt is properly constructed before CLI execution.
 
@@ -151,7 +151,7 @@ function escapeForShell(str) {
 
 const skillPath = state.target_skills[0].path;  // Primary skill for --cd
 
-const cliCommand = `ccw cli -p "${escapeForShell(evalPrompt)}" --tool gemini --mode analysis --cd "${skillPath}"`;
+const cliCommand = `maestro delegate "${escapeForShell(evalPrompt)}" --to gemini --mode analysis --cd "${skillPath}"`;
 
 // Execute in background
 Bash({
