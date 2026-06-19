@@ -41,6 +41,8 @@ export interface SpecInjectionLogEntry {
   matchedEntries?: number;
   totalPromptKeywords?: number;
   dedupFilteredCount?: number;
+  // Domain-specific
+  domainTermsMatched?: number;
   // Plugin-specific
   inferredCategory?: string;
 }
@@ -115,7 +117,6 @@ const CONFIG_CACHE_TTL_MS = 30_000;
 // ---------------------------------------------------------------------------
 
 let _seq = 0;
-let _writeCount = 0;
 let _cachedConfig: { config: SpecAnalyticsConfig; projectPath: string; timestamp: number } | null = null;
 
 // ---------------------------------------------------------------------------
@@ -161,8 +162,7 @@ function resolveArchiveDir(projectPath: string): string {
 // ---------------------------------------------------------------------------
 
 function maybeRotate(logPath: string, archiveDir: string, maxSize: number): void {
-  _writeCount++;
-  if (_writeCount % ROTATION_CHECK_INTERVAL !== 0) return;
+  if (Math.random() >= (1 / ROTATION_CHECK_INTERVAL)) return;
   rotateIfLarge(logPath, maxSize, archiveDir);
 }
 

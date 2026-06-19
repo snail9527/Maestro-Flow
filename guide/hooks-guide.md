@@ -2,7 +2,7 @@
 title: "Maestro Hooks 系统指南"
 ---
 
-Maestro Hook 系统为 Claude Code 和 Codex 提供自动化的上下文管理、规范注入和工作流感知能力。Hook 以子进程方式运行，通过 stdin/stdout JSON 协议与宿主环境交互。
+Maestro Hook 系统为 Claude Code、Codex 和 Agy (Antigravity) 提供自动化的上下文管理、规范注入和工作流感知能力。Hook 以子进程方式运行，通过 stdin/stdout JSON 协议与宿主环境交互。
 
 ## 目录
 
@@ -23,6 +23,7 @@ Maestro Hook 系统为 Claude Code 和 Codex 提供自动化的上下文管理�
 |----|---------|---------|
 | Claude Code Hooks | `settings.json` | 子进程 `maestro hooks run <name>` |
 | Codex Hooks | `hooks.json` | 子进程 `maestro hooks run <name>` |
+| Agy (Antigravity) Hooks | `~/.gemini/antigravity-cli/` | Skills + Agents 自动发现 |
 | Coordinator Hooks | `WorkflowHookRegistry` | 进程内插件 |
 
 ### 协议
@@ -78,6 +79,19 @@ Maestro Hook 系统为 Claude Code 和 Codex 提供自动化的上下文管理�
 
 > **与 Claude Code 差异**：Codex `spec-injector` 用 SessionStart（无法拦截 Agent）；`workflow-guard` 仅防护 Bash；并发执行；正则 matcher。
 
+### Agy (Antigravity) Hook 清单（v0.4.19+）
+
+Agy 使用 Skills + Agents 自动发现机制，而非传统 Hook 注册：
+
+| 组件 | 安装路径 | 用途 |
+|------|---------|------|
+| `agy-context` | `~/.gemini/antigravity-cli/skills/` | 会话上下文注入 |
+| `agy-md-chinese` | `~/.gemini/antigravity-cli/skills/` | 中文回复规范注入 |
+| `agy-skills` | `~/.gemini/antigravity-cli/skills/` | Skill 自动发现 |
+| `agy-agents` | `~/.gemini/antigravity-cli/agents/` | Agent 定义同步 |
+
+> **与 Claude/Codex 差异**：Agy 不使用 stdin/stdout JSON 协议，而是通过目录约定自动发现 skills 和 agents。安装时将 `.claude/commands/` 和 `.claude/skills/` 镜像到 `~/.gemini/antigravity-cli/` 对应目录。
+
 ---
 
 ## 安装级别
@@ -101,6 +115,9 @@ maestro hooks install --level standard --project       # 项目级
 # Codex（需 ~/.codex/config.toml 启用 codex_hooks）
 maestro hooks install --target codex --level <level>
 maestro hooks install --target codex --level standard --project
+
+# Agy (Antigravity)
+maestro hooks install --target agy --level <level>
 
 # 查看
 maestro hooks status    # 安装状态
@@ -158,7 +175,7 @@ maestro hooks list      # 可用 Hook 列表
 
 **事件**: `UserPromptSubmit` | **级别**: `standard`
 
-匹配 Skill 调用时注入工作流状态 + 阶段产物树 + 前序成果（`additionalContext`，不重写 prompt）。支持模式：`/maestro-execute {N}`、`/maestro-plan {N}`、`/maestro-verify {N}`、`/maestro-analyze {N}`、`/maestro-milestone-audit`、`/quality-review {N}`、`/quality-test {N}`、`/maestro`、`/maestro-coordinate`、`/maestro-link-coordinate`
+匹配 Skill 调用时注入工作流状态 + 阶段产物树 + 前序成果（`additionalContext`，不重写 prompt）。支持模式：`/maestro-execute {N}`、`/maestro-plan {N}`、`/maestro-analyze {N}`、`/maestro-milestone-audit`、`/quality-review {N}`、`/quality-test {N}`、`/maestro`、`/maestro-coordinate`、`/maestro-link-coordinate`
 
 协调器 Skill 额外注入 coordinator-tracker bridge 的 next-step 提示：`Chain: full-lifecycle [3/6] | Status: paused | Next: quality-review 2 | Resume: /maestro -c`
 

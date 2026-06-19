@@ -125,6 +125,10 @@ Presence of `worktree-scope.json` signals "inside a worktree" — used by E003 v
 - Sync → resume work in worktree
 </execution>
 
+<invariants>
+**Artifact verification** — worktree-scope.json, scoped state.json, and worktrees.json registry update MUST all complete. If any missing: DO NOT report completion.
+</invariants>
+
 <error_codes>
 | Code | Severity | Condition | Recovery |
 |------|----------|-----------|----------|

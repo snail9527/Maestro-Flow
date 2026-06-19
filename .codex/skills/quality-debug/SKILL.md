@@ -2,7 +2,7 @@
 name: quality-debug
 description: Use when bugs, test failures, or unexpected behavior need systematic root cause investigation
 argument-hint: "[-y|--yes] [-c|--concurrency N] [--continue] \"[bug description] [--from-uat <phase>] [--parallel]\""
-allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -110,7 +110,9 @@ id,title,description,hypothesis,deps,context_from,wave,status,findings,evidence_
 | `deps` | Input | Semicolon-separated dependency task IDs (wave 2 depends on wave 1) |
 | `context_from` | Input | Semicolon-separated task IDs whose findings this task needs |
 | `wave` | Input | Wave number (1 = investigation, 2 = fix attempt) |
-| `status` | Lifecycle | `pending` (initial) → `confirmed`/`refuted`/`inconclusive`/`fixed`/`fix_failed`/`failed`/`skipped` (set by merge step from worker's `result_status`) |
+| `status` | Lifecycle | `pending` (initial) → `completed`/`failed`/`skipped` (set by merge step from worker's `result_status`) |
+| `hypothesis_verdict` | Lifecycle | Wave 1 only: `confirmed`/`refuted`/`inconclusive` (merged from worker output) |
+| `fix_result` | Lifecycle | Wave 2 only: `fixed`/`fix_failed` (merged from worker output) |
 | `findings` | Lifecycle | Key findings summary (max 500 chars; merged from worker output) |
 | `evidence_for` | Lifecycle | Evidence supporting the hypothesis (wave 1; merged) |
 | `evidence_against` | Lifecycle | Evidence refuting the hypothesis (wave 1; merged) |
@@ -205,7 +207,7 @@ mkdir -p {sessionFolder}
 
 2b. **Load codebase + wiki context** (optional, informs hypothesis generation):
    - If `.workflow/codebase/ARCHITECTURE.md` exists: read module boundaries to scope impact analysis
-   - Run `maestro wiki search "<symptom keywords>" --json 2>/dev/null`; if results: check for prior investigations on similar issues
+   - Run `maestro search "<symptom keywords>" --json 2>/dev/null`; if results: check for prior investigations on similar issues
    - Run `maestro spec load --category debug --keyword "<symptom keywords>"`; if tools found: extract known issues, workarounds, and root-cause notes to inform hypotheses
    - All are optional — proceed without if unavailable
 
@@ -250,21 +252,22 @@ spawn_agents_on_csv({
   output_schema: {
     type: "object",
     properties: {
-      id:               { type: "string" },
-      result_status:    { type: "string", enum: ["confirmed", "refuted", "inconclusive", "failed"] },
-      findings:         { type: "string", maxLength: 500 },
-      evidence_for:     { type: "string" },
-      evidence_against: { type: "string" },
-      error:            { type: "string" }
+      id:                  { type: "string" },
+      result_status:       { type: "string", enum: ["completed", "failed"] },
+      hypothesis_verdict:  { type: "string", enum: ["confirmed", "refuted", "inconclusive"], description: "Investigation outcome" },
+      findings:            { type: "string", maxLength: 500 },
+      evidence_for:        { type: "string" },
+      evidence_against:    { type: "string" },
+      error:               { type: "string" }
     },
-    required: ["id", "result_status", "findings"]
+    required: ["id", "result_status", "hypothesis_verdict", "findings"]
   }
 })
 ```
 
-3. **Merge**: for each row in `wave-1-results.csv`, look up master row by `id` and write `master.status = result_status`, then copy `findings`, `evidence_for`, `evidence_against`, `error`. Delete `wave-1.csv` and `wave-1-results.csv`.
+3. **Merge**: for each row in `wave-1-results.csv`, look up master row by `id` and write `master.status = result_status`, then copy `hypothesis_verdict`, `findings`, `evidence_for`, `evidence_against`, `error`. Delete `wave-1.csv` and `wave-1-results.csv`.
 4. **Wave 2 gating** (read from MASTER `tasks.csv` after merge, NOT from wave-1-results.csv):
-   - For each `FIX-H{N}` row: read its `context_from` hypothesis ID (e.g., `H{N}`) from master; if master `H{N}.status != "confirmed"`, set `FIX-H{N}.status = "skipped"` (with findings = "upstream {H{N}.status}").
+   - For each `FIX-H{N}` row: read its `context_from` hypothesis ID (e.g., `H{N}`) from master; if master `H{N}.hypothesis_verdict != "confirmed"`, set `FIX-H{N}.status = "skipped"` (with findings = "upstream hypothesis_verdict={H{N}.hypothesis_verdict}").
    - Only rows where `status == "pending"` proceed to wave 2.
 
 #### Wave 1 Worker Contract (WAVE1_INVESTIGATION_INSTRUCTION)
@@ -281,23 +284,24 @@ REQUIRED STEPS:
   1. Read shared discoveries: {sessionFolder}/discoveries.ndjson (may be empty)
   2. Scan codebase for evidence using Read/Grep/Glob (read-only investigation)
   3. Classify the hypothesis based on evidence collected:
-     - confirmed   → strong evidence supports the hypothesis (file:line proof)
-     - refuted     → strong evidence contradicts the hypothesis
-     - inconclusive → insufficient evidence within time budget; do NOT guess
-     - failed      → tool error / cannot read files / blocked by environment
+     - confirmed   → strong evidence supports the hypothesis (file:line proof) → result_status=completed, hypothesis_verdict=confirmed
+     - refuted     → strong evidence contradicts the hypothesis → result_status=completed, hypothesis_verdict=refuted
+     - inconclusive → insufficient evidence within time budget; do NOT guess → result_status=completed, hypothesis_verdict=inconclusive
+     - failed      → tool error / cannot read files / blocked by environment → result_status=failed
   4. Append discoveries to {sessionFolder}/discoveries.ndjson if reusable (root_cause / hypothesis_evidence types)
   5. Call report_agent_job_result EXACTLY ONCE with the verdict
 
 TERMINATION CONTRACT (mandatory — NO worker may end without calling report_agent_job_result):
-  - Success path  → result_status = confirmed | refuted, with evidence
-  - Timeout path  → if approaching {max_runtime_seconds}, STOP investigation and report inconclusive
-  - Failure path  → on any unrecoverable error, report failed with error message
+  - Success path  → result_status=completed, hypothesis_verdict = confirmed | refuted, with evidence
+  - Timeout path  → if approaching {max_runtime_seconds}, STOP investigation and report result_status=completed, hypothesis_verdict=inconclusive
+  - Failure path  → on any unrecoverable error, result_status=failed with error message
   - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
 
 OUTPUT (return via report_agent_job_result; must match output_schema):
   {
     "id": "<your row id>",
-    "result_status": "confirmed" | "refuted" | "inconclusive" | "failed",
+    "result_status": "completed" | "failed",
+    "hypothesis_verdict": "confirmed" | "refuted" | "inconclusive",
     "findings": "<one-sentence summary, max 500 chars>",
     "evidence_for": "<bullet list of file:line refs supporting, or empty>",
     "evidence_against": "<bullet list of file:line refs refuting, or empty>",
@@ -328,18 +332,19 @@ spawn_agents_on_csv({
     type: "object",
     properties: {
       id:            { type: "string" },
-      result_status: { type: "string", enum: ["fixed", "fix_failed", "failed"] },
+      result_status: { type: "string", enum: ["completed", "failed"] },
+      fix_result:    { type: "string", enum: ["fixed", "fix_failed"], description: "Fix attempt outcome" },
       findings:      { type: "string", maxLength: 500 },
       fix_applied:   { type: "string" },
       verified:      { type: "string", enum: ["true", "false"] },
       error:         { type: "string" }
     },
-    required: ["id", "result_status", "findings", "verified"]
+    required: ["id", "result_status", "fix_result", "findings", "verified"]
   }
 })
 ```
 
-4. **Merge**: write `master.status = result_status`, copy `findings`, `fix_applied`, `verified`, `error`. Delete `wave-2.csv` and `wave-2-results.csv`.
+4. **Merge**: write `master.status = result_status`, copy `fix_result`, `findings`, `fix_applied`, `verified`, `error`. Delete `wave-2.csv` and `wave-2-results.csv`.
 
 #### Wave 2 Worker Contract (WAVE2_FIX_INSTRUCTION)
 
@@ -359,16 +364,17 @@ REQUIRED STEPS:
   5. Call report_agent_job_result EXACTLY ONCE
 
 TERMINATION CONTRACT (mandatory):
-  - Success path → fix applied AND verified → result_status=fixed, verified="true"
-  - Partial path → fix applied but verification failed → result_status=fix_failed, verified="false"
-  - Timeout path → approaching {max_runtime_seconds} with no fix applied → result_status=fix_failed with error="timeout"
+  - Success path → fix applied AND verified → result_status=completed, fix_result=fixed, verified="true"
+  - Partial path → fix applied but verification failed → result_status=completed, fix_result=fix_failed, verified="false"
+  - Timeout path → approaching {max_runtime_seconds} with no fix applied → result_status=completed, fix_result=fix_failed with error="timeout"
   - Failure path → cannot apply fix (file missing, parse error, etc.) → result_status=failed
   - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
 
 OUTPUT (return via report_agent_job_result; must match output_schema):
   {
     "id": "<your row id>",
-    "result_status": "fixed" | "fix_failed" | "failed",
+    "result_status": "completed" | "failed",
+    "fix_result": "fixed" | "fix_failed",
     "findings": "<one-sentence summary of what was changed, max 500 chars>",
     "fix_applied": "<file:line description of the change>",
     "verified": "true" | "false",
@@ -400,19 +406,19 @@ CONSTRAINTS:
 5. **Register artifact** (phase-scoped only): Append to `state.json.artifacts[]` with `type: "debug"`, `id: DBG-NNN`, `depends_on: triggering_review_id || exec_art.id`.
 
 6. **Post-debug Knowledge Inquiry**: Prompt user to capture knowledge when:
-   - Recurring root cause pattern detected -> `/spec-add debug`
-   - Non-obvious fix strategy used -> `/spec-add learning`
-   - Architectural gap identified -> `/spec-add arch`
+   - Recurring root cause pattern detected -> `$spec-add debug`
+   - Non-obvious fix strategy used -> `$spec-add learning`
+   - Architectural gap identified -> `$spec-add arch`
 
 8. **Next step routing**:
 
 | Result | Suggestion |
 |--------|------------|
-| All fixes verified | Run tests: `Skill({ skill: "quality-test", args: "{phase}" })` |
-| Fixes applied, not verified | Re-verify: `Skill({ skill: "maestro-verify", args: "{phase}" })` |
-| Confirmed but no fix | Plan fixes: `Skill({ skill: "maestro-plan", args: "{phase} --gaps" })` |
+| All fixes verified | Run tests: `$quality-test "{phase}"` |
+| Fixes applied, not verified | Re-execute: `$maestro-execute "{phase}"` |
+| Confirmed but no fix | Plan fixes: `$maestro-plan "{phase} --gaps"` |
 | All inconclusive | Resume with more context or manual investigation |
-| From UAT, all diagnosed | `Skill({ skill: "quality-test", args: "{phase} --auto-fix" })` |
+| From UAT, all diagnosed | `$quality-test "{phase} --auto-fix"` |
 
 9. Display summary.
 

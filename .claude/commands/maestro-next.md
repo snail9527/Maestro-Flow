@@ -12,12 +12,8 @@ allowed-tools:
 ---
 
 <purpose>
-单链推荐：解析 intent + project state → 路由表评分 → 推荐**单个原子命令** → 确认后通过 `Skill()` 执行。
-
-与 `/maestro` / `/maestro-ralph` 区别：
-- 不创建 session、不构建 chain、不写 status.json
-- 始终只推 1 个 top pick，最多列 2-3 个备选
-- 适用场景：意图清晰且单步即可完成；或需要定向推荐时
+解析 intent + project state → 路由表评分 → 推荐单个原子命令 → 确认后 `Skill()` 执行。
+不创建 session、不构建 chain、不写 status.json。
 </purpose>
 
 <context>
@@ -112,8 +108,7 @@ ls -la .workflow/.maestro/ 2>$null | head -5  # 进行中的 session
 | 有 roadmap，未启动 phase | analyze | `maestro-analyze {phase}` |
 | 最新 artifact = analyze | plan | `maestro-plan {phase}` |
 | 最新 artifact = plan | execute | `maestro-execute {phase}` |
-| 最新 artifact = execute | verify | `maestro-verify {phase}` |
-| verify passed | review | `quality-review {phase}` |
+| 最新 artifact = execute | review | `quality-review {phase}` |
 | review verdict=PASS | test-gen | `quality-auto-test {phase}` |
 | 测试全绿 | milestone-audit | `maestro-milestone-audit` |
 | 当前 milestone 全 phase 完成 | milestone-complete | `maestro-milestone-complete` |
@@ -122,7 +117,7 @@ ls -la .workflow/.maestro/ 2>$null | head -5  # 进行中的 session
 **Maestro Lifecycle 主线：**
 ```
 brainstorm → blueprint → init → analyze-macro → roadmap
-   → [per phase] analyze → plan → execute → verify
+   → [per phase] analyze → plan → execute (includes verification)
    → [quality gate] review → auto-test → test
    → milestone-audit → milestone-complete → milestone-release
 ```
@@ -157,19 +152,19 @@ brainstorm → blueprint → init → analyze-macro → roadmap
 | 分析 / analyze / 多维度调研 | `maestro-analyze` |
 | 规划 / plan / 任务分解 | `maestro-plan` |
 | 实现 / 执行 / execute | `maestro-execute` |
-| 验证 / verify / 验收 | `maestro-verify` |
+| 验证 / verify / 验收 | `maestro-execute` |
 | 调试 / debug / 排查 / bug | `quality-debug` |
 | 审查 / review / 代码审查 | `quality-review` |
 | 测试 / test / UAT | `quality-test` / `quality-auto-test` |
 | 重构 / refactor / 技术债 | `quality-refactor` |
 | 同步文档 / sync docs | `quality-sync` |
-| 回顾 / retro | `quality-retrospective` / `learn-retro` |
+| 回顾 / retro | `quality-retrospective` |
 | issue / 缺陷管理 | `manage-issue` / `manage-issue-discover` |
-| wiki / 知识图谱 | `manage-wiki` / `wiki-connect` / `wiki-digest` |
+| wiki / 知识图谱 | `manage-wiki` (含 connect/digest 子命令) |
 | spec / 规则 / 约束 | `spec-load` / `spec-add` / `spec-setup` |
 | 项目初始化 / init | `maestro-init` |
 | 状态 / status / 仪表盘 | `manage-status` |
-| 文档重建 / codebase 文档 | `manage-codebase-rebuild` / `manage-codebase-refresh` |
+| 文档重建 / codebase 文档 | `manage-codebase-rebuild` / `quality-sync` |
 | 安全 / security / OWASP | `security-audit` |
 | 跟读 / 学习 / 阅读源码 | `learn-follow` / `learn-investigate` |
 | 第二意见 / challenge / consult | `learn-second-opinion` |
@@ -185,9 +180,9 @@ brainstorm → blueprint → init → analyze-macro → roadmap
 |----|------|---------|
 | Learning | 接触新代码/未知模块 | `learn-follow` → `learn-decompose` → `learn-second-opinion` |
 | Knowledge | 提炼经验 / 沉淀知识 | `manage-harvest` → `manage-knowhow-capture` → `spec-add` |
-| Wiki | 知识图谱整理 | `manage-wiki` → `wiki-connect` → `wiki-digest` |
+| Wiki | 知识图谱整理 | `manage-wiki health` → `manage-wiki connect` → `manage-wiki digest` |
 | Issue | 缺陷管理 | `manage-issue-discover` → `manage-issue` |
-| 文档同步 | 代码大改后 | `quality-sync` → `manage-codebase-refresh` |
+| 文档同步 | 代码大改后 | `quality-sync` → `manage-codebase-rebuild` (if major) |
 | 重构 | 技术债积累 | `quality-refactor` → `quality-review` |
 | 发布 | 里程碑结束 | `maestro-milestone-audit` → `maestro-milestone-release` |
 | 并行开发 | 多 milestone 并行 | `maestro-fork` → ... → `maestro-merge` |
@@ -218,7 +213,13 @@ brainstorm → blueprint → init → analyze-macro → roadmap
 执行参数: <args>
 ```
 
-`--dry-run` 展示后结束；`-y` 直接 S_EXECUTE；否则 AskUserQuestion 提供：执行 top pick / 选备选 / 修改参数 / 取消。
+`--dry-run` 展示后结束；`-y` 直接 S_EXECUTE；否则：
+
+AskUserQuestion (single-select, header: "执行确认"):
+- **执行推荐** (Recommended) — run top pick with shown args
+- **选择备选** — pick from alternative commands
+- **修改参数** — adjust args before executing
+- **取消** — do nothing
 
 </presentation>
 

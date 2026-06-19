@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
+import type { GraphNode, GraphEdge, Layer, TourStep, KnowledgeGraph } from '../../../../src/graph/types.js';
 import type { WikiEntry, WikiStatus } from './wiki-types.js';
 
 function slugify(s: string): string {
@@ -88,6 +89,7 @@ export function adaptIssueRow(
     },
     scope: null,
     category: issueType || null,
+    specCategory: null,
     createdBy: null,
     sourceRef: id,
     parent: null,
@@ -147,6 +149,210 @@ export async function loadVirtualJsonEntries(
   } catch (err) {
     warn(`adapter-fail:${absPath}`, `adapter failed at ${absPath}: ${(err as Error).message}`);
     return [];
+  }
+}
+
+// ── Knowledge Graph adapter ───────────────────────────────────────────
+// Maps .workflow/codebase/knowledge-graph.json → virtual knowhow entries.
+// Nodes become searchable wiki entries; edges are stored in ext.kgEdges
+// for high-fidelity traversal while related[] feeds standard graph analysis.
+// Layers and tour steps get their own entries for macro navigation.
+
+export interface KgAdapterOptions {
+  maxRelatedPerNode: number;
+  maxSummaryLength: number;
+  maxTags: number;
+}
+
+const DEFAULT_KG_OPTIONS: KgAdapterOptions = {
+  maxRelatedPerNode: 12,
+  maxSummaryLength: 240,
+  maxTags: 10,
+};
+
+const KG_NODE_TYPE_CATEGORY: Record<string, string> = {
+  file: 'arch',
+  module: 'arch',
+  package: 'arch',
+  directory: 'arch',
+  namespace: 'arch',
+  layer: 'arch',
+  function: 'coding',
+  method: 'coding',
+  class: 'coding',
+  interface: 'coding',
+  type: 'coding',
+  enum: 'coding',
+  variable: 'coding',
+  constant: 'coding',
+  component: 'coding',
+  hook: 'coding',
+  concept: 'arch',
+  pattern: 'arch',
+  api: 'coding',
+  route: 'coding',
+  config: 'coding',
+};
+
+function kgCategory(nodeType: string): string {
+  return KG_NODE_TYPE_CATEGORY[nodeType] ?? 'arch';
+}
+
+function stableKgId(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+export function adaptKnowledgeGraph(
+  parsed: unknown,
+  sourcePath: string,
+  opts: KgAdapterOptions = DEFAULT_KG_OPTIONS,
+): WikiEntry[] {
+  if (!parsed || typeof parsed !== 'object') return [];
+  const graph = parsed as Partial<KnowledgeGraph>;
+  const nodes = graph.nodes ?? [];
+  const edges = graph.edges ?? [];
+  const layers = graph.layers ?? [];
+  const tour = graph.tour ?? [];
+  if (nodes.length === 0) return [];
+
+  const ts = toIso(graph.project?.analyzedAt);
+  const out: WikiEntry[] = [];
+
+  // Build outgoing edge index: nodeId → edges from that node (limited)
+  const outEdges = new Map<string, GraphEdge[]>();
+  for (const e of edges) {
+    if (!e.source || !e.target) continue;
+    const list = outEdges.get(e.source) ?? [];
+    list.push(e);
+    outEdges.set(e.source, list);
+  }
+
+  // Node entries
+  for (const n of nodes) {
+    if (!n?.id) continue;
+    const nodeEdges = outEdges.get(n.id) ?? [];
+    const relatedIds = nodeEdges
+      .slice(0, opts.maxRelatedPerNode)
+      .map(e => `kg-${stableKgId(e.target)}`);
+
+    out.push({
+      id: `kg-${stableKgId(n.id)}`,
+      type: 'knowhow',
+      title: n.name || n.id,
+      summary: (n.summary || '').slice(0, opts.maxSummaryLength),
+      tags: ['kg', `kg:${n.type}`, ...(n.tags ?? []).slice(0, opts.maxTags)],
+      status: 'active',
+      created: ts,
+      updated: ts,
+      related: relatedIds,
+      source: { kind: 'virtual', path: sourcePath },
+      body: '',
+      raw: n,
+      ext: {
+        virtualKind: 'kg-node',
+        kgNodeId: n.id,
+        nodeType: n.type,
+        filePath: n.filePath ?? null,
+        complexity: n.complexity ?? null,
+        kgEdges: nodeEdges.map(e => ({
+          target: `kg-${stableKgId(e.target)}`,
+          type: e.type,
+          weight: e.weight ?? 1,
+          direction: e.direction,
+        })),
+      },
+      scope: null,
+      category: kgCategory(n.type),
+      specCategory: null,
+      createdBy: 'manage-codebase-rebuild',
+      sourceRef: n.id,
+      parent: null,
+    });
+  }
+
+  // Layer entries
+  for (const l of layers) {
+    if (!l?.id) continue;
+    out.push({
+      id: `kg-layer-${stableKgId(l.id)}`,
+      type: 'knowhow',
+      title: l.name || l.id,
+      summary: (l.description || '').slice(0, opts.maxSummaryLength),
+      tags: ['kg', 'kg:layer'],
+      status: 'active',
+      created: ts,
+      updated: ts,
+      related: (l.nodeIds ?? []).slice(0, opts.maxRelatedPerNode).map(id => `kg-${stableKgId(id)}`),
+      source: { kind: 'virtual', path: sourcePath },
+      body: '',
+      raw: l,
+      ext: { virtualKind: 'kg-layer', kgLayerId: l.id },
+      scope: null,
+      category: 'arch',
+      specCategory: null,
+      createdBy: 'manage-codebase-rebuild',
+      sourceRef: l.id,
+      parent: null,
+    });
+  }
+
+  // Tour step entries (chained via parent)
+  let prevTourId: string | null = null;
+  for (const step of tour) {
+    if (!step?.title) continue;
+    const stepId = `kg-tour-${step.order}`;
+    out.push({
+      id: stepId,
+      type: 'knowhow',
+      title: `Tour ${step.order}: ${step.title}`,
+      summary: (step.description || '').slice(0, opts.maxSummaryLength),
+      tags: ['kg', 'kg:tour'],
+      status: 'active',
+      created: ts,
+      updated: ts,
+      related: (step.nodeIds ?? []).slice(0, opts.maxRelatedPerNode).map(id => `kg-${stableKgId(id)}`),
+      source: { kind: 'virtual', path: sourcePath },
+      body: '',
+      raw: step,
+      ext: { virtualKind: 'kg-tour-step', order: step.order, languageLesson: step.languageLesson ?? null },
+      scope: null,
+      category: 'arch',
+      specCategory: null,
+      createdBy: 'manage-codebase-rebuild',
+      sourceRef: `tour-step-${step.order}`,
+      parent: prevTourId,
+    });
+    prevTourId = stepId;
+  }
+
+  return out;
+}
+
+/**
+ * Cross-reference KG entries with existing codebase doc-index entries.
+ * Matches by filePath → code_locations. Mutates kgEntries in place.
+ */
+export function crossReferenceKgWithDocIndex(
+  kgEntries: WikiEntry[],
+  docIndexEntries: WikiEntry[],
+): void {
+  const compByPath = new Map<string, string>();
+  for (const e of docIndexEntries) {
+    if (e.ext.virtualKind !== 'codebase-component') continue;
+    for (const loc of (e.ext.codeLocations ?? []) as string[]) {
+      compByPath.set(loc.replace(/\\/g, '/').toLowerCase(), e.id);
+    }
+  }
+
+  for (const kg of kgEntries) {
+    if (kg.ext.virtualKind !== 'kg-node') continue;
+    const fp = kg.ext.filePath as string | null;
+    if (!fp) continue;
+    const peer = compByPath.get(fp.replace(/\\/g, '/').toLowerCase());
+    if (peer) {
+      if (!kg.related.includes(peer)) kg.related.push(peer);
+      kg.ext.semanticDuplicateOf = peer;
+    }
   }
 }
 
@@ -238,6 +444,7 @@ export function adaptCodebaseDocIndex(parsed: unknown, sourcePath: string): Wiki
       ext: { virtualKind: 'codebase-component', codeLocations: c.code_locations, symbols: c.symbols, docIndexPath: sourcePath },
       scope: null,
       category: 'arch',
+      specCategory: null,
       createdBy: 'manage-codebase-rebuild',
       sourceRef: c.id,
       parent: null,
@@ -268,6 +475,7 @@ export function adaptCodebaseDocIndex(parsed: unknown, sourcePath: string): Wiki
       ext: { virtualKind: 'codebase-feature', phase: f.phase, docIndexPath: sourcePath },
       scope: null,
       category: 'arch',
+      specCategory: null,
       createdBy: 'manage-codebase-rebuild',
       sourceRef: f.id,
       parent: null,
@@ -292,6 +500,7 @@ export function adaptCodebaseDocIndex(parsed: unknown, sourcePath: string): Wiki
       ext: { virtualKind: 'codebase-requirement', priority: r.priority, acceptanceCriteria: r.acceptance_criteria },
       scope: null,
       category: 'review',
+      specCategory: null,
       createdBy: 'manage-codebase-rebuild',
       sourceRef: r.id,
       parent: r.feature_id ? `codebase-feat-${r.feature_id.toLowerCase()}` : null,
@@ -317,6 +526,7 @@ export function adaptCodebaseDocIndex(parsed: unknown, sourcePath: string): Wiki
       ext: { virtualKind: 'codebase-adr', rationale: a.rationale },
       scope: null,
       category: 'arch',
+      specCategory: null,
       createdBy: 'manage-codebase-rebuild',
       sourceRef: a.id,
       parent: null,
@@ -498,6 +708,7 @@ export function adaptSessionArchive(
     },
     scope: null,
     category: SESSION_TYPE_CATEGORY[sessionType] ?? null,
+    specCategory: null,
     createdBy: sessionType,
     sourceRef: arch.session_id ?? null,
     parent: null,

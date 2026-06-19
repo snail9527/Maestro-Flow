@@ -75,6 +75,7 @@ export function createWikiRoutes(
       issue: 0,
       knowhow: 0,
       note: 0,
+      domain: 0,
     };
     const tagCounts: Record<string, number> = {};
     for (const d of index.entries) {

@@ -2,7 +2,7 @@
 name: maestro-analyze
 description: Use when a topic needs structured multi-dimensional investigation before planning or decision-making
 argument-hint: "[-y|--yes] [-c|--concurrency N] [--continue] [--from <source>] \"<phase|topic> [-q|--quick] [--gaps [ISS-ID]]\""
-allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -36,8 +36,8 @@ $ARGUMENTS -- phase number, topic text, and optional flags.
 <interview_protocol>
 Interview the user relentlessly until shared understanding is reached. Active only in interactive mode; skip when `-y/--yes`, `--continue`, or input is already specific (explicit phase number or unambiguous topic).
 
-- One decision per turn via AskUserQuestion with 2–4 options + a (Recommended) default. The user controls termination — keep interviewing until convergence; they can interrupt naturally at any time.
-- Search-first when uncertain: before asking, resolve via `state.json`, `roadmap.md`, `issues.jsonl`, `maestro spec load`, `maestro wiki search`, Grep, Read, or — for open-ended multi-file scans — `maestro delegate ... --role explore`. Never ask what code or memory can verify; never bounce your own ambiguity back to the user — search first, then ask only what truly needs human judgment.
+- One decision per turn via request_user_input with 2–4 options + a (Recommended) default. The user controls termination — keep interviewing until convergence; they can interrupt naturally at any time.
+- Search-first when uncertain: before asking, resolve via `state.json`, `roadmap.md`, `issues.jsonl`, `maestro spec load`, `maestro search`, Grep, Read, or — for open-ended multi-file scans — `maestro delegate ... --role explore`. Never ask what code or memory can verify; never bounce your own ambiguity back to the user — search first, then ask only what truly needs human judgment.
 - Writeback cadence: each settled decision is immediately appended/updated in `context.md` "Interview Decisions" (and mirrored into `analysis.md` in full mode). Do NOT batch writeback to the end — partial decisions must already be on disk before the next question.
 - Walk the decision dependency tree strictly: scope → depth → dimensions → Go/No-Go threshold. Do not open the next branch until the current one is settled.
 - Scope guard: only ask about decisions owned by `analyze`. Do not prejudge plan/execute concerns.
@@ -87,6 +87,9 @@ Available exploration dimensions: architecture, implementation, performance, sec
 8. **Tri-output**: context.md + context-package.json always. analysis.md (full only) + conclusions.json (full + quick — quick writes minimal with `scope_verdict` + `implementation_scope[]`). Gaps mode writes to issues.jsonl + context.md + context-package.json
 9. **D-007 milestone resolution**: numeric scope MUST reverse-lookup `state.json.milestones[].phase_slugs`. NEVER read `current_milestone` directly for phase-scoped artifact registration.
 10. **scope_verdict mandatory** (D-003): macro/adhoc/standalone scopes MUST produce `scope_verdict ∈ {small, medium, large}` in conclusions.json. Drives downstream chain (roadmap vs plan).
+11. **Invariant violation = BLOCK** — violating any invariant above blocks the current operation. Do NOT bypass for "efficiency" or "clear intent" reasons.
+12. **Evidence required on decisions** — every decision in context.md MUST cite evidence from Wave 1 exploration findings or Wave 2 scores. Decisions citing only orchestrator's manual file reading are flagged LOW CONFIDENCE.
+13. **Degradation must be marked** — when graceful degradation (invariant 7) activates, ALL downstream outputs inherit a LOW CONFIDENCE flag. Record in discoveries.ndjson: `{ type: "degradation_event", data: { wave, failed_tasks, impact } }`.
 </invariants>
 
 <state_machine>
@@ -231,7 +234,7 @@ Gray area detection: domain-aware (things users SEE/CALL/RUN/READ), phase-specif
 1. Export results.csv
 2. **Confidence scoring** (full mode): factors -- findings_depth(.30), evidence_strength(.25), coverage_breadth(.20), user_validation(.15), consistency(.10). Thresholds: <60% deeper, 60-80% optional, 80-95% converging, >95% converge.
 3. Auto-create issues from Deferred items -> issues.jsonl
-4. Spec enrichment: Locked decisions -> `maestro spec add arch`; code patterns -> `maestro spec add coding`
+4. Spec enrichment: Locked decisions -> `maestro spec add arch "<title>" "<content>" --keywords <kw> --description "<summary>"`; code patterns -> `maestro spec add coding "<title>" "<content>" --keywords <kw> --description "<summary>"`
 5. Register artifact in state.json (type: analyze, includes context_package field pointing to context-package.json)
 6. Copy outputs to scratchDir, display summary
 7. **Next-step routing** (D-003 §5.3 — macro scope uses `scope_verdict` for downstream chain selection):
@@ -249,6 +252,16 @@ Gray area detection: domain-aware (things users SEE/CALL/RUN/READ), phase-specif
    | Gaps | Need more context | `$maestro-analyze --gaps {ISS-ID}` |
 
 </actions>
+
+### Artifact Verification (before S_AGGREGATE)
+
+Before transitioning to S_AGGREGATE, verify ALL expected outputs exist:
+```
+FULL_MODE_REQUIRED = ["tasks.csv", "context.md", "context-package.json", "analysis.md", "conclusions.json"]
+QUICK_MODE_REQUIRED = ["tasks.csv", "context.md", "context-package.json", "conclusions.json"]
+GAPS_MODE_REQUIRED = ["tasks.csv", "context.md", "context-package.json"]
+```
+If any artifact is missing for the active mode: DO NOT proceed to S_AGGREGATE. Go back and produce the missing artifact.
 
 </state_machine>
 
@@ -272,8 +285,8 @@ Protocol: read before analysis, append-only, dedup by type+key.
 | --gaps but no issues found | Abort: "No open/registered issues" |
 | --gaps ISS-ID not found | Abort: "Issue not found" |
 | Phase directory not found | List available phases, abort |
-| All exploration agents failed | Proceed to scoring with limited context |
-| All scoring agents failed | Skip analysis.md, decision extraction only |
+| All exploration agents failed | Retry once. If still fails: proceed to scoring but flag ALL downstream decisions as LOW CONFIDENCE in discoveries.ndjson |
+| All scoring agents failed | Retry once. If still fails: produce decision-only context.md but flag ALL decisions as LOW CONFIDENCE |
 | Synthesis agent failed | Minimal context.md from raw scores/exploration |
 | Continue mode: no session found | List available sessions |
 </error_codes>

@@ -10,10 +10,7 @@ allowed-tools:
   - Grep
 ---
 <purpose>
-Add a knowledge entry to the specs system using `<spec-entry>` closed-tag format.
-Each category maps 1:1 to a single target file — no dual-write.
-Supports 4 scopes: project (default), global, team, personal.
-Entries use `category` attribute to declare which category they belong to.
+Add `<spec-entry>` to specs by category. 4 scopes: project (default), global, team, personal.
 </purpose>
 
 <required_reading>
@@ -24,6 +21,7 @@ Entries use `category` attribute to declare which category they belong to.
 $ARGUMENTS -- expects `[--scope <scope>] [--uid <uid>] <category> <content>`
 
 **Options:**
+- `--description <desc>` — One-line description for search results (falls back to content[:240])
 - `--ref <path>` — Create as index entry referencing a knowhow document. If the path exists, only creates the spec index entry. If path doesn't exist, also creates the knowhow file.
 - `--knowhow-type <type>` — Knowhow document type when creating with --ref (asset, blueprint, document, template, recipe, reference, decision)
 
@@ -34,12 +32,13 @@ Scope-to-directory mapping, category-to-file mapping, and entry format defined i
 # English content → English keywords
 /spec-add coding "Named exports" "Always use named exports" --keywords "exports,naming"
 
-# Chinese content → Chinese keywords (匹配中文 prompt)
+# With description for search results
+/spec-add coding "OAuth PKCE Flow" "完整 PKCE 集成流程" --keywords "oauth,pkce" --description "OAuth 2.0 PKCE 认证流程规范"
+
+# Chinese content → Chinese keywords
 /spec-add coding "命名导出规范" "始终使用命名导出" --keywords "导出,命名,模块"
 
-# Mixed → bilingual keywords
-/spec-add coding "OAuth PKCE Flow" "完整 PKCE 集成流程" --ref knowhow/RCP-oauth-pkce.md --keywords "oauth,pkce,认证,授权"
-
+# Ref mode
 /spec-add arch "OAuth PKCE 集成" "完整流程设计" --ref knowhow/AST-oauth-flow.md
 ```
 </context>
@@ -64,5 +63,15 @@ Follow '~/.maestro/workflows/specs-add.md' completely.
 - [ ] Entry written in `<spec-entry>` closed-tag format
 - [ ] Entry appended to correct target file for scope
 - [ ] Confirmation report displayed with scope, path, keywords
-- [ ] Next step: `maestro spec load --scope <scope> --keyword {keyword}` to verify
+- [ ] Next step routed
 </success_criteria>
+
+<completion>
+### Next-step routing
+
+| Condition | Suggestion |
+|-----------|-----------|
+| Verify entry added | `maestro spec load --scope <scope> --keyword {keyword}` |
+| Add more entries | `/spec-add <category>` |
+| View all specs | `/spec-load --category <category>` |
+</completion>

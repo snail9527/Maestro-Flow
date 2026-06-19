@@ -120,7 +120,7 @@ When tackling unfamiliar domains or cross-cutting concerns, search existing know
 
 When execution surfaces non-obvious knowledge (decisions, root causes, pitfalls, patterns), persist it:
 
-- **Spec entry** (short rule/constraint) → `/spec-add <category> "title" "content" --keywords kw1,kw2`
+- **Spec entry** (short rule/constraint) → `/spec-add <category> "title" "content" --keywords kw1,kw2 --description "summary"`
 - **Knowhow document** (detailed recipe/template/decision/reference) → `/manage-knowhow-capture`
 
 Category routing: decisions→`arch`, patterns→`coding`, pitfalls→`debug`/`learning`, rules→`review`, test strategy→`test`.

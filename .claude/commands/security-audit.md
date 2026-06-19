@@ -36,6 +36,25 @@ $ARGUMENTS — Parse tier and scope:
 
 <execution>
 
+### Phase Gates (MANDATORY, BLOCKING)
+
+**GATE 1: Recon → Scan**
+- REQUIRED: Tech stack detected and entry points identified.
+- REQUIRED: Auth/authz modules listed and data flow mapped.
+- BLOCKED if missing: cannot scan without entry points and data flow baseline.
+
+**GATE 2: Scan → Report** (tier-gated)
+- REQUIRED: OWASP Top 10 scan completed (all tiers).
+- REQUIRED: Dependency audit completed (all tiers).
+- REQUIRED: Secrets + CI/CD scan completed (standard/deep only).
+- REQUIRED: STRIDE + git history completed (deep only).
+- BLOCKED if tier-required scans incomplete: finish all tier-applicable phases before reporting.
+
+**GATE 3: Report → Completion**
+- REQUIRED: Severity matrix produced with file:line references and remediation.
+- REQUIRED: Artifact registered in state.json.
+- BLOCKED if missing: do not emit completion status without severity matrix.
+
 **Phase 1: Reconnaissance**
 
 1. Detect tech stack from package.json / go.mod / requirements.txt / Cargo.toml
@@ -139,16 +158,7 @@ LOW ({count}):
 Summary: {total} findings ({critical} critical, {high} high, {medium} medium, {low} low)
 ```
 
-Emit completion status:
-```
---- COMPLETION STATUS ---
-STATUS: DONE|DONE_WITH_CONCERNS
-CONCERNS: {count} critical findings require immediate action
-NEXT: /quality-review
---- END STATUS ---
-```
-
-**Register artifact on completion** (so retrospective/harvest can trace this audit):
+**Register artifact on completion:**
 ```
 Append to state.json.artifacts[]:
 {
@@ -168,6 +178,47 @@ Append to state.json.artifacts[]:
 ```
 Write findings report to the same `path` (severity matrix, file:line refs, remediation).
 </execution>
+
+<completion>
+### Standalone report
+
+```
+--- COMPLETION STATUS ---
+STATUS: DONE|DONE_WITH_CONCERNS
+CONCERNS: {count} critical findings require immediate action
+--- END STATUS ---
+```
+
+Status mapping:
+- **DONE** — No critical/high findings
+- **DONE_WITH_CONCERNS** — Critical/high findings documented with remediation
+
+### Ralph-invoked completion
+
+End the step by calling the CLI (no text block output):
+```
+maestro ralph complete <idx> --status {STATUS} [--evidence {path}]
+```
+
+### Next-step routing
+
+| Condition | Suggestion |
+|-----------|-----------|
+| No critical findings | `/quality-review {phase}` |
+| Critical findings need fix | `/maestro-plan {phase} --gaps` |
+| Need deeper analysis | `/security-audit deep --scope {path}` |
+| Want dependency remediation | Fix vulnerabilities, then re-run `/security-audit` |
+</completion>
+
+<error_codes>
+| Code | Severity | Condition | Recovery |
+|------|----------|-----------|----------|
+| E001 | error | No source files found in scope | Verify --scope path exists |
+| E002 | error | Tech stack not detected | Manually specify entry points |
+| W001 | warning | npm audit / dependency tool unavailable | Skip dependency phase, note limitation |
+| W002 | warning | Git history scan failed | Skip Phase 7, note limitation |
+| W003 | warning | Partial scan (some files inaccessible) | Report coverage gap in findings |
+</error_codes>
 
 <success_criteria>
 - [ ] Tech stack identified and entry points mapped

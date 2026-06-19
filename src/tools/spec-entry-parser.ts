@@ -15,6 +15,8 @@ export interface SpecEntryParsed {
   date: string;
   source?: string;
   ref?: string;
+  description?: string;
+  domain?: string;
   title: string;
   content: string;
   lineStart: number;
@@ -97,9 +99,9 @@ export function parseSpecEntries(content: string): ParseResult {
     // Parse attributes
     const attrs = parseAttributes(attrStr);
 
-    // Extract title from first ### heading
+    // Extract title: attribute > ### heading > empty
     const titleMatch = body.match(HEADING_RE);
-    const title = titleMatch ? titleMatch[1].trim() : '';
+    const title = attrs.title || (titleMatch ? titleMatch[1].trim() : '');
 
     // Validate and build entry
     const ref = attrs.ref || undefined;
@@ -110,6 +112,8 @@ export function parseSpecEntries(content: string): ParseResult {
       date: attrs.date ?? '',
       source: attrs.source,
       ref,
+      description: attrs.description || undefined,
+      domain: attrs.domain || undefined,
       title,
       content: body.trim(),
       lineStart,
@@ -236,12 +240,15 @@ export function formatNewEntry(
   content: string,
   source?: string,
   ref?: string,
+  description?: string,
 ): string {
   const kwStr = keywords.map(k => k.toLowerCase().trim()).filter(Boolean).join(',');
   const sourceAttr = source ? ` source="${source}"` : '';
   const refAttr = ref ? ` ref="${ref}"` : '';
+  const descAttr = description ? ` description="${description}"` : '';
+  const titleAttr = ` title="${title}"`;
 
-  return `<spec-entry category="${category}" keywords="${kwStr}" date="${date}"${sourceAttr}${refAttr}>\n\n### ${title}\n\n${content}\n\n</spec-entry>`;
+  return `<spec-entry category="${category}" keywords="${kwStr}" date="${date}"${titleAttr}${descAttr}${sourceAttr}${refAttr}>\n\n### ${title}\n\n${content}\n\n</spec-entry>`;
 }
 
 // ============================================================================

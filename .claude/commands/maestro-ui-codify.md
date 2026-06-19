@@ -13,14 +13,8 @@ allowed-tools:
   - Skill
 ---
 <purpose>
-Codify UI design system from existing source code. 4-phase pipeline:
-
-1. **Validate** (inline): Parameter validation, workspace setup, file discovery
-2. **Extract** (3 parallel agents): Style Agent + Animation Agent + Layout Agent produce design-tokens.json, animation-tokens.json, layout-templates.json
-3. **Package** (agent): Copy tokens to package directory, generate preview.html + preview.css
-4. **Knowhow** (manifest + skill): Build knowhow-manifest.json, call codify-to-knowhow to persist as knowledge assets
-
-Position in pipeline: code -> **ui-codify** -> knowhow + specs
+Extract design system from source code into tokens, reference package, and knowledge assets.
+4-phase pipeline: validate → extract → package → knowhow.
 </purpose>
 
 <deferred_reading>
@@ -56,6 +50,39 @@ If specs not initialized, continue without — the workflow still produces valid
 Route to `~/.maestro/workflows/ui-codify.md` and follow completely.
 
 The workflow orchestrates 4 phases with deferred loading of phase-specific workflow files. Each phase reads its workflow file only when execution reaches that phase.
+
+### Phase Gates (MANDATORY, BLOCKING)
+
+**GATE Phase 1 → Phase 2: Validation → Extraction**
+- REQUIRED: Source path validated and file discovery completed.
+- REQUIRED: design-tokens.json generated with color, typography, spacing tokens.
+- BLOCKED if missing: source path invalid (E002) or design-tokens.json not generated — extraction cannot proceed without token foundation.
+
+**GATE Phase 2 → Phase 3: Extraction → Package**
+- REQUIRED: layout-templates.json generated with component patterns.
+- BLOCKED if missing: layout-templates.json absent — package generation requires component patterns as input.
+
+**GATE Phase 3 → Phase 4: Package → Knowhow**
+- REQUIRED: preview.html + preview.css generated as interactive showcase.
+- BLOCKED if missing: preview artifacts not generated — knowhow phase needs rendered reference for validation.
+
+**GATE Phase 4 → Completion: Knowhow → Done**
+- REQUIRED: knowhow-manifest.json created with AST/DCS assets and spec entries.
+- REQUIRED: codify-to-knowhow called and completed.
+- BLOCKED if missing: knowhow-manifest.json absent or codify-to-knowhow not invoked — knowledge assets not persisted.
+
+### Artifact Verification (before completion)
+
+```
+REQUIRED_ARTIFACTS = [
+  "design-tokens.json",      // Phase 1
+  "layout-templates.json",   // Phase 2
+  "preview.html",            // Phase 3
+  "preview.css",             // Phase 3
+  "knowhow-manifest.json"    // Phase 4
+]
+```
+If any artifact is missing: DO NOT report completion.
 </execution>
 
 <error_codes>
@@ -78,3 +105,13 @@ The workflow orchestrates 4 phases with deferred loading of phase-specific workf
 - [ ] codify-to-knowhow called and completed successfully
 - [ ] Temporary workspace cleaned up
 </success_criteria>
+
+<completion>
+### Next-step routing
+
+| Condition | Suggestion |
+|-----------|-----------|
+| Codify complete | Use extracted tokens in `maestro impeccable craft` for new builds |
+| Design system needs refinement | `maestro impeccable document` to regenerate DESIGN.md |
+| Knowledge assets persisted | `maestro search --type knowhow "design system"` to verify |
+</completion>

@@ -1,151 +1,43 @@
-# Delegate Execution Specification
-
-<purpose>
-Unified reference for `maestro delegate` — synchronous task delegation with broker-managed lifecycle, message injection, and MCP notifications.
-</purpose>
-
-**References**: `~/.maestro/cli-tools.json` (tool config), `~/.maestro/templates/cli/` (protocol + prompt templates)
-
----
-
-## 1. Quick Reference
-
-<context>
-
-### Command Syntax
+# Delegate Usage
 
 ```bash
 maestro delegate "<PROMPT>" [options]
 ```
 
-### Options
+## Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--to <tool>` | Explicit tool: gemini, qwen, codex, claude, opencode | First enabled in config |
-| `--role <role>` | Capability role: analyze, explore, review, implement, plan, brainstorm, research | — (resolves via config) |
-| `--mode <mode>` | `analysis` (read-only) or `write` (create/modify/delete) | `analysis` |
+| `--to <tool>` | gemini, qwen, codex, claude, opencode | First enabled |
+| `--role <role>` | analyze, explore, review, implement, plan, brainstorm, research | — |
+| `--mode <mode>` | `analysis` (read-only) / `write` (modify) | `analysis` |
 | `--model <model>` | Model override | Tool's `primaryModel` |
-| `--cd <dir>` | Working directory | Current directory |
-| `--rule <template>` | Load protocol + prompt template | — (optional) |
+| `--cd <dir>` | Working directory | Current |
+| `--rule <template>` | Protocol + prompt template | — |
 | `--id <id>` | Execution ID | Auto: `{prefix}-{HHmmss}-{rand4}` |
-| `--resume [id]` | Resume previous session (last if no id) | — |
+| `--resume [id]` | Resume previous session | — |
 | `--includeDirs <dirs>` | Additional directories (comma-separated) | — |
-| `--backend <type>` | Adapter backend: `direct` or `terminal` (tmux/wezterm) | `direct` |
 
-### Tool Resolution Priority
+Tool resolution: `--to` > `--role` > first enabled in config.
 
-1. `--to <tool>` — explicit tool selection (backward compat, highest priority)
-2. `--role <role>` — capability-based auto-selection via config
-3. No flag — first enabled tool in config
+**`--mode` is authoritative** — `MODE:` in prompt text is a hint only.
 
-### Role-Based Tool Selection
-
-Roles map to tools via `cli-tools.json` configuration:
-- User-defined roles in `roles` section override built-in defaults
-- Workspace `.maestro/cli-tools.json` overrides global `~/.maestro/cli-tools.json`
-- Built-in roles: `analyze`, `explore`, `review`, `implement`, `plan`, `brainstorm`, `research`
-
-### Mode Definition (Authoritative)
-
-| Mode | Permission | Auto-Invoke Safe | Use For |
-|------|-----------|------------------|---------|
-| `analysis` | Read-only | Yes | Review, exploration, diagnosis, architecture analysis |
-| `write` | Create/Modify/Delete | No — requires explicit intent | Implementation, bug fixes, refactoring |
-
-> `--mode` is the **authoritative** permission control. The `MODE:` field inside prompt text is a hint for the agent — both should be consistent, but `--mode` governs actual behavior.
-</context>
-
----
-
-## 2. Configuration
-
-<context>
-
-### Config File: `~/.maestro/cli-tools.json`
-
-| Field | Description |
-|-------|-------------|
-| `enabled` | Tool availability |
-| `primaryModel` | Default model |
-| `secondaryModel` | Fallback model |
-| `tags` | Capability tags (for caller-side routing) |
-| `type` | `builtin` / `cli-wrapper` / `api-endpoint` |
-
-> `api-endpoint` tools support **analysis only** — no file write capability.
-
-### Tool Selection
-
-1. Explicit `--to` specified → use it (validate enabled)
-2. No `--to` → first enabled tool in config order
-
-### Fallback Chain
-
-Primary model fails → `secondaryModel` → next enabled tool → first enabled (default).
-
-### MCP Server Startup
-
-```bash
-# Claude Code — load Maestro as development MCP server
-claude --dangerously-load-development-channels server:maestro --dangerously-skip-permissions
-```
-
-With MCP connected, all delegate tools are available programmatically.
-</context>
-
----
-
-## 3. Prompt Construction
-
-<context>
-
-### Assembly Order
-
-`maestro delegate` builds the final prompt as:
-
-1. **Mode protocol** — `~/.maestro/templates/cli/protocols/{mode}-protocol.md`
-2. **User prompt** — the positional `"<PROMPT>"` value
-3. **Rule template** — `~/.maestro/templates/cli/prompts/{rule}.txt` (if `--rule` specified)
-
-### Prompt Template (6 Fields)
+## Prompt Template
 
 ```
-PURPOSE: [goal] + [why] + [success criteria]
+PURPOSE: [goal] + [success criteria]
 TASK: [step 1] | [step 2] | [step 3]
 MODE: analysis|write
-CONTEXT: @[file patterns] | Memory: [prior work context]
-EXPECTED: [output format] + [quality criteria]
-CONSTRAINTS: [scope limits] | [special requirements]
+CONTEXT: @[file patterns] | Memory: [prior work]
+EXPECTED: [output format]
+CONSTRAINTS: [scope limits]
 ```
 
-- **PURPOSE**: What + Why + Success. Not "Analyze code" but "Identify auth vulnerabilities; success = OWASP Top 10 covered"
-- **TASK**: Specific verbs. Not "Review code" but "Scan for SQL injection | Check XSS | Verify CSRF"
-- **MODE**: Must match `--mode` flag
-- **CONTEXT**: File scope + memory from prior work
-- **EXPECTED**: Deliverable format, not just "Report"
-- **CONSTRAINTS**: Task-specific limits (vs `--rule` which loads generic templates)
+### CONTEXT Patterns
 
-### CONTEXT: File Patterns + Directory
-
-- `@**/*` — all files in working directory (default)
-- `@src/**/*.ts` — scoped pattern
-- `@../shared/**/*` — sibling directory (**requires `--includeDirs`**)
-
-**Rule**: If CONTEXT uses `@../dir/**/*`, must add `--includeDirs ../dir`.
-
-```bash
-maestro delegate "CONTEXT: @**/* @../shared/**/*" --to gemini --mode analysis \
-  --cd "src/auth" --includeDirs "../shared"
-```
-
-### CONTEXT: Memory
-
-Include when building on previous work:
-
-```
-Memory: Building on auth refactoring (commit abc123), implementing refresh tokens
-Memory: Integration with auth module, using shared error patterns
-```
+- `@**/*` — all files (default)
+- `@src/**/*.ts` — scoped
+- `@../shared/**/*` — sibling dir (**requires `--includeDirs ../shared`**)
 
 ### --rule Templates
 
@@ -157,93 +49,44 @@ Memory: Integration with auth module, using shared error patterns
 
 **Development**: `development-implement-feature`, `development-refactor-codebase`, `development-generate-tests`, `development-implement-component-ui`, `development-debug-runtime-issues`
 
-### Complete Example
+## Execution Rules
 
-```bash
-maestro delegate "PURPOSE: Identify OWASP Top 10 vulnerabilities in auth module; success = all critical/high documented with remediation
-TASK: Scan for injection flaws | Check auth bypass vectors | Evaluate session management | Assess data exposure
-MODE: analysis
-CONTEXT: @src/auth/**/* @src/middleware/auth.ts | Memory: Using bcrypt + JWT
-EXPECTED: Severity matrix, file:line references, remediation snippets, priority ranking
-CONSTRAINTS: Focus on authentication | Ignore test files
-" --to gemini --mode analysis --rule analysis-assess-security-risks --cd "src/auth"
-```
-</context>
-
----
-
-## 4. Execution
-
-<execution>
-
-### Calling Convention
-
-`maestro delegate` runs synchronously. Status summary and output are **auto-appended** on completion — no manual `output` or `status` commands needed.
-
-**Always** use `run_in_background: true` and **end your response immediately**:
+**ALWAYS** use `run_in_background: true`, then **stop immediately**:
 
 ```
 Bash({ command: "maestro delegate \"...\" --to gemini --mode analysis", run_in_background: true })
 ```
 
-When the background callback arrives, the result is already included:
-```
-[MAESTRO_EXEC_ID=gem-143022-a7f2]                             ← at start
-[DELEGATE COMPLETED] gem-143022-a7f2 gemini/analysis           ← status, on completion
---- Output ---
-<actual output content>                                        ← output, on completion
-```
-
-**Rules:**
 - NEVER use foreground Bash for delegate calls
-- NEVER output text or tool calls after the `run_in_background` Bash call
-- When the callback arrives, output is already included — directly use it
+- NEVER output text or tool calls after the background Bash call
+- Callback includes status + output — use it directly
 
-### Execution ID
+### Execution ID Prefix
 
-ID prefix: gemini→`gem`, qwen→`qwn`, codex→`cdx`, claude→`cld`, opencode→`opc`
+gemini→`gem`, qwen→`qwn`, codex→`cdx`, claude→`cld`, opencode→`opc`
 
-```bash
-maestro delegate "<PROMPT>" --to gemini --mode analysis    # auto-ID: gem-143022-a7f2
-maestro delegate "<PROMPT>" --to gemini --mode write --id my-task-1  # custom ID
-```
-
-### Session Resume
+### Resume
 
 ```bash
-maestro delegate "<PROMPT>" --to gemini --resume              # last session
-maestro delegate "<PROMPT>" --to gemini --mode write --resume <id>  # specific
-maestro delegate "<PROMPT>" --to gemini --resume <id1>,<id2>     # merge multiple
-```
-
-Resume auto-assembles previous conversation context. Warning emitted when context exceeds 32KB.
-
-### Job Lifecycle
-
-```
-queued → running → completed
-                 → failed
-                 → cancelled
-              ↗
-         input_required
+maestro delegate "<PROMPT>" --to gemini --resume           # last session
+maestro delegate "<PROMPT>" --to gemini --resume <id>      # specific
 ```
 
 ### Message Delivery
 
-| Mode | Behavior | Use For |
-|------|----------|---------|
-| `inject` | Routes to running worker stdin; non-interactive adapters auto cancel + relaunch | Supplementary context, course correction |
-| `after_complete` | Queues message; relaunches delegate with queued message on completion | Chained tasks, post-processing |
+| Mode | Use For |
+|------|---------|
+| `inject` | Supplementary context to running worker |
+| `after_complete` | Chained tasks after completion |
 
-</execution>
+```bash
+maestro delegate message <exec-id> "additional context"
+maestro delegate message <exec-id> "next task" --delivery after_complete
+```
 
----
+## Auto-Invoke Triggers
 
-## 5. Auto-Invoke Triggers
-
-<execution>
-
-Proactively invoke `maestro delegate` when these conditions are met — no user confirmation needed for `analysis` mode:
+Proactively invoke for `analysis` mode — no user confirmation needed:
 
 | Trigger | Suggested Rule |
 |---------|---------------|
@@ -253,49 +96,4 @@ Proactively invoke `maestro delegate` when these conditions are met — no user 
 | Pattern uncertainty | `analysis-analyze-code-patterns` |
 | Critical/security code paths | `analysis-assess-security-risks` |
 
-### Principles
-
-- Default `--mode analysis` (safe, read-only)
-- Always `Bash(run_in_background: true)` — stop immediately, wait for callback
-- Use `--role` for capability-based tool selection; fallback chain is config-driven
-- Rule suggestions are guidelines — choose the best fit
-- Use `inject` for supplementary context mid-execution; `after_complete` for chained multi-step tasks
-</execution>
-
----
-
-## 6. Workflows
-
-<execution>
-
-### Basic Usage
-
-```
-Bash({
-  command: 'maestro delegate "analyze auth module" --to gemini',
-  run_in_background: true
-})
-// → STOP, wait for callback
-// → callback includes status + output automatically
-```
-
-### Inject Supplementary Context
-
-```bash
-maestro delegate message gem-143022-a7f2 "Also check src/utils/sanitize.ts"
-# → accepted: true, delivery: inject
-```
-
-### Chain: Analyze → Fix
-
-```
-Bash({
-  command: 'maestro delegate "find SQL injection vulnerabilities" --to gemini',
-  run_in_background: true
-})
-// → STOP, wait for callback
-// → on callback: chain next step
-maestro delegate message gem-143022-a7f2 "Fix all critical vulnerabilities" --delivery after_complete
-// → queued, relaunches after analysis completes
-```
-</execution>
+**Always** `run_in_background: true`, default `--mode analysis`.

@@ -97,7 +97,7 @@ Keyword quality rules:
 ```
 Entry format (closed-tag), date = YYYY-MM-DD, title = first meaningful phrase:
 
-<spec-entry category="{category}" keywords="{kw1},{kw2},{kw3}" date="{YYYY-MM-DD}">
+<spec-entry category="{category}" keywords="{kw1},{kw2},{kw3}" date="{YYYY-MM-DD}" title="{title}" description="{one-line summary}">
 ### {title}
 {content}
 </spec-entry>

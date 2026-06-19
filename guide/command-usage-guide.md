@@ -2,18 +2,19 @@
 title: "Maestro 命令使用指南"
 ---
 
-Maestro 命令系统包含 53 个 slash 命令，分为 9 大类。本文档提供命令全景图和核心工作流导航。
+Maestro 命令系统包含 58 个 slash 命令，分为 9 大类。本文档提供命令全景图和核心工作流导航。
 
 ## 命令总览
 
 | 类别 | 命令数 | 前缀 | 职责 |
 |------|--------|------|------|
-| **核心工作流** | 16 | `maestro-*` | 项目初始化、规划、执行、验证、coordinate、milestones、overlays |
-| **管理** | 12 | `manage-*` | Issue 生命周期、代码库文档、知识捕获、记忆管理、harvest、status |
+| **核心工作流** | 19 | `maestro-*` | 项目初始化、规划、执行、验证、coordinate、milestones、overlays、swarm、companion、next |
+| **管理** | 13 | `manage-*` | Issue 生命周期、代码库文档、知识捕获、记忆管理、harvest、status、knowledge-audit |
 | **质量** | 9 | `quality-*` | 代码审查、业务测试、UAT、调试、重构、复盘、同步 |
 | **规范** | 3 | `spec-*` | 项目规范初始化、加载、录入 |
 | **学习** | 5 | `learn-*` | 统一复盘（git+决策）、跟读学习、模式拆解、系统探究、多视角分析 |
 | **知识图谱** | 2 | `wiki-*` | 连接发现、知识摘要 |
+| **团队智能** | 1 | `team-*` | ACO 蚁群智能、群体优化 |
 
 全局入口 `/maestro` 是智能协调器，根据用户意图和项目状态自动选择最优命令链。
 
@@ -25,21 +26,29 @@ Maestro 命令系统包含 53 个 slash 命令，分为 9 大类。本文档提�
 graph TB
     subgraph entry["入口"]
         M["/maestro 智能协调器"]
+        NX["/maestro-next 单命令推荐"]
+        SW["/maestro-swarm-workflow 并行加速"]
     end
 
     subgraph init["项目初始化"]
         BS["/maestro-brainstorm"]
+        GR["/maestro-grill 压力测试"]
         INIT["/maestro-init"]
         RM["/maestro-roadmap"]
         SG["/maestro-blueprint"]
         UID["/maestro-impeccable"]
     end
 
+    subgraph knowledge["知识管理"]
+        CP["/maestro-companion 知识伴侣"]
+        KA["/manage-knowledge-audit 审计淘汰"]
+    end
+
     subgraph pipeline["Milestone 管线"]
         AN["/maestro-analyze"]
         PL["/maestro-plan"]
         EX["/maestro-execute"]
-        VF["/maestro-verify"]
+        VF["/maestro-execute (verify)"]
     end
 
     subgraph quality["质量管线"]
@@ -74,6 +83,11 @@ graph TB
     M -->|意图路由| pipeline
     M -->|"continue"| pipeline
     M -->|quick| quick
+    NX -->|推荐单命令| init
+    NX -->|推荐单命令| pipeline
+    SW -->|并行加速| pipeline
+    GR -.->|压力测试后| BS
+    CP -.->|任务知识伴侣| pipeline
 
     BS -.->|可选| INIT
     INIT --> RM
@@ -186,7 +200,7 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 | 分析 | `/maestro-analyze` | context.md, analysis.md | ANL-{NNN} |
 | 规划 | `/maestro-plan` | plan.json + TASK-*.json | PLN-{NNN} |
 | 执行 | `/maestro-execute` | .summaries/, 代码变更 | EXC-{NNN} |
-| 验证 | `/maestro-verify` | verification.json | VRF-{NNN} |
+| 验证 | `/maestro-execute` (E2.7) | verification.json | VRF-{NNN} |
 | 审计 | `/maestro-milestone-audit` | audit-report.md | — |
 | 完成 | `/maestro-milestone-complete` | 归档到 milestones/ | — |
 
@@ -266,7 +280,7 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 ## 四、质量管线
 
 ```bash
-/maestro-execute → /maestro-verify → /quality-auto-test → /quality-review → /quality-test → /maestro-milestone-audit
+/maestro-execute → /quality-auto-test → /quality-review → /quality-test → /maestro-milestone-audit
 ```
 
 | 命令 | 用途 | 关键参数 |
@@ -309,8 +323,22 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 /spec-load --role implement                     # 加载规范
 /manage-codebase-refresh                        # 增量刷新代码库文档
 /manage-knowhow search "认证"                   # 搜索知识复用
+/manage-knowledge-audit --scope all             # 审计三存储，清理过期/矛盾条目
 /manage-status                                  # 项目仪表板
+/maestro-companion before --task "实现认证"      # 任务前加载知识上下文
 ```
+
+### 新增命令速查
+
+| 命令 | 定位 | 使用场景 |
+|------|------|----------|
+| `/maestro-swarm-workflow` | 并行加速层 | 8 个 Workflow 脚本覆盖 analyze/brainstorm/review/verify/grill/plan/execute/milestone-audit |
+| `/maestro-companion` | 知识伴侣 | before（加载上下文）→ note（记录洞察）→ after（沉淀知识）→ route（推荐下一步） |
+| `/maestro-next` | 单命令推荐 | 轻量路由，不创建 session，推荐 1 个原子命令 + 2-3 备选 |
+| `/maestro-grill` | 压力测试 | 对抗式苏格拉底访谈，验证方案假设，产出 context-package |
+| `/maestro-blueprint` | 正式规格 | 6 阶段文档链（Brief → PRD → Architecture → Epics），与 brainstorm 互补 |
+| `/manage-knowledge-audit` | 知识审计 | spec/knowhow/artifact 三存储审计淘汰（keep/deprecate/delete） |
+| `/team-swarm` | 蚁群智能 | ACO 驱动群体优化，信息素收敛，4 角色 + Python 控制器 |
 
 ---
 

@@ -77,6 +77,7 @@ Use `store_knowhow` MCP tool:
   "operation": "add",
   "type": "<decision|tip|reference>",
   "title": "maestro-impeccable <command>: <concise description>",
+  "description": "<one-line summary for search results>",
   "body": "<markdown content from Step 2>",
   "tags": ["impeccable", "<command>", "<category>", ...domain keywords]
 }

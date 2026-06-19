@@ -2,7 +2,7 @@
 name: maestro-tools-register
 description: Register tool specs - extract, generate, or optimize reusable process definitions
 argument-hint: "[description or intent]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -55,7 +55,7 @@ Parse $ARGUMENTS to determine mode:
 - Contains "optimize/improve" → optimize mode
 - Contains "promote" or references existing knowhow doc (path/ID) → promote mode
 - Other → generate mode
-- Empty → ask user with AskUserQuestion
+- Empty → ask user with request_user_input
 
 ### Step 2: Gather Information
 
@@ -65,14 +65,14 @@ Parse $ARGUMENTS to determine mode:
 
 **Generate mode**:
 - Confirm tool name, applicable roles, target scenario
-- If unclear, ask user with AskUserQuestion
+- If unclear, ask user with request_user_input
 
 **Optimize mode**:
 - Load existing tool: `maestro spec load --category coding --keyword <name>`
 - Analyze improvement points (step splitting, prerequisites, error handling)
 
 **Promote mode** (existing knowhow → tool):
-- Locate document: `maestro wiki list --keyword <name>` or by path in `.workflow/knowhow/`
+- Locate document: `maestro search "<name>" --type knowhow` or by path in `.workflow/knowhow/`
 - Read document, verify it contains actionable steps (numbered list or ## Steps section)
 - If no actionable steps, suggest extract mode instead
 - Determine category (Step 3) and summary ("Use when ...")

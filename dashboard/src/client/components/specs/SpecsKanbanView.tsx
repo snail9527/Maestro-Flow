@@ -113,8 +113,9 @@ function formatTimestamp(ts: string): string {
 }
 
 export function SpecsKanbanView({ onAddEntry }: SpecsKanbanViewProps) {
-  const entries = useSpecsStore((s) => s.entries);
+  const rawEntries = useSpecsStore((s) => s.entries);
   const typeFilter = useSpecsStore((s) => s.typeFilter);
+  const scopeFilter = useSpecsStore((s) => s.scopeFilter);
   const keywordFilter = useSpecsStore((s) => s.keywordFilter);
   const search = useSpecsStore((s) => s.search);
   const selectedEntry = useSpecsStore((s) => s.selectedEntry);
@@ -122,6 +123,11 @@ export function SpecsKanbanView({ onAddEntry }: SpecsKanbanViewProps) {
   const setKeywordFilter = useSpecsStore((s) => s.setKeywordFilter);
   const hiddenColumns = useSpecsStore((s) => s.hiddenColumns);
   const toggleColumn = useSpecsStore((s) => s.toggleColumn);
+
+  const entries = useMemo(() => {
+    if (scopeFilter === 'all') return rawEntries;
+    return rawEntries.filter((e) => e.scope === scopeFilter);
+  }, [rawEntries, scopeFilter]);
 
   // All categories: known order first, then any unknown from data — only include categories with entries
   const allCategories = useMemo(() => {

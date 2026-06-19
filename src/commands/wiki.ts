@@ -14,14 +14,16 @@ import type { Command } from 'commander';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { truncate, extractSnippet } from '../utils/cli-format.js';
 import { WikiIndexer } from '#maestro-dashboard/wiki/wiki-indexer.js';
 import { WikiWriter, WikiWriteError } from '#maestro-dashboard/wiki/writer.js';
 import { computeHealth, detectOrphans, detectHubs } from '#maestro-dashboard/wiki/graph-analysis.js';
 import type { WikiEntry, WikiFilters, WikiNodeType } from '#maestro-dashboard/wiki/wiki-types.js';
+import { loadWorkspaceConfig, resolveWorkspaceLinks } from '../config/index.js';
 
 // Inline type to avoid cross-build dependency on dashboard dist-server.
 // Must match WikiScope in dashboard/src/server/wiki/wiki-types.ts.
-type WikiScope = 'project' | 'global' | 'team' | 'personal';
+type WikiScope = 'project' | 'global' | 'team' | 'personal' | 'linked';
 
 const DEFAULT_BASE = process.env.MAESTRO_DASHBOARD_URL ?? 'http://127.0.0.1:3001';
 
@@ -33,7 +35,13 @@ let _writer: WikiWriter | null = null;
 function getOfflineClients(): { indexer: WikiIndexer; writer: WikiWriter } {
   if (!_indexer) {
     const workflowRoot = resolve('.workflow');
-    _indexer = new WikiIndexer({ workflowRoot });
+    const projectPath = process.cwd();
+    const wsConfig = loadWorkspaceConfig(projectPath);
+    const resolved = resolveWorkspaceLinks(projectPath, wsConfig);
+    const linkedWorkspaces = resolved
+      .filter(lw => lw.valid)
+      .map(lw => ({ name: lw.name, workflowRoot: lw.workflowRoot, shareTypes: lw.share }));
+    _indexer = new WikiIndexer({ workflowRoot, linkedWorkspaces });
     _writer = new WikiWriter(workflowRoot, _indexer);
   }
   return { indexer: _indexer!, writer: _writer! };
@@ -82,16 +90,22 @@ export function registerWikiCommand(program: Command): void {
           return;
         }
         if (opts.group) {
-          const groups = (data.groups ?? {}) as Record<string, Array<{ id: string; title: string }>>;
+          const groups = (data.groups ?? {}) as Record<string, Array<{ id: string; title: string; summary?: string }>>;
           for (const [type, items] of Object.entries(groups)) {
             if (items.length === 0) continue;
             console.log(`\n[${type}] (${items.length})`);
-            for (const e of items) console.log(`  ${e.id}  ${e.title}`);
+            for (const e of items) {
+              const desc = e.summary ? `  ${truncate(e.summary, 50)}` : '';
+              console.log(`  ${e.id}  ${e.title}${desc}`);
+            }
           }
         } else {
-          const entries = (data.entries ?? []) as Array<{ id: string; type: string; title: string }>;
+          const entries = (data.entries ?? []) as Array<{ id: string; type: string; title: string; summary?: string }>;
           console.log(`Found ${entries.length} entries`);
-          for (const e of entries) console.log(`  [${e.type}] ${e.id}  ${e.title}`);
+          for (const e of entries) {
+            const desc = e.summary ? `  ${truncate(e.summary, 50)}` : '';
+            console.log(`  [${e.type}] ${e.id}  ${e.title}${desc}`);
+          }
         }
         return;
       }
@@ -117,7 +131,10 @@ export function registerWikiCommand(program: Command): void {
         for (const [type, items] of Object.entries(groups)) {
           if (items.length === 0) continue;
           console.log(`\n[${type}] (${items.length})`);
-          for (const e of items) console.log(`  ${e.id}  ${e.title}`);
+          for (const e of items) {
+            const desc = e.summary ? `  ${truncate(e.summary, 50)}` : '';
+            console.log(`  ${e.id}  ${e.title}${desc}`);
+          }
         }
       } else {
         const entries = await indexer.query(filters);
@@ -126,7 +143,13 @@ export function registerWikiCommand(program: Command): void {
           return;
         }
         console.log(`Found ${entries.length} entries`);
-        for (const e of entries) console.log(`  [${e.type}] ${e.id}  ${e.title}`);
+        for (const e of entries) {
+          console.log(`  [${e.type}] ${e.id}  ${e.title}`);
+          if (opts.query) {
+            const snippet = extractSnippet(e.body, opts.query);
+            if (snippet) console.log(`    ${snippet}`);
+          }
+        }
       }
     });
 
@@ -235,6 +258,7 @@ export function registerWikiCommand(program: Command): void {
     .description('BM25 search (alias for `list -q`)')
     .option('--json', 'Output as JSON')
     .action(async (queryParts, opts, cmd) => {
+      console.warn('[deprecated] Use "maestro search" instead');
       const live = cmd.parent!.opts().live as boolean | undefined;
       const q = queryParts.join(' ');
 
@@ -245,9 +269,12 @@ export function registerWikiCommand(program: Command): void {
           console.log(JSON.stringify(data, null, 2));
           return;
         }
-        const entries = (data.entries ?? []) as Array<{ id: string; type: string; title: string }>;
+        const entries = (data.entries ?? []) as Array<{ id: string; type: string; title: string; summary?: string }>;
         console.log(`Query: "${q}"  (${entries.length} results)`);
-        for (const e of entries) console.log(`  [${e.type}] ${e.id}  ${e.title}`);
+        for (const e of entries) {
+          console.log(`  [${e.type}] ${e.id}  ${e.title}`);
+          if (e.summary) console.log(`    ${truncate(e.summary, 60)}`);
+        }
         return;
       }
 
@@ -259,7 +286,12 @@ export function registerWikiCommand(program: Command): void {
         return;
       }
       console.log(`Query: "${q}"  (${entries.length} results)`);
-      for (const e of entries) console.log(`  [${e.type}] ${e.id}  ${e.title}`);
+      for (const e of entries) {
+        console.log(`  [${e.type}] ${e.id}  ${e.title}`);
+        if (e.summary) console.log(`    ${truncate(e.summary, 60)}`);
+        const snippet = extractSnippet(e.body, q);
+        if (snippet) console.log(`    ${snippet}`);
+      }
     });
 
   // ── health ────────────────────────────────────────────────────────────
@@ -544,6 +576,8 @@ export function registerWikiCommand(program: Command): void {
     .option('--category <cat>', 'Entry category (coding, arch, debug, learning, ...) — inherits from container if omitted')
     .requiredOption('--body <text>', 'Entry content')
     .option('--keywords <kw>', 'Comma-separated keywords')
+    .option('--title <title>', 'Entry title (defaults to first line of body)')
+    .option('--description <desc>', 'One-line description for search results')
     .action(async (containerId, opts, cmd) => {
       // Offline mode only — no live mode for append
       const { writer } = getOfflineClients();
@@ -553,6 +587,8 @@ export function registerWikiCommand(program: Command): void {
           category: opts.category,
           content: opts.body,
           keywords: opts.keywords,
+          title: opts.title,
+          description: opts.description,
         });
         console.log(`Appended: ${entry.id}`);
         console.log(`  Container: ${containerId}`);

@@ -13,9 +13,8 @@ allowed-tools:
   - AskUserQuestion
 ---
 <purpose>
-Execute all tasks in a plan using wave-based parallel execution with dependency-aware ordering. Each plan is executed independently (plans串行, plan内wave并行). Task summaries are written to the plan's scratch directory under `.summaries/`. Registers EXC artifact in state.json.
-
-Invoked after /maestro-plan produces a confirmed plan. When called without args on a milestone, finds all pending plans and executes them sequentially.
+Execute confirmed plan tasks via wave-based parallel dispatch.
+Consumes plan from maestro-plan; registers EXC artifact in state.json.
 </purpose>
 
 <required_reading>
@@ -30,18 +29,37 @@ Invoked after /maestro-plan produces a confirmed plan. When called without args 
 <context>
 $ARGUMENTS — phase number, or no args for milestone-wide execution, with optional flags.
 
-Scope routing, flags, resolution logic, output directory format, artifact registration schema, and incremental knowhow extraction are defined in workflow `execute.md`.
+### Flags
+
+| Flag | Effect | Default |
+|------|--------|---------|
+| `--auto-commit` | Auto-commit after each completed task | false |
+| `--method agent\|cli\|auto` | Execution method: Agent tool, CLI delegate, or auto-select | `auto` |
+| `--executor <tool>` | Explicit executor tool for CLI delegate mode | First enabled in config |
+| `--dir <path>` | Execute a specific plan directory instead of auto-discovery | — |
+| `-y` / `--yes` | Auto mode — skip interactive questions | false |
+
+### Scope routing
+
+| Input | Scope | Resolution |
+|-------|-------|------------|
+| numeric arg | phase | Resolve plan from roadmap phase |
+| `--dir <path>` | explicit | Use specified plan directory |
+| no args + milestone | milestone | Find all pending plans, execute sequentially |
+| no args + no milestone | error E001 | No plan found |
+
+Full resolution logic, output directory format, artifact registration schema, and incremental knowhow extraction are defined in workflow `execute.md`.
 
 ### Pre-load context (before task execution)
 
 1. **Codebase docs**: If `.workflow/codebase/doc-index.json` exists, read `ARCHITECTURE.md` for module boundaries. Pass as shared context to executor agents.
-2. **Wiki knowledge**: Run `maestro wiki search "<phase keywords>" --json 2>/dev/null`. If results found, extract top 5 entries as prior knowledge context for agents.
+2. **Wiki knowledge**: Run `maestro search "<phase keywords>" --json 2>/dev/null`. If results found, extract top 5 entries as prior knowledge context for agents.
 3. **Coding specs + tools**: Run `maestro spec load --category coding` to load coding conventions AND discoverable knowhow tools (tool: true entries). Pass as specs context to all executor agents.
 4. **UI specs (conditional)**: If any task involves frontend/UI work (task scope/description contains keywords like component, page, style, layout, CSS, HTML, frontend; or focus_paths in `src/components/`, `src/pages/`, `src/styles/`, `src/ui/`), also run `maestro spec load --category ui` and include in agent context.
 5. All are optional — proceed without if unavailable (log warning).
 
 ### Role Knowledge
-`maestro wiki list --category coding` → select relevant → `maestro wiki load`
+`maestro search --category coding` → select relevant → `maestro wiki load`
 </context>
 
 <execution>
@@ -55,6 +73,31 @@ If exit code is 1, present warnings and ask whether to proceed.
 
 Follow '~/.maestro/workflows/execute.md' completely.
 
+### Phase Gates (MANDATORY, BLOCKING)
+
+**GATE 1: Plan Load → Task Execution**
+- REQUIRED: plan.json found and parsed with valid task definitions.
+- REQUIRED: `.task/TASK-*.json` files exist for all tasks in plan.
+- BLOCKED if no pending tasks: error E004.
+
+**GATE 2: Per-Task Execution → Summary**
+- REQUIRED: Each completed task has `.summaries/TASK-{NNN}-summary.md` written with concrete evidence (files changed, tests run, verification results).
+- REQUIRED: `.task/TASK-{NNN}.json` status updated to completed|blocked.
+- BLOCKED if missing: summary file absent or task status not updated — halt wave progression until evidence is recorded.
+- Do NOT silently skip failed tasks — mark as blocked with reason.
+
+**GATE 3: All Tasks → Completion**
+- REQUIRED: All waves executed in dependency order.
+- REQUIRED: EXC artifact registered in state.json.
+- BLOCKED if missing: waves incomplete or EXC artifact not registered — do not report execution complete.
+
+### Evidence Requirement
+
+Task summaries MUST include:
+- Files actually modified (not just planned targets)
+- Convergence criteria verification results (pass/fail with evidence)
+- Any deviations from the plan with rationale
+
 ### Post-task Knowledge Inquiry
 
 After each task completion, check triggers:
@@ -65,7 +108,8 @@ After each task completion, check triggers:
 | retry_count >= 2 | "Document fix pattern?" | spec-add debug |
 | Summary contains design rationale ("chose X because") | "Record as knowhow?" | spec-add learning |
 
-On confirm → `Skill("spec-add", "<category> <content>")`.
+On confirm → `Skill("spec-add", "<category> <content> --description \"<summary>\"")`.
+Include `--description` with a one-line summary for search result display.
 
 ### Issue Status Sync
 
@@ -81,7 +125,10 @@ For each completed/failed TASK with issue_id:
   Write updated issue back to issues.jsonl
 ```
 
-**Report format on completion:**
+</execution>
+
+<completion>
+### Standalone report
 
 ```
 === EXECUTION COMPLETE ===
@@ -91,24 +138,29 @@ Failed:    {failed_count} tasks
 
 Summaries: {plan_dir}/.summaries/
 Tasks:     {plan_dir}/.task/
-
-Next steps:
-  /maestro-verify              -- Verify execution results
-  /maestro-verify --dir {dir}  -- Verify specific plan
-  /manage-status               -- View project dashboard
 ```
 
-**Completion status:**
+### Ralph-invoked completion
+
+End the step by calling the CLI (no text block output):
 ```
---- COMPLETION STATUS ---
-STATUS: DONE|DONE_WITH_CONCERNS|NEEDS_RETRY
-CONCERNS: {failed_count} tasks failed (if any)
-NEXT: /maestro-verify
---- END STATUS ---
+maestro ralph complete <idx> --status {STATUS} [--evidence {path}]
 ```
 
-If failed tasks exist, suggest /quality-debug for investigation.
-</execution>
+Status verdicts:
+- **DONE** — Normal completion
+- **DONE_WITH_CONCERNS** — Completed with caveats; pass `--concerns`
+- **NEEDS_RETRY** — Tooling error / transient issue; ralph will retry
+- **BLOCKED** — External hard blocker; pass `--reason`
+
+### Next-step routing
+
+| Condition | Suggestion |
+|-----------|-----------|
+| All tasks completed successfully | `/quality-review` |
+| Failed tasks exist | `/quality-debug` |
+| View project dashboard | `/manage-status` |
+</completion>
 
 <error_codes>
 | Code | Severity | Condition | Recovery |

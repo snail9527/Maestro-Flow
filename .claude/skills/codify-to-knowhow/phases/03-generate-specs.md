@@ -68,7 +68,8 @@ ${spec.body}
 
   // 追加到目标文件
   // 优先使用 maestro spec add CLI
-  const cliResult = Bash(`maestro spec add ${spec.category} "${spec.title}" "${spec.body}" --keywords "${spec.keywords}" 2>/dev/null`);
+  const descFlag = spec.description ? ` --description "${spec.description}"` : '';
+  const cliResult = Bash(`maestro spec add ${spec.category} "${spec.title}" "${spec.body}" --keywords "${spec.keywords}"${descFlag} 2>/dev/null`);
 
   if (cliResult.exitCode !== 0) {
     // 回退：直接追加到文件

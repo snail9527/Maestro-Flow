@@ -7,6 +7,8 @@ import { parseSpecEntries, parseKnowhowEntries } from './spec-entry-parser.js';
 import {
   adaptCodebaseDocIndex,
   adaptIssueRow,
+  adaptKnowledgeGraph,
+  crossReferenceKgWithDocIndex,
   loadSessionArchiveEntries,
   loadVirtualEntries,
   loadVirtualJsonEntries,
@@ -26,8 +28,15 @@ import type {
 import { buildGraph, type WikiGraph } from './graph-analysis.js';
 import { buildInvertedIndex, searchBM25, type InvertedIndex } from './search.js';
 
+export interface LinkedWorkspaceConfig {
+  name: string;
+  workflowRoot: string;
+  shareTypes: Array<'spec' | 'knowhow' | 'domain' | 'codebase'>;
+}
+
 export interface WikiIndexerConfig {
   workflowRoot: string;
+  linkedWorkspaces?: LinkedWorkspaceConfig[];
 }
 
 /**
@@ -43,13 +52,24 @@ export interface WikiIndexerConfig {
  */
 export class WikiIndexer {
   private readonly workflowRoot: string;
+  private readonly linkedWorkspaces: Array<{
+    name: string;
+    workflowRoot: string;
+    shareTypes: Set<string>;
+  }>;
   private cache: WikiIndex | null = null;
   private graphCache: WikiGraph | null = null;
   private searchCache: InvertedIndex | null = null;
   private inflight: Promise<WikiIndex> | null = null;
+  private mtimeSnapshot: Map<string, number> = new Map();
 
   constructor(config: WikiIndexerConfig) {
     this.workflowRoot = resolve(config.workflowRoot);
+    this.linkedWorkspaces = (config.linkedWorkspaces ?? []).map(lw => ({
+      name: lw.name,
+      workflowRoot: resolve(lw.workflowRoot),
+      shareTypes: new Set(lw.shareTypes),
+    }));
   }
 
   getWorkflowRoot(): string {
@@ -57,8 +77,82 @@ export class WikiIndexer {
   }
 
   async get(): Promise<WikiIndex> {
-    if (this.cache) return this.cache;
+    if (this.cache) {
+      if (!await this.hasSourceChanges()) return this.cache;
+      this.cache = null;
+      this.graphCache = null;
+      this.searchCache = null;
+    }
     return this.rebuild();
+  }
+
+  /**
+   * Quick mtime scan of known source directories. If any file's mtime
+   * changed since the last rebuild, the cache is stale.
+   */
+  private async hasSourceChanges(): Promise<boolean> {
+    if (this.mtimeSnapshot.size === 0) return true;
+    const dirs = [
+      join(this.workflowRoot, 'specs'),
+      join(this.workflowRoot, 'knowhow'),
+      join(this.workflowRoot, 'issues'),
+      join(this.workflowRoot, 'domain'),
+      join(this.workflowRoot, 'scratch'),
+    ];
+    // Include linked workspace directories in staleness check
+    for (const lw of this.linkedWorkspaces) {
+      if (lw.shareTypes.has('spec')) dirs.push(join(lw.workflowRoot, 'specs'));
+      if (lw.shareTypes.has('knowhow')) dirs.push(join(lw.workflowRoot, 'knowhow'));
+      if (lw.shareTypes.has('domain')) dirs.push(join(lw.workflowRoot, 'domain'));
+      if (lw.shareTypes.has('codebase')) dirs.push(join(lw.workflowRoot, 'codebase'));
+    }
+    const singletons = ['project.md', 'roadmap.md'];
+    for (const s of singletons) {
+      const p = join(this.workflowRoot, s);
+      try {
+        const st = await stat(p);
+        const prev = this.mtimeSnapshot.get(p);
+        if (prev === undefined || st.mtimeMs !== prev) return true;
+      } catch {
+        if (this.mtimeSnapshot.has(p)) return true;
+      }
+    }
+    for (const dir of dirs) {
+      try {
+        const st = await stat(dir);
+        const prev = this.mtimeSnapshot.get(dir);
+        if (prev === undefined || st.mtimeMs !== prev) return true;
+      } catch {
+        if (this.mtimeSnapshot.has(dir)) return true;
+      }
+    }
+    return false;
+  }
+
+  private async captureMtimeSnapshot(): Promise<Map<string, number>> {
+    const snap = new Map<string, number>();
+    const dirs = [
+      join(this.workflowRoot, 'specs'),
+      join(this.workflowRoot, 'knowhow'),
+      join(this.workflowRoot, 'issues'),
+      join(this.workflowRoot, 'domain'),
+      join(this.workflowRoot, 'scratch'),
+    ];
+    for (const lw of this.linkedWorkspaces) {
+      if (lw.shareTypes.has('spec')) dirs.push(join(lw.workflowRoot, 'specs'));
+      if (lw.shareTypes.has('knowhow')) dirs.push(join(lw.workflowRoot, 'knowhow'));
+      if (lw.shareTypes.has('domain')) dirs.push(join(lw.workflowRoot, 'domain'));
+      if (lw.shareTypes.has('codebase')) dirs.push(join(lw.workflowRoot, 'codebase'));
+    }
+    const singletons = ['project.md', 'roadmap.md'];
+    for (const s of singletons) {
+      const p = join(this.workflowRoot, s);
+      try { snap.set(p, (await stat(p)).mtimeMs); } catch { /* missing is fine */ }
+    }
+    for (const dir of dirs) {
+      try { snap.set(dir, (await stat(dir)).mtimeMs); } catch { /* missing */ }
+    }
+    return snap;
   }
 
   async rebuild(): Promise<WikiIndex> {
@@ -66,18 +160,32 @@ export class WikiIndexer {
     this.inflight = (async () => {
       const fileEntries = await this.scanFiles();
       const virtualEntries = await this.scanVirtual();
-      const entries = [...fileEntries, ...virtualEntries];
+      const linkedEntries = await this.scanLinkedWorkspaces();
+      const entries = [...fileEntries, ...virtualEntries, ...linkedEntries];
 
-      // Stable collision suffix
+      // Stable collision suffix — use original id for counting so the
+      // third duplicate becomes -3 (not another -2).
+      // Collisions are expected across multi-source JSONL files; warn only
+      // when MAESTRO_DEBUG is set to avoid polluting CLI search output.
       const seen = new Map<string, number>();
+      const debugCollisions = process.env.MAESTRO_DEBUG === '1';
+      let collisionCount = 0;
       for (const d of entries) {
-        const n = seen.get(d.id) ?? 0;
+        const original = d.id;
+        const n = seen.get(original) ?? 0;
         if (n > 0) {
-          // eslint-disable-next-line no-console
-          console.warn(`[wiki-indexer] id collision '${d.id}' — suffixing`);
-          d.id = `${d.id}-${n + 1}`;
+          if (debugCollisions) {
+            // eslint-disable-next-line no-console
+            console.warn(`[wiki-indexer] id collision '${original}' — suffixing to ${original}-${n + 1}`);
+          }
+          d.id = `${original}-${n + 1}`;
+          collisionCount++;
         }
-        seen.set(d.id, n + 1);
+        seen.set(original, n + 1);
+      }
+      if (collisionCount > 0 && debugCollisions) {
+        // eslint-disable-next-line no-console
+        console.warn(`[wiki-indexer] ${collisionCount} id collision(s) resolved by suffixing`);
       }
 
       const byId: Record<string, WikiEntry> = {};
@@ -88,6 +196,7 @@ export class WikiIndexer {
         issue: [],
         knowhow: [],
         note: [],
+        domain: [],
       } as Record<WikiNodeType, WikiEntry[]>;
 
       for (const d of entries) {
@@ -106,6 +215,9 @@ export class WikiIndexer {
       this.cache = index;
       this.graphCache = null;
       this.searchCache = null;
+
+      // Snapshot mtimes of source directories for incremental staleness check
+      this.mtimeSnapshot = await this.captureMtimeSnapshot();
 
       // Persist lightweight index to disk (fire-and-forget).
       this.persistIndex(index).catch(() => {});
@@ -152,6 +264,7 @@ export class WikiIndexer {
       issue: [],
       knowhow: [],
       note: [],
+      domain: [],
     };
     for (const d of source) out[d.type].push(d);
     return out;
@@ -171,13 +284,20 @@ export class WikiIndexer {
     return this.searchCache;
   }
 
-  async search(query: string, limit = 50): Promise<WikiEntry[]> {
+  async searchWithScores(query: string, limit = 50): Promise<Array<{ entry: WikiEntry; score: number }>> {
     const index = await this.get();
     const bm25 = await this.getSearchIndex();
     const ranked = searchBM25(bm25, query, limit);
-    return ranked
-      .map((r) => index.byId[r.docId])
-      .filter((d): d is WikiEntry => Boolean(d));
+    const out: Array<{ entry: WikiEntry; score: number }> = [];
+    for (const r of ranked) {
+      const entry = index.byId[r.docId];
+      if (entry) out.push({ entry, score: r.score });
+    }
+    return out;
+  }
+
+  async search(query: string, limit = 50): Promise<WikiEntry[]> {
+    return (await this.searchWithScores(query, limit)).map(r => r.entry);
   }
 
   // -------------------------------------------------------------------------
@@ -228,7 +348,7 @@ export class WikiIndexer {
             id: `${idPrefix}${se.id}`,
             type: 'spec',
             title: se.title,
-            summary: se.content.slice(0, 240).replace(/\s+/g, ' '),
+            summary: se.description || se.content.slice(0, 240).replace(/\s+/g, ' '),
             tags: se.keywords,
             status: 'active',
             created: container.created,
@@ -239,6 +359,7 @@ export class WikiIndexer {
             ext: { entryType: se.type, timestamp: se.timestamp, ...(se.ref ? { ref: se.ref } : {}) },
             scope,
             category: se.category || container.category,
+            specCategory: container.specCategory,
             createdBy: container.createdBy,
             sourceRef: container.sourceRef,
             parent: container.id,
@@ -247,10 +368,9 @@ export class WikiIndexer {
       }
     }
 
-    // knowhow/*.md  (KNW-→session, TIP-→tip, TPL-→template, RCP-→recipe, REF-→reference, DCS-→decision, DOC-→document)
-    for (const name of await safeReaddir(join(this.workflowRoot, 'knowhow'))) {
-      if (extname(name).toLowerCase() !== '.md') continue;
-      const entry = await this.parseFileEntry(join(this.workflowRoot, 'knowhow', name), 'knowhow');
+    // knowhow/*.md — recursive scan supports both flat and sub-folder layouts
+    const knowhowEntries = await this.scanKnowhowDir(join(this.workflowRoot, 'knowhow'));
+    for (const { name, absPath, entry } of knowhowEntries) {
       if (entry) {
         // Only derive category from file prefix if no frontmatter category
         if (!entry.category) {
@@ -283,7 +403,7 @@ export class WikiIndexer {
             id: `knowhow-${se.id}`,
             type: 'knowhow' as const,
             title: se.title,
-            summary: se.content.slice(0, 240).replace(/\s+/g, ' '),
+            summary: se.description || se.content.slice(0, 240).replace(/\s+/g, ' '),
             tags: se.keywords,
             status: 'active' as const,
             created: entry.created,
@@ -294,6 +414,7 @@ export class WikiIndexer {
             ext: { entryType: se.type, timestamp: se.timestamp, ...(se.ref ? { ref: se.ref } : {}) },
             scope: null,
             category: se.category || entry.category,
+            specCategory: entry.specCategory,
             createdBy: entry.createdBy,
             sourceRef: entry.sourceRef,
             parent: entry.id,
@@ -302,7 +423,126 @@ export class WikiIndexer {
       }
     }
 
+    // domain/glossary.json → domain WikiEntries
+    const domainEntries = await this.scanDomain();
+    out.push(...domainEntries);
+
+    // scratch/*/*.md — session working documents (lowest search priority via SCRATCH_FIELD_CONFIGS)
+    const scratchEntries = await this.scanScratchDocuments();
+    out.push(...scratchEntries);
+
     return out;
+  }
+
+  /**
+   * Recursively scan knowhow directory (supports both flat and sub-folder layouts).
+   */
+  private async scanKnowhowDir(dir: string): Promise<Array<{ name: string; absPath: string; entry: WikiEntry | null }>> {
+    const results: Array<{ name: string; absPath: string; entry: WikiEntry | null }> = [];
+    for (const name of await safeReaddir(dir)) {
+      const fullPath = join(dir, name);
+      let stats: Awaited<ReturnType<typeof stat>> | null = null;
+      try { stats = await stat(fullPath); } catch { continue; }
+
+      if (stats.isDirectory()) {
+        const nested = await this.scanKnowhowDir(fullPath);
+        results.push(...nested);
+      } else if (stats.isFile() && extname(name).toLowerCase() === '.md') {
+        const entry = await this.parseFileEntry(fullPath, 'knowhow');
+        results.push({ name, absPath: fullPath, entry });
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Scan .workflow/scratch session directories for .md working documents.
+   * These are indexed as 'note' type with ext.virtualKind='scratch-doc'
+   * so search.ts applies SCRATCH_FIELD_CONFIGS (lowest BM25 weight).
+   */
+  private async scanScratchDocuments(): Promise<WikiEntry[]> {
+    const scratchRoot = join(this.workflowRoot, 'scratch');
+    if (!existsSync(scratchRoot)) return [];
+    const out: WikiEntry[] = [];
+
+    for (const sessionName of await safeReaddir(scratchRoot)) {
+      const sessionDir = join(scratchRoot, sessionName);
+      let dirStat: Awaited<ReturnType<typeof stat>> | null = null;
+      try { dirStat = await stat(sessionDir); } catch { continue; }
+      if (!dirStat.isDirectory()) continue;
+
+      for (const fileName of await safeReaddir(sessionDir)) {
+        if (extname(fileName).toLowerCase() !== '.md') continue;
+        const absPath = join(sessionDir, fileName);
+        const entry = await this.parseFileEntry(absPath, 'note');
+        if (!entry) continue;
+
+        const stem = basename(fileName, extname(fileName));
+        entry.id = `scratch-${slugify(sessionName)}-${slugify(stem)}`;
+        entry.ext = { ...entry.ext, virtualKind: 'scratch-doc', sessionDir: sessionName };
+        entry.category = entry.category || 'scratch';
+        out.push(entry);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Scan .workflow/domain/glossary.json and produce WikiEntry[] for each term.
+   */
+  private async scanDomain(): Promise<WikiEntry[]> {
+    const glossaryPath = join(this.workflowRoot, 'domain', 'glossary.json');
+    try {
+      const raw = await readFile(glossaryPath, 'utf-8');
+      const glossary = JSON.parse(raw);
+      if (!Array.isArray(glossary.terms)) return [];
+
+      const now = new Date().toISOString();
+      let glossaryStat: Awaited<ReturnType<typeof stat>>;
+      try { glossaryStat = await stat(glossaryPath); } catch { return []; }
+      const fileDate = new Date(glossaryStat.mtimeMs).toISOString();
+
+      return glossary.terms.map((term: Record<string, unknown>) => {
+        const id = term.id as string;
+        const canonical = term.canonical as string;
+        const definition = (term.definition as string) ?? '';
+        const aliases = (term.aliases as string[]) ?? [];
+        const keywords = (term.keywords as string[]) ?? [];
+        const relationships = (term.relationships as string[]) ?? [];
+        const status = ((term.status as string) ?? 'active') === 'active' ? 'active' : 'archived';
+
+        const bodyLines = [`# ${canonical}`, '', definition, ''];
+        if (aliases.length) bodyLines.push(`Aliases: ${aliases.join(', ')}`);
+        if (relationships.length) bodyLines.push(`Related: ${relationships.join(', ')}`);
+        if (keywords.length) bodyLines.push(`Keywords: ${keywords.join(', ')}`);
+
+        return {
+          id: `domain-${id}`,
+          type: 'domain' as const,
+          title: canonical,
+          summary: definition,
+          tags: [...aliases, ...keywords],
+          status: status as 'active' | 'archived',
+          created: fileDate,
+          updated: fileDate,
+          related: relationships.map(r => `domain-${r}`),
+          source: { kind: 'file' as const, path: 'domain/glossary.json' },
+          body: bodyLines.join('\n'),
+          ext: {
+            tier: term.tier ?? 'core',
+            sourceKind: (term.source as Record<string, unknown>)?.kind ?? 'unknown',
+          },
+          scope: null,
+          category: 'domain',
+          specCategory: null,
+          createdBy: null,
+          sourceRef: null,
+          parent: null,
+        } satisfies WikiEntry;
+      });
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -381,19 +621,42 @@ export class WikiIndexer {
   private async scanVirtual(): Promise<WikiEntry[]> {
     const out: WikiEntry[] = [];
 
+    // Issues: collect from all JSONL files, then deduplicate by ID keeping the
+    // entry with the most recent updated timestamp.  This avoids collision
+    // warnings when the same issue ID appears across multiple JSONL sources
+    // (e.g. issues.jsonl and review-issues.jsonl).
+    const allIssues: WikiEntry[] = [];
     for (const name of await safeReaddir(join(this.workflowRoot, 'issues'))) {
       if (extname(name).toLowerCase() !== '.jsonl') continue;
       const abs = join(this.workflowRoot, 'issues', name);
       if (!this.isInsideRoot(abs)) continue;
       const rel = toForwardSlash(relative(this.workflowRoot, abs));
-      out.push(...(await loadVirtualEntries(abs, adaptIssueRow, rel)));
+      allIssues.push(...(await loadVirtualEntries(abs, adaptIssueRow, rel)));
     }
+    const issueBest = new Map<string, WikiEntry>();
+    for (const e of allIssues) {
+      const existing = issueBest.get(e.id);
+      if (!existing || e.updated > existing.updated) {
+        issueBest.set(e.id, e);
+      }
+    }
+    out.push(...issueBest.values());
 
     // Codebase: .workflow/codebase/doc-index.json → component/feature/req/ADR
     const codebaseIndex = join(this.workflowRoot, 'codebase', 'doc-index.json');
     if (existsSync(codebaseIndex) && this.isInsideRoot(codebaseIndex)) {
       const rel = toForwardSlash(relative(this.workflowRoot, codebaseIndex));
       out.push(...(await loadVirtualJsonEntries(codebaseIndex, adaptCodebaseDocIndex, rel)));
+    }
+
+    // Knowledge Graph: .workflow/codebase/knowledge-graph.json → KG nodes/layers/tour
+    // Loaded after doc-index so cross-referencing can link kg-* ↔ codebase-comp-*
+    const kgPath = join(this.workflowRoot, 'codebase', 'knowledge-graph.json');
+    if (existsSync(kgPath) && this.isInsideRoot(kgPath)) {
+      const kgRel = toForwardSlash(relative(this.workflowRoot, kgPath));
+      const kgEntries = await loadVirtualJsonEntries(kgPath, adaptKnowledgeGraph, kgRel);
+      crossReferenceKgWithDocIndex(kgEntries, out);
+      out.push(...kgEntries);
     }
 
     // Sessions: scan archive.json under scratch/ (sealed) and
@@ -426,6 +689,286 @@ export class WikiIndexer {
     return out;
   }
 
+  // -------------------------------------------------------------------------
+  // Linked workspace scanning
+  // -------------------------------------------------------------------------
+
+  private async scanLinkedWorkspaces(): Promise<WikiEntry[]> {
+    const out: WikiEntry[] = [];
+    for (const lw of this.linkedWorkspaces) {
+      if (!existsSync(lw.workflowRoot)) {
+        if (process.env.MAESTRO_DEBUG === '1') {
+          // eslint-disable-next-line no-console
+          console.warn(`[wiki-indexer] linked workspace "${lw.name}" not found: ${lw.workflowRoot}`);
+        }
+        continue;
+      }
+      const entries = await this.scanLinkedWorkspace(lw);
+      out.push(...entries);
+    }
+    return out;
+  }
+
+  private async scanLinkedWorkspace(lw: {
+    name: string;
+    workflowRoot: string;
+    shareTypes: Set<string>;
+  }): Promise<WikiEntry[]> {
+    const out: WikiEntry[] = [];
+    const idPrefix = `ws:${lw.name}:`;
+
+    if (lw.shareTypes.has('spec')) {
+      const specsDir = join(lw.workflowRoot, 'specs');
+      for (const name of await safeReaddir(specsDir)) {
+        if (extname(name).toLowerCase() !== '.md') continue;
+        const absPath = join(specsDir, name);
+        const entry = await this.parseLinkedFileEntry(absPath, 'spec', lw.name, lw.workflowRoot);
+        if (!entry) continue;
+        const stem = basename(name, extname(name));
+        entry.id = `${idPrefix}spec:${slugify(stem)}`;
+        entry.scope = 'linked';
+        entry.source = { kind: 'file', path: `specs/${name}`, workspace: lw.name };
+        out.push(entry);
+
+        const specEntries = parseSpecEntries(entry.body, name, {
+          category: entry.category ?? undefined,
+          keywords: entry.tags,
+        });
+        for (const se of specEntries) {
+          out.push({
+            id: `${idPrefix}spec:${se.id}`,
+            type: 'spec',
+            title: se.title,
+            summary: se.description || se.content.slice(0, 240).replace(/\s+/g, ' '),
+            tags: se.keywords,
+            status: 'active',
+            created: entry.created,
+            updated: entry.updated,
+            related: [],
+            source: { kind: 'file', path: `specs/${name}`, workspace: lw.name },
+            body: se.content,
+            ext: { entryType: se.type, timestamp: se.timestamp },
+            scope: 'linked',
+            category: se.category || entry.category,
+            specCategory: entry.specCategory,
+            createdBy: entry.createdBy,
+            sourceRef: entry.sourceRef,
+            parent: entry.id,
+          });
+        }
+      }
+    }
+
+    if (lw.shareTypes.has('knowhow')) {
+      const knowhowDir = join(lw.workflowRoot, 'knowhow');
+      const knowhowFiles = await this.scanLinkedKnowhowDir(knowhowDir, lw.name, lw.workflowRoot);
+      for (const { entry } of knowhowFiles) {
+        if (!entry) continue;
+        entry.id = `${idPrefix}${entry.id}`;
+        entry.scope = 'linked';
+        out.push(entry);
+      }
+    }
+
+    if (lw.shareTypes.has('domain')) {
+      const domainEntries = await this.scanLinkedDomain(lw.workflowRoot, lw.name);
+      for (const e of domainEntries) {
+        e.id = `${idPrefix}${e.id}`;
+        out.push(e);
+      }
+    }
+
+    if (lw.shareTypes.has('codebase')) {
+      const codebaseIndex = join(lw.workflowRoot, 'codebase', 'doc-index.json');
+      if (existsSync(codebaseIndex)) {
+        const rel = `codebase/doc-index.json`;
+        const entries = await loadVirtualJsonEntries(codebaseIndex, adaptCodebaseDocIndex, rel);
+        for (const e of entries) {
+          e.id = `${idPrefix}${e.id}`;
+          e.source = { ...e.source, workspace: lw.name };
+          e.scope = 'linked';
+          out.push(e);
+        }
+      }
+
+      const kgPath = join(lw.workflowRoot, 'codebase', 'knowledge-graph.json');
+      if (existsSync(kgPath)) {
+        const kgRel = `codebase/knowledge-graph.json`;
+        const kgEntries = await loadVirtualJsonEntries(kgPath, adaptKnowledgeGraph, kgRel);
+        for (const e of kgEntries) {
+          e.id = `${idPrefix}${e.id}`;
+          e.source = { ...e.source, workspace: lw.name };
+          e.scope = 'linked';
+          out.push(e);
+        }
+      }
+    }
+
+    return out;
+  }
+
+  private async parseLinkedFileEntry(
+    absPath: string,
+    type: WikiNodeType,
+    wsName: string,
+    wsWorkflowRoot: string,
+  ): Promise<WikiEntry | null> {
+    const requested = resolve(absPath);
+    const root = resolve(wsWorkflowRoot);
+    if (!requested.startsWith(root + sep) && requested !== root) return null;
+
+    try {
+      const ls = await lstat(absPath);
+      if (ls.isSymbolicLink() || !ls.isFile()) return null;
+    } catch {
+      return null;
+    }
+
+    let raw: string;
+    let stats;
+    try {
+      raw = await readFile(absPath, 'utf-8');
+      stats = await stat(absPath);
+    } catch {
+      return null;
+    }
+
+    const { data, content } = parseFrontmatter(raw);
+    const fileName = basename(absPath);
+    const stem = basename(fileName, extname(fileName));
+
+    const title = asString(data.title) || firstHeading(content) || stem;
+    const summary = asString(data.description) || asString(data.summary) || firstParagraph(content);
+    const tags = extractTags(data);
+    const status = asStatus(data.status) ?? inferStatus(type);
+    const related = normalizeRelated(data.related);
+    const ext = extractExt(data);
+
+    const category = asString(data.category) || null;
+    const specCategory = asString(data.specCategory) || null;
+    const createdBy = asString(data.createdBy) || null;
+    const sourceRef = asString(data.sourceRef) || null;
+    const parent = asString(data.parent) || null;
+
+    const rel = toForwardSlash(relative(wsWorkflowRoot, absPath));
+    const id = `${type}-${slugify(stem)}`;
+
+    return {
+      id,
+      type,
+      title,
+      summary,
+      tags,
+      status,
+      created: new Date(stats.birthtimeMs || stats.mtimeMs).toISOString(),
+      updated: new Date(stats.mtimeMs).toISOString(),
+      related,
+      source: { kind: 'file', path: rel, workspace: wsName },
+      body: content,
+      ext,
+      scope: 'linked',
+      category,
+      specCategory,
+      createdBy,
+      sourceRef,
+      parent,
+    };
+  }
+
+  private async scanLinkedKnowhowDir(
+    dir: string,
+    wsName: string,
+    wsWorkflowRoot: string,
+  ): Promise<Array<{ entry: WikiEntry | null }>> {
+    const results: Array<{ entry: WikiEntry | null }> = [];
+    for (const name of await safeReaddir(dir)) {
+      const fullPath = join(dir, name);
+      let stats: Awaited<ReturnType<typeof stat>> | null = null;
+      try { stats = await stat(fullPath); } catch { continue; }
+
+      if (stats.isDirectory()) {
+        const nested = await this.scanLinkedKnowhowDir(fullPath, wsName, wsWorkflowRoot);
+        results.push(...nested);
+      } else if (stats.isFile() && extname(name).toLowerCase() === '.md') {
+        const entry = await this.parseLinkedFileEntry(fullPath, 'knowhow', wsName, wsWorkflowRoot);
+        if (entry) {
+          if (!entry.category) {
+            const upper = name.toUpperCase();
+            if (upper.startsWith('KNW-')) entry.category = 'session';
+            else if (upper.startsWith('TPL-')) entry.category = 'template';
+            else if (upper.startsWith('RCP-')) entry.category = 'recipe';
+            else if (upper.startsWith('REF-')) entry.category = 'reference';
+            else if (upper.startsWith('DCS-')) entry.category = 'decision';
+            else if (upper.startsWith('TIP-')) entry.category = 'tip';
+            else if (upper.startsWith('AST-')) entry.category = 'asset';
+            else if (upper.startsWith('BLP-')) entry.category = 'blueprint';
+            else if (upper.startsWith('DOC-')) entry.category = 'document';
+          }
+        }
+        results.push({ entry });
+      }
+    }
+    return results;
+  }
+
+  private async scanLinkedDomain(wsWorkflowRoot: string, wsName: string): Promise<WikiEntry[]> {
+    const glossaryPath = join(wsWorkflowRoot, 'domain', 'glossary.json');
+    try {
+      const raw = await readFile(glossaryPath, 'utf-8');
+      const glossary = JSON.parse(raw);
+      if (!Array.isArray(glossary.terms)) return [];
+
+      let glossaryStat: Awaited<ReturnType<typeof stat>>;
+      try { glossaryStat = await stat(glossaryPath); } catch { return []; }
+      const fileDate = new Date(glossaryStat.mtimeMs).toISOString();
+
+      return glossary.terms.map((term: Record<string, unknown>) => {
+        const id = term.id as string;
+        const canonical = term.canonical as string;
+        const definition = (term.definition as string) ?? '';
+        const aliases = (term.aliases as string[]) ?? [];
+        const keywords = (term.keywords as string[]) ?? [];
+        const relationships = (term.relationships as string[]) ?? [];
+        const status = ((term.status as string) ?? 'active') === 'active' ? 'active' : 'archived';
+
+        const bodyLines = [`# ${canonical}`, '', definition, ''];
+        if (aliases.length) bodyLines.push(`Aliases: ${aliases.join(', ')}`);
+        if (relationships.length) bodyLines.push(`Related: ${relationships.join(', ')}`);
+        if (keywords.length) bodyLines.push(`Keywords: ${keywords.join(', ')}`);
+
+        return {
+          id: `domain-${id}`,
+          type: 'domain' as const,
+          title: canonical,
+          summary: definition,
+          tags: [...aliases, ...keywords],
+          status: status as 'active' | 'archived',
+          created: fileDate,
+          updated: fileDate,
+          related: relationships.map(r => `domain-${r}`),
+          source: { kind: 'file' as const, path: 'domain/glossary.json', workspace: wsName },
+          body: bodyLines.join('\n'),
+          ext: {
+            tier: term.tier ?? 'core',
+            sourceKind: (term.source as Record<string, unknown>)?.kind ?? 'unknown',
+          },
+          scope: 'linked' as const,
+          category: 'domain',
+          specCategory: null,
+          createdBy: null,
+          sourceRef: null,
+          parent: null,
+        } satisfies WikiEntry;
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // File parsing
+  // -------------------------------------------------------------------------
+
   private async parseFileEntry(
     absPath: string,
     type: WikiNodeType,
@@ -453,7 +996,7 @@ export class WikiIndexer {
     const stem = basename(fileName, extname(fileName));
 
     const title = asString(data.title) || firstHeading(content) || stem;
-    const summary = asString(data.summary) || firstParagraph(content);
+    const summary = asString(data.description) || asString(data.summary) || firstParagraph(content);
     const tags = extractTags(data);
     const status = asStatus(data.status) ?? inferStatus(type);
     const related = normalizeRelated(data.related);
@@ -461,17 +1004,17 @@ export class WikiIndexer {
 
     // Enrichment fields from frontmatter
     const category = asString(data.category) || null;
+    const specCategory = asString(data.specCategory) || null;
     const createdBy = asString(data.createdBy) || null;
     const sourceRef = asString(data.sourceRef) || null;
     const parent = asString(data.parent) || null;
 
     const rel = toForwardSlash(relative(this.workflowRoot, absPath));
-    // Knowhow files live under knowhow/ with prefix-<slug>.md naming.
-    // Strip the 4-char prefix (KNW-/TIP-/TPL-/RCP-/REF-/DCS-/AST-/BLP-) from the id-generating
-    // stem so the id matches what WikiWriter produced at create time (`knowhow-<slug>`).
-    let idStem = stem;
-    if (/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i.test(stem)) idStem = stem.slice(4);
-    const id = `${type}-${slugify(idStem)}`;
+    // Knowhow files use prefix-<slug>.md naming (KNW-, TIP-, TPL-, etc.).
+    // Keep the full stem (including prefix) to avoid collisions when multiple
+    // prefixed files share the same timestamp slug (e.g. KNW-20260427-1912 vs
+    // DCS-20260427-1912 both slugifying to the same value).
+    const id = `${type}-${slugify(stem)}`;
 
     return {
       id,
@@ -488,6 +1031,7 @@ export class WikiIndexer {
       ext,
       scope: null,
       category,
+      specCategory,
       createdBy,
       sourceRef,
       parent,
@@ -523,28 +1067,34 @@ export class WikiIndexer {
   /**
    * Write a lightweight persistent index to `.workflow/wiki-index.json`.
    * Strips body/raw/ext to keep the file small and fast to parse externally.
+   * KG virtual entries get additional truncation to prevent file bloat.
    */
   private async persistIndex(index: WikiIndex): Promise<void> {
     const persisted: PersistedWikiIndex = {
       version: 2,
       generatedAt: index.generatedAt,
-      entries: index.entries.map((e): PersistedEntry => ({
-        id: e.id,
-        type: e.type,
-        title: e.title,
-        summary: e.summary,
-        tags: e.tags,
-        status: e.status,
-        created: e.created,
-        updated: e.updated,
-        scope: e.scope,
-        category: e.category,
-        createdBy: e.createdBy,
-        sourceRef: e.sourceRef,
-        parent: e.parent,
-        related: e.related,
-        source: e.source,
-      })),
+      entries: index.entries.map((e): PersistedEntry => {
+        const isKg = typeof e.ext?.virtualKind === 'string'
+          && (e.ext.virtualKind as string).startsWith('kg-');
+        return {
+          id: e.id,
+          type: e.type,
+          title: e.title,
+          summary: isKg ? e.summary.slice(0, 160) : e.summary,
+          tags: isKg ? e.tags.slice(0, 8) : e.tags,
+          status: e.status,
+          created: e.created,
+          updated: e.updated,
+          scope: e.scope,
+          category: e.category,
+          specCategory: e.specCategory,
+          createdBy: e.createdBy,
+          sourceRef: e.sourceRef,
+          parent: e.parent,
+          related: isKg ? e.related.slice(0, 8) : e.related,
+          source: e.source,
+        };
+      }),
     };
     const target = join(this.workflowRoot, 'wiki-index.json');
     await mkdir(dirname(target), { recursive: true });
@@ -611,7 +1161,7 @@ function normalizeRelated(value: unknown): string[] {
 function extractExt(data: Record<string, unknown>): Record<string, unknown> {
   const known = new Set([
     'title', 'summary', 'tags', 'status', 'related',
-    'category', 'createdBy', 'sourceRef', 'parent',
+    'category', 'specCategory', 'createdBy', 'sourceRef', 'parent',
   ]);
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
@@ -654,6 +1204,7 @@ export function filterEntries(entries: WikiEntry[], filters: WikiFilters): WikiE
     if (filters.category && d.category !== filters.category) return false;
     if (filters.createdBy && d.createdBy !== filters.createdBy) return false;
     if (filters.tool && d.ext?.tool !== true && d.ext?.tool !== 'true') return false;
+    if (filters.workspace && d.source.workspace !== filters.workspace) return false;
     if (filters.q) {
       const q = filters.q.toLowerCase();
       if (!d.title.toLowerCase().includes(q) && !d.summary.toLowerCase().includes(q)) {

@@ -4,7 +4,7 @@ Last step of session commands. Inline-extracts spec/knowhow from this single ses
 
 ## Inputs
 
-Caller passes: `SESSION_DIR`, `SESSION_TYPE` (brainstorm | analyze | blueprint | plan | execute | verify), `SESSION_ID`, `LINKED_MILESTONE` (optional).
+Caller passes: `SESSION_DIR`, `SESSION_TYPE` (grill | brainstorm | analyze | blueprint | plan | execute | verify), `SESSION_ID`, `LINKED_MILESTONE` (optional).
 
 ## Steps
 
@@ -14,7 +14,9 @@ Scan `SESSION_DIR` for any of these files (any absent → skip silently):
 
 | File | Source | Used for |
 |------|--------|----------|
-| `context-package.json` | brainstorm/analyze/blueprint | constraints + insights |
+| `context-package.json` | grill/brainstorm/analyze/blueprint | constraints + insights |
+| `terminology.md` | grill | domain terms with code references |
+| `grill-report.md` | grill | stress-test decisions + risk register |
 | `conclusions.json` | analyze | decisions |
 | `reflection-log.md` | execute | lessons + pitfalls |
 | `{role}/analysis.md` | brainstorm | role decisions |
@@ -33,6 +35,9 @@ Iterate detected files; build a `fragments[]` array. Each fragment: `{ kind, cat
 | `conclusions.json#recommendations[]` (priority ≥ medium) | knowhow | knowhow (`REF`) | derived from area |
 | `reflection-log.md` "## Lessons" / "## Pitfalls" sections | learning | spec (category `learning`) or knowhow (`KNW`) by length: < 200 chars → spec, else knowhow | `learning` |
 | `{role}/analysis.md` §2 Decisions[status=locked] | rule | spec | role-derived (`arch` for system-architect, `coding` for code-quality, etc.) |
+| `grill-report.md` "## Synthesis" locked decisions | rule | spec | `arch` if scope/integration/security branch, else `coding` |
+| `grill-report.md` "## Risk Register" items (severity ≥ medium) | knowhow | knowhow (`REF`) | `debug` |
+| `terminology.md` locked terms | knowhow | knowhow (`REF`) | `coding` |
 
 **Confidence scoring** (drop if < 0.5):
 - +0.3 if `status == "locked"` or section is explicit "## Decisions"
@@ -55,10 +60,34 @@ Apply? (auto | spec-only | knowhow-only | skip)
 
 Then for each fragment in approved buckets:
 
-- **spec**: `maestro spec add <category> "<title>" "<content>" --keywords {csv} --source finish-work` (capture returned id into `extracted_spec_ids[]`)
+- **spec**: `maestro spec add <category> "<title>" "<content>" --keywords {csv} --description "<one-line summary>" --source finish-work` (capture returned id into `extracted_spec_ids[]`)
 - **knowhow**: `maestro knowhow add --type {DCS|RCP|REF|KNW} --title "{title}" --body "{content}" --keywords {csv}` (capture id into `extracted_knowhow_ids[]`)
 - Below confidence threshold: increment `skipped_count`, do nothing
 - CLI failure: log W002, continue with remaining fragments
+
+### 3.5 Domain Term Extraction (interactive, conditional)
+
+Prerequisites:
+  - `.workflow/domain/` 目录存在（不存在则跳过整个步骤）
+  - Session 包含术语源文件
+
+Source priority:
+  1. `terminology.md` (grill session) — locked terms with code references
+  2. `context-package.json#domain.terminology[]` — brainstorm/grill/import 产出
+  3. `conclusions.json#recommendations` with domain-like keywords
+
+Process:
+  1. 从 session 产物中收集术语候选
+  2. 过滤已注册的 `glossary.json` terms
+  3. 0 个新候选 → 跳过（静默）
+  4. ≥ 1 个新候选 → 交互确认（domain 注册始终需要用户确认，`-y` 对 domain 无效）
+  5. 确认的术语写入 `glossary.json` via `maestro domain add`
+  6. 记录到 `archive.json` 的 `extraction.domain_ids[]`
+
+Skip conditions:
+  - `.workflow/domain/` 不存在
+  - Session 无术语源文件
+  - 所有候选术语已注册
 
 ### 4. Write `archive.json`
 
@@ -77,6 +106,7 @@ Overwrites; idempotent. Schema `session-archive/1.0`:
     "harvested_at": "{ISO now}",
     "spec_ids": [/* from Step 3 */],
     "knowhow_ids": [/* from Step 3 */],
+    "domain_ids": [/* from Step 3.5 */],
     "skipped_count": 0
   },
   "pruned": null

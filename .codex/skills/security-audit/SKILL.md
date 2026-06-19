@@ -141,7 +141,23 @@ one agent per module. Use `request_user_input` to confirm critical module list b
 
 **STRIDE spawn contract**:
 - CSV columns: `id, module_path, threats_to_assess, deps, wave, status` (initial `status="pending"`); filter `wave==2 AND status=="pending"`.
-- Same `output_schema` as the OWASP spawn above, but `top_issues` JSON items use shape `{stride_category, threat, severity, file:line, mitigation}`.
+- `output_schema`:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":              { "type": "string" },
+    "result_status":   { "type": "string", "enum": ["completed", "failed"] },
+    "findings":        { "type": "string", "maxLength": 500 },
+    "severity_counts": { "type": "string", "description": "JSON: {critical, high, medium, low}" },
+    "top_issues":      { "type": "string", "description": "JSON array: [{stride_category, threat, severity, file:line, mitigation}]" },
+    "error":           { "type": "string" }
+  },
+  "required": ["id", "result_status", "findings"]
+}
+```
+
 - Same termination contract as the OWASP spawn above (mandatory `report_agent_job_result`, read-only, no recursion, timeout → partial findings, etc.).
 - Merge: `result_status` → master `status`; copy `findings`, `severity_counts`, `top_issues`, `error`.
 

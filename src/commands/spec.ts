@@ -53,6 +53,8 @@ export function registerSpecCommand(program: Command): void {
     .action(async (opts) => {
       const { logCliEndpoint } = await import('../hooks/spec-analytics.js');
       const { loadSpecs } = await import('../tools/spec-loader.js');
+      const { loadWorkspaceConfig, resolveWorkspaceLinks } = await import('../config/index.js');
+      const { join } = await import('node:path');
       logCliEndpoint(process.cwd(), 'spec load', { category: opts.category, scope: opts.scope, keyword: opts.keyword, stdin: !!opts.stdin });
 
       let projectPath = process.cwd();
@@ -84,7 +86,13 @@ export function registerSpecCommand(program: Command): void {
         process.exit(1);
       }
 
-      const result = loadSpecs(projectPath, opts.category, uid, keyword, scope);
+      const wsConfig = loadWorkspaceConfig(projectPath);
+      const resolved = resolveWorkspaceLinks(projectPath, wsConfig);
+      const linkedSpecs = resolved
+        .filter(lw => lw.valid && lw.share.includes('spec'))
+        .map(lw => ({ name: lw.name, specsDir: join(lw.workflowRoot, 'specs') }));
+      const loaderOpts = linkedSpecs.length > 0 ? { linkedWorkspaces: linkedSpecs } : undefined;
+      const result = loadSpecs(projectPath, opts.category, uid, keyword, scope, loaderOpts);
 
       if (opts.stdin) {
         if (result.content) {
@@ -111,40 +119,125 @@ export function registerSpecCommand(program: Command): void {
   spec
     .command('list')
     .alias('ls')
-    .description('List spec files for a given scope')
-    .option('--scope <scope>', 'Spec scope: project|global|team|personal (default: project)')
+    .description('List spec files (all scopes by default)')
+    .option('--scope <scope>', 'Spec scope: project|global|team|personal (omit for all)')
     .option('--uid <uid>', 'User id for personal scope')
     .action(async (opts) => {
       const { logCliEndpoint } = await import('../hooks/spec-analytics.js');
       logCliEndpoint(process.cwd(), 'spec list', { scope: opts.scope });
-      const { existsSync, readdirSync } = await import('node:fs');
+      const { existsSync, readdirSync, readFileSync: readFs } = await import('node:fs');
+      const { join: pathJoin } = await import('node:path');
       const { resolveSpecDir } = await import('../tools/spec-loader.js');
+      const { parseSpecEntries: parseEntries } = await import('../tools/spec-entry-parser.js');
 
-      const scope = validateScope(opts.scope);
       const uid = await resolveUid(opts);
 
-      if (scope === 'personal' && !uid) {
-        console.error('Error: personal scope requires --uid or team membership.');
-        process.exit(1);
-      }
+      const printFileEntries = (specsDir: string, file: string) => {
+        try {
+          const raw = readFs(pathJoin(specsDir, file), 'utf-8');
+          const { entries } = parseEntries(raw);
+          if (entries.length === 0) {
+            console.log(`  ${file}`);
+          } else {
+            console.log(`  ${file} (${entries.length} entries)`);
+            for (const e of entries) {
+              let label = e.title || e.content.replace(/\n/g, ' ').trim();
+              if (label.length > 50) label = label.slice(0, 50) + '...';
+              console.log(`    L${String(e.lineStart).padEnd(4)} ${label}`);
+            }
+          }
+        } catch {
+          console.log(`  ${file}`);
+        }
+      };
 
-      const specsDir = resolveSpecDir(process.cwd(), scope, uid);
-      const label = SCOPE_LABELS[scope];
+      // When --scope is explicitly given, show that scope only
+      if (opts.scope) {
+        const scope = validateScope(opts.scope);
+        if (scope === 'personal' && !uid) {
+          console.error('Error: personal scope requires --uid or team membership.');
+          process.exit(1);
+        }
 
-      if (!existsSync(specsDir)) {
-        console.log(`No ${label.toLowerCase()} directory. Run "maestro spec init --scope ${scope}" to create.`);
+        const specsDir = resolveSpecDir(process.cwd(), scope, uid);
+        const label = SCOPE_LABELS[scope];
+
+        if (!existsSync(specsDir)) {
+          console.log(`No ${label.toLowerCase()} directory. Run "maestro spec init --scope ${scope}" to create.`);
+          return;
+        }
+
+        const files = readdirSync(specsDir).filter(f => f.endsWith('.md'));
+        if (files.length === 0) {
+          console.log(`No ${label.toLowerCase()} files found.`);
+          return;
+        }
+
+        console.log(`${label} (${files.length} files)  [${specsDir}]\n`);
+        for (const file of files) printFileEntries(specsDir, file);
         return;
       }
 
-      const files = readdirSync(specsDir).filter(f => f.endsWith('.md'));
-      if (files.length === 0) {
-        console.log(`No ${label.toLowerCase()} files found.`);
+      // No --scope: show overview of all scopes
+      const scopesToShow: Array<typeof VALID_SCOPES[number]> = ['global', 'project', 'team'];
+      let totalFiles = 0;
+
+      for (const scope of scopesToShow) {
+        const specsDir = resolveSpecDir(process.cwd(), scope);
+        const label = SCOPE_LABELS[scope];
+        const exists = existsSync(specsDir);
+
+        if (!exists) {
+          console.log(`${label}: (not initialized)`);
+          console.log('');
+          continue;
+        }
+
+        const files = readdirSync(specsDir).filter((f: string) => f.endsWith('.md'));
+        totalFiles += files.length;
+
+        if (files.length === 0) {
+          console.log(`${label}: (empty)  [${specsDir}]`);
+        } else {
+          console.log(`${label} (${files.length} files)  [${specsDir}]`);
+          for (const file of files) printFileEntries(specsDir, file);
+        }
+        console.log('');
+      }
+
+      if (totalFiles === 0) {
+        console.log('No spec files found in any scope. Run "maestro spec init" to initialize.');
+      }
+    });
+
+  // ── search ────────────────────────────────────────────────────────────
+  spec
+    .command('search <query...>')
+    .description('Search spec entries by keyword or text')
+    .option('--scope <scope>', 'Spec scope: project|global|team|personal (omit for all)')
+    .option('--uid <uid>', 'User id for personal scope')
+    .option('--json', 'Output as JSON')
+    .action(async (queryParts: string[], opts) => {
+      console.warn('[deprecated] Use "maestro search --type spec" instead');
+      const q = queryParts.join(' ');
+      const { runUnifiedSearch } = await import('./search.js');
+      const results = await runUnifiedSearch(q, { type: 'spec', limit: 20 });
+
+      if (opts.json) {
+        console.log(JSON.stringify({ query: q, count: results.length, results }, null, 2));
         return;
       }
 
-      console.log(`${label} (${files.length} files)  [${specsDir}]\n`);
-      for (const file of files) {
-        console.log(`  ${file}`);
+      console.log(`Found ${results.length} entries matching "${q}"`);
+      for (const r of results) {
+        const cat = r.category ? `[${r.category}] ` : '';
+        const path = r.source?.path ? `${r.source.path}  ` : '';
+        console.log(`  ${cat}${path}${r.id}  ${r.title}`);
+        if (r.snippet) {
+          console.log(`    ${r.snippet}`);
+        } else if (r.summary) {
+          console.log(`    ${r.summary}`);
+        }
       }
     });
 
@@ -203,8 +296,8 @@ export function registerSpecCommand(program: Command): void {
   // ── status ────────────────────────────────────────────────────────────
   spec
     .command('status')
-    .description('Show spec system status')
-    .option('--scope <scope>', 'Spec scope: project|global|team|personal (default: project)')
+    .description('Show spec system status (all scopes by default)')
+    .option('--scope <scope>', 'Spec scope: project|global|team|personal (omit for all)')
     .option('--uid <uid>', 'User id for personal scope')
     .action(async (opts) => {
       const { logCliEndpoint } = await import('../hooks/spec-analytics.js');
@@ -213,32 +306,45 @@ export function registerSpecCommand(program: Command): void {
       const { join } = await import('node:path');
       const { resolveSpecDir } = await import('../tools/spec-loader.js');
 
-      const scope = validateScope(opts.scope);
       const uid = await resolveUid(opts);
 
-      if (scope === 'personal' && !uid) {
-        console.error('Error: personal scope requires --uid or team membership.');
-        process.exit(1);
-      }
+      const printScopeStatus = (scope: typeof VALID_SCOPES[number], specsDir: string) => {
+        const label = SCOPE_LABELS[scope];
+        const dirExists = existsSync(specsDir);
 
-      const specsDir = resolveSpecDir(process.cwd(), scope, uid);
-      const label = SCOPE_LABELS[scope];
-      const dirExists = existsSync(specsDir);
+        if (!dirExists) {
+          console.log(`${label}: not initialized`);
+          console.log(`  Run "maestro spec init --scope ${scope}" to initialize.`);
+          return;
+        }
 
-      if (!dirExists) {
-        console.log(`${label} directory: missing`);
-        console.log(`Run "maestro spec init --scope ${scope}" to initialize.`);
+        const files = readdirSync(specsDir).filter((f: string) => f.endsWith('.md'));
+        console.log(`${label} (${files.length} files)  [${specsDir}]`);
+
+        for (const file of files) {
+          const size = readFileSync(join(specsDir, file), 'utf-8').length;
+          console.log(`    ${file}  (${size} chars)`);
+        }
+      };
+
+      // When --scope is explicitly given, show that scope only
+      if (opts.scope) {
+        const scope = validateScope(opts.scope);
+        if (scope === 'personal' && !uid) {
+          console.error('Error: personal scope requires --uid or team membership.');
+          process.exit(1);
+        }
+        console.log('Spec System Status\n');
+        printScopeStatus(scope, resolveSpecDir(process.cwd(), scope, uid));
         return;
       }
 
-      const files = readdirSync(specsDir).filter(f => f.endsWith('.md'));
-      console.log(`${label} System Status\n`);
-      console.log(`  Directory: OK (${specsDir})`);
-      console.log(`  Files: ${files.length}\n`);
-
-      for (const file of files) {
-        const size = readFileSync(join(specsDir, file), 'utf-8').length;
-        console.log(`    ${file}  (${size} chars)`);
+      // No --scope: show all scopes
+      console.log('Spec System Status\n');
+      const scopesToShow: Array<typeof VALID_SCOPES[number]> = ['global', 'project', 'team'];
+      for (const scope of scopesToShow) {
+        printScopeStatus(scope, resolveSpecDir(process.cwd(), scope));
+        console.log('');
       }
     });
 
@@ -250,6 +356,7 @@ export function registerSpecCommand(program: Command): void {
     .argument('<title>', 'Entry title')
     .argument('[content]', 'Entry content (if omitted, reads from remaining args)')
     .option('--keywords <words>', 'Comma-separated keywords')
+    .option('--description <desc>', 'One-line description for search results')
     .option('--source <source>', 'Source reference (e.g., analyze:ANL-xxx)')
     .option('--ref <path>', 'Create as index entry referencing a knowhow document')
     .option('--knowhow-type <type>', 'Knowhow type for --ref (asset, blueprint, document, template, etc.)')
@@ -419,6 +526,7 @@ export function registerSpecCommand(program: Command): void {
         opts.source as string | undefined,
         scope,
         uid,
+        opts.description as string | undefined,
       );
 
       if (opts.json) {

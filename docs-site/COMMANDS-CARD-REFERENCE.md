@@ -1,6 +1,6 @@
 # Maestro Commands Quick Reference
 
-> Auto-generated cross-checked card layout — 58 commands, 7 categories
+> Auto-generated cross-checked card layout — 65 active commands + 4 deprecated, 9 categories
 
 ---
 
@@ -44,16 +44,6 @@
 按波次并行执行阶段任务，支持依赖感知调度和原子提交。消费 plan.json 生成的任务定义
 
 **Flags:** [phase] (阶段) · --auto-commit (自动提交) · --method agent|codex|gemini|cli|auto (执行方式) · --executor <tool> (指定执行工具) · --dir <path> (草稿目录模式) · -y (自动模式)
-
----
-
-### `maestro-verify` — 验证阶段
-
-**Usage:** `/maestro-verify [phase] [--skip-tests] [--skip-antipattern] [--dir <path>]`
-
-目标回溯验证：3 层必要项检查 → 反模式扫描 → 奈奎斯特测试覆盖率审计 → 缺口修复计划生成
-
-**Flags:** [phase] (阶段) · --skip-tests (跳过测试检查) · --skip-antipattern (跳过反模式扫描) · --dir <path> (草稿目录模式)
 
 ---
 
@@ -147,13 +137,9 @@
 
 ---
 
-### `maestro-coordinate` — CLI 协调器
+### ~~`maestro-coordinate`~~ — 已废弃
 
-**Usage:** `/maestro-coordinate "intent text" [-y] [-c] [--dry-run] [--chain <name>] [--tool <tool>]`
-
-CLI 协调器：分析用户意图 → 选择命令链 → 通过 maestro delegate 顺序执行，支持自动确认和非阻塞后台执行
-
-**Flags:** "intent text" (意图文本) · -y (自动模式) · -c (恢复会话) · --dry-run (演练) · --chain <name> (指定命令链) · --tool <tool> (指定工具)
+> **已废弃**：功能已由 `maestro-ralph` 和 `maestro-next` 替代。使用 `/maestro-ralph` 或 `/maestro-next` 替代。
 
 ---
 
@@ -187,6 +173,106 @@ CLI 协调器：分析用户意图 → 选择命令链 → 通过 maestro delega
 
 ---
 
+### `maestro-universal-workflow` — 动态对抗工作流
+
+**Usage:** `/maestro-universal-workflow <intent> [--name <slug>] [--depth shallow|standard|deep] [--dry-run] [--from <script>] [--resume <runId>]`
+
+动态工作流生成器：扫描库 → 匹配或设计 → 生成脚本 → 执行 → 持久化。每个决策点注入对抗性 agent 模式（skeptic/prosecutor/defender/judge），生成的脚本积累在 ~/.maestro/workflows/dynamic/ 构建可复用库
+
+**Flags:** <intent> (任务描述) · --name <slug> (脚本名) · --depth shallow|standard|deep (对抗深度) · --dry-run (仅生成不执行) · --from <script> (基于已有脚本) · --resume <runId> (恢复运行)
+
+---
+
+### `maestro-swarm-workflow` — 并行工作流加速
+
+**Usage:** `/maestro-swarm-workflow <intent> [--script <name>] [--dims <d1,d2>] [--roles <r1,r2>] [--count N] [--tier quick|standard] [--resume <runId>]`
+
+并行加速层：将意图路由到预构建的 Workflow 脚本，利用 parallel()/pipeline() 实现多代理并发执行。8 个固定脚本覆盖 analyze/brainstorm/review/verify/grill/plan/execute/milestone-audit，每个脚本内嵌对抗决策模式
+
+**Flags:** <intent> (任务描述) · --script <name> (指定脚本) · --dims <d1,d2> (分析维度) · --roles <r1,r2> (角色) · --count N (角色数量) · --tier quick|standard (审查层级) · --resume <runId> (恢复运行)
+
+---
+
+### `maestro-companion` — 知识伴侣
+
+**Usage:** `/maestro-companion [before|note|after|route] [--task <description>] [--type <task_type>] [--category <cat>]`
+
+知识伴侣工具：加载上下文、记录伴侣文档、捕获洞察、路由到技能。四种模式：before（预任务加载）、note（中任务记录）、after（后任务复盘）、route（意图路由）。纯 side-car，不创建 session
+
+**Flags:** [before|note|after|route] (模式) · --task <description> (任务描述) · --type <task_type> (任务类型) · --category <cat> (分类过滤)
+
+---
+
+### `maestro-grill` — 苏格拉底式测试
+
+**Usage:** `/maestro-grill <topic|plan> [-y] [-c] [--from <source>] [--depth shallow|standard|deep]`
+
+苏格拉底式压力测试：对计划/想法/需求进行代码库现实检验。逐个分支走决策树，用具体场景挑战模糊术语，用代码证据验证假设。产出 verified context package 供下游 brainstorm/analyze/roadmap 消费。位于 brainstorm 之前
+
+**Flags:** <topic|plan> (主题或计划) · -y (自动模式) · -c (恢复会话) · --from <source> (上游输入) · --depth shallow|standard|deep (分支深度)
+
+---
+
+### `maestro-next` — 单命令推荐
+
+**Usage:** `/maestro-next <intent> [-y] [--dry-run] [--top N] [--list]`
+
+单链推荐引擎：解析 intent + 项目状态 → 路由表评分 → 推荐单个原子命令 → 确认后通过 Skill() 执行。不创建 session，不构建 chain，不写 status.json。适用于意图清晰且单步即可完成的场景
+
+**Flags:** <intent> (意图文本) · -y (跳过确认) · --dry-run (仅显示推荐) · --top N (显示前 N 个候选) · --list (列出候选池)
+
+---
+
+### `maestro-ralph` — 闭环引擎
+
+**Usage:** `/maestro-ralph <intent> [-y] | status | continue`
+
+闭环决策引擎：读取项目状态 → 推断位置 → 构建自适应链 → 委托执行。与 maestro-ralph-execute 互调形成自延续工作循环。支持 ralph（自适应链）和 maestro（静态链）两类 session。决策节点自动评估质量门
+
+**Flags:** <intent> (意图文本) · -y (自动模式) · status (显示进度) · continue (恢复执行)
+
+---
+
+### `maestro-ralph-beta` — 自运行循环
+
+**Usage:** `/maestro-ralph-beta <intent> [-y] | continue | status`
+
+自运行循环控制器：单一 skill 完成 build/tick/decide 一体化。每次调用按 session 状态路由，执行一个 tick，然后自调用直到全部 completion_confirmed 或暂停。双平台支持（Claude + Codex）
+
+**Flags:** <intent> (意图文本) · -y (自动模式) · continue (恢复) · status (显示进度)
+
+---
+
+### `maestro-ralph-execute` — 单步执行
+
+**Usage:** `/maestro-ralph-execute [-y] [session-id]`
+
+Ralph session 单步执行器：每次调用定位 session → 找下一步 → 解析参数 → 执行 → 更新 → 自调用下一步。与 /maestro-ralph 互调形成自延续工作循环。支持 ralph（自适应链）和 maestro（静态链）两类 session
+
+**Flags:** -y (自动模式) · [session-id] (指定会话)
+
+---
+
+### `maestro-guard` — 编辑边界
+
+**Usage:** `/maestro-guard <on|off|status|allow <path>|deny <path>>`
+
+目录级写入边界管理：由 workflow-guard PreToolUse hook 强制执行。启用时 Write/Edit 工具对允许路径外的文件调用被阻断。配置存储在 .workflow/config.json guard 段
+
+**Flags:** on (启用) · off (禁用) · status (显示状态) · allow <path> (允许路径) · deny <path> (拒绝路径)
+
+---
+
+### `maestro-ui-codify` — 设计系统提取
+
+**Usage:** `/maestro-ui-codify <source-path> [--package-name <name>] [--output-dir <path>] [--overwrite]`
+
+从现有源代码提取设计系统：4 阶段管线 — 验证 → 提取（3 并行 agent：Style/Animation/Layout）→ 打包（生成 preview.html + preview.css）→ 持久化为知识资产
+
+**Flags:** <source-path> (源代码目录，必填) · --package-name <name> (包名) · --output-dir <path> (输出目录) · --overwrite (覆盖已有)
+
+---
+
 ### `maestro-update` — 工作流更新
 
 **Usage:** `/maestro-update [--dry-run] [--force]`
@@ -217,13 +303,9 @@ CLI 协调器：分析用户意图 → 选择命令链 → 通过 maestro delega
 
 ---
 
-### `maestro-link-coordinate` — 步进协调器
+### ~~`maestro-link-coordinate`~~ — 已废弃
 
-**Usage:** `/maestro-link-coordinate "intent text" [--list] [-c [sessionId]] [--chain <name>] [--tool <tool>] [-y]`
-
-步进式工作流协调器：逐节点执行命令链图，决策/门控/评估节点自动解析，会话持久化支持恢复
-
-**Flags:** "intent text" (意图文本) · --list (列出可用链图) · -c [sessionId] (恢复会话) · --chain <name> (指定链图) · --tool <tool> (指定工具) · -y (自动模式)
+> **已废弃**：功能已由 `maestro-ralph` 替代。使用 `/maestro-ralph` 替代。
 
 ---
 
@@ -318,8 +400,8 @@ Load registered tool specs and execute step-by-step. Supports direct invocation 
 
 ---
 
-## Quality (10 commands)
-*Testing, debugging, code review, refactoring, and quality assurance*
+## Quality (11 commands)
+*Testing, debugging, code review, refactoring, security, and quality assurance*
 
 ### `quality-review` — 代码审查
 
@@ -403,8 +485,18 @@ Load registered tool specs and execute step-by-step. Supports direct invocation 
 
 ---
 
-## Management (10 commands)
-*Project status, memory management, codebase documentation, and issue tracking*
+### `security-audit` — 安全审计
+
+**Usage:** `/security-audit [quick|standard|deep] [--scope <path>]`
+
+OWASP Top 10 和 STRIDE 安全审计，含供应链分析。三级深度控制：quick（OWASP+依赖）、standard（+密钥+CI/CD）、deep（+STRIDE+Git History）
+
+**Flags:** [quick|standard|deep] (审计深度) · --scope <path> (限定扫描目录)
+
+---
+
+## Management (11 commands)
+*Project status, memory management, codebase documentation, knowledge audit, and issue tracking*
 
 ### `manage-status` — 项目状态
 
@@ -501,6 +593,16 @@ Load registered tool specs and execute step-by-step. Supports direct invocation 
 知识图谱管理工具：健康仪表板（连通性、孤立条目检测）、条目搜索、孤立清理和图谱统计
 
 **Flags:** [health] (健康仪表板) · [search] (条目搜索) · [cleanup] (孤立清理) · [stats] (图谱统计) · [options] (子命令选项)
+
+---
+
+### `manage-knowledge-audit` — 知识审计
+
+**Usage:** `/manage-knowledge-audit --scope <spec|knowhow|artifact|all> [--level P0|P1|P2] [--timeline T1..T6] [--since YYYY-MM-DD] [--milestone <name>] [--include-archive] [--interactive] [--mark|--delete|--purge] [--dry-run] [--report]`
+
+知识审计与修剪：对称于 manage-harvest（写入入口）的知识淘汰入口。覆盖 8 大场景类、28 子场景（矛盾、失效、老化、孤儿等），通过 keep/deprecate/delete 三态决策清理 spec/knowhow/artifact 三大存储
+
+**Flags:** --scope <spec|knowhow|artifact|all> (范围，必填) · --level P0|P1|P2 (优先级) · --timeline T1..T6 (时间线) · --since YYYY-MM-DD (起始日期) · --milestone <name> (里程碑) · --include-archive (包含归档) · --interactive (交互模式) · --mark|--delete|--purge (操作) · --dry-run (演练) · --report (生成报告)
 
 ---
 

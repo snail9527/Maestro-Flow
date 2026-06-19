@@ -1,17 +1,6 @@
 # Retrospective Workflow
 
-Multi-lens 复盘 of completed phase artifacts. Consumes existing execution outputs (verification.json, review.json, issues.jsonl, .summaries/, state.json, uat.md, plan.json) and routes distilled insights into the spec / note / issue / knowhow stores.
-
-This is a **post-execution analysis** workflow. It reads only — until the routing stage, where it writes new spec stubs, issue rows, memory entries, and knowhow entries. It **does not modify existing phase artifacts**; it writes to the spec / issue / knowhow stores as configured outputs (new entries appended; pre-existing phase outputs such as verification.json, review.json, uat.md, .summaries/ are never altered).
-
----
-
-## Prerequisites
-
-- `.workflow/` initialized (`.workflow/state.json` exists)
-- At least one completed phase (via artifact registry in state.json)
-- Target phase has been executed (has `.task/` and `.summaries/`)
-- `maestro delegate` available (used for the four lens analyses via Agent calls)
+Multi-lens 复盘 of completed phase artifacts. Read-only until routing stage, where it writes to spec / issue / knowhow stores. NEVER modifies existing phase artifacts.
 
 ---
 
@@ -102,12 +91,10 @@ Archive existing retrospective.{json,md} to "{candidate.phase_dir}/.history/retr
 
 ## Stage 3: load_artifacts (per phase)
 
-For each selected phase (using `candidate.phase_dir` resolved in Stage 2), build the in-memory artifacts bundle:
-
 ```
-artifact_dir = candidate.phase_dir  (resolved from artifact registry)
+artifact_dir = candidate.phase_dir
 
-Load artifacts bundle from artifact_dir:
+Load artifacts bundle:
   index           ← {artifact_dir}/index.json
   state           ← .workflow/state.json
   plan            ← {artifact_dir}/plan.json
@@ -148,9 +135,7 @@ delta = { vs_phase, tasks_completed, gaps_found, issues_opened, rework_iteration
 
 ## Stage 4: multi_lens_analysis
 
-Spawn one Agent per active lens **in parallel** (single message, multiple Agent calls). Each agent receives the artifacts bundle as a structured context block in its prompt and returns JSON.
-
-**All agent calls use `run_in_background: false`** (subagents cannot receive hook callbacks).
+Spawn one Agent per active lens **in parallel** (`run_in_background: false`). Each returns JSON.
 
 ### Lens registry
 
@@ -248,43 +233,31 @@ Return ONLY a single JSON object, no prose, matching this schema:
 
 ### Spawn pattern
 
-Spawn all active lenses in parallel as `general-purpose` Agents (run_in_background: false), each receiving the rendered lens prompt template.
-
-Collect results into `lens_results = { technical, process, quality, decision }`. If any lens fails, log W001 and proceed with successful lenses.
+Spawn all lenses in parallel. Collect into `lens_results`. If any fails, log W001, proceed with successful lenses.
 
 ---
 
 ## Stage 5: synthesize
 
-Merge lens results into the canonical retrospective record.
-
 ### Generate insight IDs
 
-Assign `INS-{8 lowercase hex}` per insight using stable hash of `phase_num + lens + title` (idempotent across re-runs).
+`INS-{8 lowercase hex}` via stable hash of `phase_num + lens + title` (idempotent).
 
 ### Build retrospective.json
 
-Assemble the canonical record with structure: `{ phase, phase_slug, phase_title, retrospected_at, lenses_run, metrics, delta, findings_by_lens, distilled_insights, routing_recommendations, tweetable }`. See full schema in [Schemas](#retrospectivejson) section. Each insight's `routed_id` is null here (populated in Stage 6).
+Structure: `{ phase, phase_slug, phase_title, retrospected_at, lenses_run, metrics, delta, findings_by_lens, distilled_insights, routing_recommendations, tweetable }`. Each insight's `routed_id` is null (populated in Stage 6).
 
-### Build retrospective.md (human-readable)
+### Build retrospective.md
 
-Render a markdown report with these sections:
-1. **Header**: tweetable quote, phase metadata, lenses run
-2. **Metrics table**: all metrics fields from Stage 3
-3. **Delta table** (if --compare): ± values for key metrics
-4. **Findings by Lens**: for each lens → numbered wins, challenges, watch_patterns with evidence_refs
-5. **Distilled Insights**: per insight → category, lens, confidence, tags, routed_to, summary, evidence refs
-6. **Routing Recommendations table**: insight_id | target | rationale
+Sections: Header (tweetable, metadata) → Metrics table → Delta table (if --compare) → Findings by Lens → Distilled Insights → Routing Recommendations.
 
-Write both `{artifact_dir}/retrospective.json` and `{artifact_dir}/retrospective.md`.
+Write both to `{artifact_dir}/`.
 
 ---
 
 ## Stage 6: route_outputs
 
-**Skip entirely if `--no-route` flag is set.**
-
-For each routing recommendation, prompt the user (unless `--auto-yes`) and execute the routing action.
+**Skip if `--no-route`.** Prompt user per recommendation (skip if `--auto-yes`).
 
 ### Display routing table
 
@@ -325,8 +298,6 @@ insight.routed_id = "{target_file}#INS-{INS_id}"
 ```
 
 #### Target: note
-
-Reuse the existing `manage-learn` skill in tip mode — do not duplicate the learning pipeline.
 
 ```
 Invoke manage-learn tip with:
@@ -371,7 +342,7 @@ After all routings complete, re-write `retrospective.json` with the `routed_id` 
 
 ## Stage 7: persist_insights
 
-Append every distilled insight (regardless of routing target, including `routed_to: "none"`) to the knowhow store.
+Append every distilled insight (including `routed_to: "none"`) to the knowhow store.
 
 ### Bootstrap
 
@@ -400,37 +371,17 @@ For each insight in `distilled_insights`, append a `<spec-entry>` to `.workflow/
 </spec-entry>
 ```
 
-WikiIndexer auto-indexes each entry — no manual index update required.
-
-### Backward-compat append to specs/learnings.md
-
-Append learnings to `.workflow/specs/learnings.md` (shared with milestone-complete's learning extraction) using `<spec-entry>` closed-tag format:
-
-```
-Append each insight to .workflow/specs/learnings.md as <spec-entry> with:
-  category="learning", keywords (3-5 extracted), date, source="retrospective"
-  Body: title, summary, phase/lens/INS_id metadata
-
-Create file with roles frontmatter + "## Entries" header if it does not exist.
-```
+Also append each insight to `.workflow/specs/learnings.md` as `<spec-entry>` with `category="learning"` (backward compat with milestone-complete).
 
 ---
 
 ## Stage 8: next_step
 
-Print confirmation banner and route the user.
+Print: phase, lenses run, insight count, routing summary, output paths.
 
-```
-Print banner: phase, lenses run, insight count, routing summary (spec/note/issue/knowhow counts with target paths), output file paths.
+Next steps: `manage-status` | `manage-issue list --source retrospective` | `manage-learn list` | `maestro-milestone-audit`
 
-Suggested next steps:
-  manage-status                              — Review project state
-  manage-issue list --source retrospective   — Triage created issues
-  manage-learn list                          — Browse the insights library
-  maestro-milestone-audit                    — Audit milestone if all phases done
-```
-
-If `mode == "range"` or `--all`, loop Stages 3-8 per phase, then print aggregate batch summary (phases retrospected, total insights/specs/notes/issues).
+If range/all mode: loop Stages 3-8 per phase, then print aggregate summary.
 
 ---
 

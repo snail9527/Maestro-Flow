@@ -13,12 +13,8 @@ allowed-tools:
   - Agent
 ---
 <purpose>
-Codify reusable business processes as knowhow documents with `tool: true` in `.workflow/knowhow/`. Once registered, tools are auto-discovered by `spec load --category` and spec-injector — plan agents pick up design/architecture flows, test agents pick up verification methods, implement agents pick up execution steps.
-
-When to register: during planning to standardize a business process (e.g. payment reconciliation, OAuth integration steps); after execution to capture a validated procedure (e.g. database migration rollback); before testing to register verification methods for test agents (e.g. E2E checkout flow, API idempotency verification); during retrospective/harvest to extract reusable process knowledge from artifacts.
-
-Four modes: Extract (from code/docs), Generate (from description), Optimize (improve existing), Promote (existing knowhow → tool in place).
-Short processes (<10 steps) inline; long processes (>=10 steps) use ref mode with knowhow detail doc.
+Codify reusable business processes as knowhow documents with `tool: true` in `.workflow/knowhow/`.
+Four modes: Extract, Generate, Optimize, Promote. Short processes inline; long use ref mode.
 </purpose>
 
 <required_reading>
@@ -65,7 +61,7 @@ Parse $ARGUMENTS to determine mode:
 - Analyze improvement points (step splitting, prerequisites, error handling)
 
 **Promote mode** (existing knowhow → tool):
-- Locate document: `maestro wiki list --keyword <name>` or by path in `.workflow/knowhow/`
+- Locate document: `maestro search "<name>" --type knowhow` or by path in `.workflow/knowhow/`
 - Read document, verify it contains actionable steps (numbered list or ## Steps section)
 - If no actionable steps, suggest extract mode instead
 - Determine category (Step 3) and summary ("Use when ...")
@@ -128,7 +124,7 @@ summary: "Use when <timing>. <scope description>"
 **Optionally register spec ref entry** for index discoverability:
 ```bash
 maestro spec add <category> "<title>" "Use when <timing>. <scope summary>" --keywords "<csv>" \
-  --ref "knowhow/RCP-<slug>.md" --knowhow-type recipe
+  --description "<one-line summary>" --ref "knowhow/RCP-<slug>.md" --knowhow-type recipe
 ```
 
 ### Step 6: Verify
@@ -155,3 +151,12 @@ maestro spec add <category> "<title>" "Use when <timing>. <scope summary>" --key
 - [ ] Long processes use ref mode with knowhow file created
 - [ ] Ref knowhow YAML includes `summary` with usage timing
 </success_criteria>
+
+<completion>
+### Next-step routing
+| Condition | Suggestion |
+|-----------|-----------|
+| Tool registered, want to test | `/maestro-tools-execute <name>` |
+| Want to register another | `/maestro-tools-register` |
+| Tool for test agents | `/spec-load --category test` to verify discovery |
+</completion>

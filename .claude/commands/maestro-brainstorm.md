@@ -12,7 +12,9 @@ allowed-tools:
   - AskUserQuestion
 ---
 <purpose>
-Unified brainstorming combining interactive framework generation, multi-role parallel analysis, cross-role review, and resolution writeback. Two modes: Auto (full pipeline: guidance-specification → parallel {role}/ multi-file analysis → cross-role-reviewer compares Decision Digests for conflicts/gaps/synergies → user-confirmed resolutions patched into role files + logged in guidance §12) and Single Role (individual role analysis for an existing session). Outputs structured artifacts in `.workflow/scratch/{YYYYMMDD}-brainstorm-{slug}/` ready for downstream planning (roadmap / analyze / blueprint consume `guidance-specification.md`).
+Multi-role brainstorming with cross-role conflict resolution. Auto mode: guidance-specification → parallel role analysis → cross-role review → resolution writeback. Single role mode: individual role analysis for existing session.
+
+Pipeline: grill (optional) → **brainstorm** → roadmap / analyze / blueprint.
 </purpose>
 
 <required_reading>
@@ -38,59 +40,128 @@ $ARGUMENTS -- topic text for auto mode, or role name for single role mode.
 **Valid roles**: data-architect, product-manager, product-owner, scrum-master, subject-matter-expert, system-architect, test-strategist, ui-designer, ux-expert
 
 **Flags**:
-- `--yes` / `-y`: Auto mode, skip interactive questions, use defaults
-- `--count N`: Number of roles to select (default 3, max 9)
-- `--session ID`: Use existing session
-- `--update`: Update existing analysis (single role)
-- `--skip-questions`: Skip context gathering questions
-- `--include-questions`: Force context gathering even if analysis exists
-- `--style-skill PKG`: Style package for ui-designer role
+
+| Flag | Effect | Default |
+|------|--------|---------|
+| `--yes` / `-y` | Auto mode — skip interactive questions, use defaults | false |
+| `--count N` | Number of roles to select (max 9) | 3 |
+| `--session ID` | Use existing session | — |
+| `--update` | Update existing analysis (single role) | false |
+| `--skip-questions` | Skip context gathering questions | false |
+| `--include-questions` | Force context gathering even if analysis exists | false |
+| `--style-skill PKG` | Style package for ui-designer role | — |
 
 ### Pre-load specs
 1. **Architecture specs**: Run `maestro spec load --category arch` to load architecture constraints. Use as context for multi-role analysis — ensures roles respect documented decisions.
 2. Optional — proceed without if unavailable.
 
 ### Role Knowledge
-1. Browse accumulated knowledge for this role:
-   `maestro wiki list --category arch`
-2. Analyze the index, identify entries relevant to the current task
-3. Load selected documents:
-   `maestro wiki load <id1> [id2] [id3...]`
-4. Review loaded knowledge before proceeding
+1. `maestro search --category arch` → identify relevant entries
+2. `maestro wiki load <id1> [id2...]` → load selected documents
 </context>
 
 <interview_protocol>
-Interview the user relentlessly until shared understanding is reached. Active only in interactive mode; skip when `--yes/-y`, `--skip-questions`, `--session` (existing session), or input is already specific.
+Follows @~/.maestro/workflows/interview-mechanics.md standard.
 
-- One decision per turn via AskUserQuestion with 2–4 options + a (Recommended) default. The user controls termination — keep interviewing until convergence; they can interrupt naturally or via `Other` at any time.
-- Search-first when uncertain: before asking, resolve via `state.json`, the session directory, `maestro spec load`, `maestro wiki search`, Glob/Grep/Read, or — for open-ended multi-file scans — spawn `Agent(subagent_type: Explore)` / `maestro delegate ... --role explore`. Never ask what code or memory can verify; never bounce your own ambiguity back to the user — search first, then ask only what truly needs human judgment.
-- Writeback cadence: each time a decision settles, immediately append/update its row in `guidance-specification.md` §11 (create the section if absent). Do NOT batch writeback to the end — partial decisions must already be on disk before the next question.
-- Branch jumps allowed: the user may switch freely between mode / role / upstream / sub-pipeline branches; sequence is not enforced, but every decision point must end with a definite answer.
-- Scope guard: only ask about decisions owned by `brainstorm`. Do not pre-resolve roadmap/plan choices.
-
-Decision points: mode (auto / single-role / review-only) / role selection and `--count` / `--from` upstream source / whether to enable design-research and the DESIGN.md sub-pipeline.
-
-Exit: on consensus or explicit user signal to proceed, finalize session metadata. The §11 table (already populated incrementally) uses this schema:
-`| # | Decision | Choice | Source (user / code / default) |`
+**Interaction mode**: convergent menu-driven
+**Decision tree** (flexible order — user may jump between branches): mode (auto / single-role / review-only) → role selection and --count → --from upstream source (grill:ID, blueprint:ID, @file, path) → whether to enable design-research and DESIGN.md sub-pipeline
+**Scope guard**: only brainstorm decisions; do not pre-resolve roadmap/plan choices
+**Writeback target**: guidance-specification.md §11 (create section if absent)
+**Additional skip conditions**: --skip-questions, --session (existing session)
+**Exit condition**: on consensus or explicit user signal → finalize session metadata
 </interview_protocol>
 
 <execution>
 Follow '~/.maestro/workflows/brainstorm.md' completely.
 
-**Next-step routing on completion:**
+### Phase Gates (MANDATORY, BLOCKING)
 
-Auto mode:
-- Project not initialized → Skill({ skill: "maestro-init" })
-- Project initialized, need formal spec package → Skill({ skill: "maestro-blueprint", args: "--from brainstorm:{artifact_id}" })
-- Project initialized, quick roadmap → Skill({ skill: "maestro-roadmap", args: "--from brainstorm:{artifact_id}" })
-- Need deeper analysis first → Skill({ skill: "maestro-analyze", args: "{topic} --from brainstorm:{artifact_id}" })
-- `html-prototypes/` produced with 2+ files and user wants to browse → load `~/.maestro/workflows/brainstorm-visualize.md` and launch visualizer server (optional, user-triggered)
-- DESIGN.md established during Step 3.5 → suggest: "Run `/maestro-impeccable build <feature-description>` to build with the established design system"
+These gates apply to Auto mode (full pipeline). Do NOT advance past a gate until ALL conditions are met.
 
-Single role mode:
-- More roles needed → Skill({ skill: "maestro-brainstorm", args: "{next_role} --session {session_id}" })
-- All roles done, run synthesis → Skill({ skill: "maestro-brainstorm", args: "{topic} --session {session_id}" })
+**GATE 1: Framework → Role Analysis** (Step 1 → Step 3)
+- REQUIRED: `guidance-specification.md` written with §10 feature decomposition and RFC 2119 keywords.
+- REQUIRED: Role selection completed (interactive or auto-default).
+- BLOCKED if missing: complete framework generation before spawning role agents.
+
+**GATE 2: Role Analysis → Cross-Role Review** (Step 3 → Step 4.5)
+- REQUIRED: Every selected role has `{role}/analysis.md` with §2 Decision Digest (4 tables).
+- REQUIRED: Per-feature files `{role}/analysis-F-*.md` written for each feature in §10.
+- BLOCKED if missing: complete all role analyses before spawning cross-role-reviewer.
+
+**GATE 3: Cross-Role Review → Completion** (Step 4.5 → Report)
+- REQUIRED: Cross-role-reviewer output received with `patch_targets[]`.
+- REQUIRED: If findings > 0, resolutions applied via Edit AND logged in `guidance-specification.md` §12.
+- REQUIRED: If findings == 0, final report explicitly states "No cross-role issues detected".
+- BLOCKED if missing: complete review synthesis before reporting.
+
+### Artifact Verification (before completion report)
+
+```
+AUTO_MODE_REQUIRED = [
+  "guidance-specification.md",            // Step 1
+  "{role}/analysis.md" (per selected role), // Step 3
+  "{role}/analysis-F-*.md" (per feature),   // Step 3
+]
+```
+If any artifact is missing: DO NOT report completion. Go back and produce the missing artifact.
+
+### Evidence Requirement
+
+Role analysis findings in `{role}/analysis.md` §2 Decision Digest MUST cite concrete evidence:
+- Code references (file:line), API endpoints, data models from the codebase
+- User-provided constraints from interview
+- Cross-role references to other role analyses
+Decisions without evidence are flagged LOW CONFIDENCE.
 </execution>
+
+<completion>
+### Standalone report
+
+```
+=== BRAINSTORM READY ===
+Session: {session_id}
+Output:  {output_dir}
+Mode:    {auto|single-role}
+Roles:   {selected_roles}
+Findings: {review_findings_count} cross-role issues, {resolutions_applied} resolutions applied
+Status:  COMPLETE
+========================
+```
+
+### Ralph-invoked completion
+
+End the step by calling the CLI (no text block output):
+```
+maestro ralph complete <idx> --status {STATUS} [--evidence {path}]
+```
+
+Status verdicts:
+- **DONE** — Normal completion
+- **DONE_WITH_CONCERNS** — Completed with caveats; pass `--concerns`
+- **NEEDS_RETRY** — Tooling error / transient issue; ralph will retry
+- **BLOCKED** — External hard blocker; pass `--reason`
+
+### Next-step routing
+
+**Auto mode:**
+
+| Condition | Suggestion |
+|-----------|-----------|
+| Project not initialized | `/maestro-init` |
+| Need formal spec package | `/maestro-blueprint --from brainstorm:{artifact_id}` |
+| Quick roadmap needed | `/maestro-roadmap --from brainstorm:{artifact_id}` |
+| Need deeper analysis first | `/maestro-analyze {topic} --from brainstorm:{artifact_id}` |
+| Need stress-testing first | `/maestro-grill {topic}` |
+| `html-prototypes/` produced with 2+ files and user wants to browse | Load `~/.maestro/workflows/brainstorm-visualize.md` and launch visualizer server |
+| DESIGN.md established during Step 3.5 | `/maestro-impeccable build <feature-description>` |
+
+**Single role mode:**
+
+| Condition | Suggestion |
+|-----------|-----------|
+| More roles needed | `/maestro-brainstorm {next_role} --session {session_id}` |
+| All roles done, run synthesis | `/maestro-brainstorm {topic} --session {session_id}` |
+</completion>
 
 <error_codes>
 | Code | Severity | Condition | Recovery |

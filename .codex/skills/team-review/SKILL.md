@@ -187,7 +187,7 @@ You MUST call report_agent_job_result EXACTLY ONCE before exiting. NO exceptions
   "findings": "<key findings, max 500 chars>",
   "files_modified": "<semicolon-separated paths or empty>",
   "finding_count": "<integer or empty>",
-  "verdict": "PASS" | "WARN" | "BLOCK" | "" (REV only),
+  "verdict": "APPROVE" | "CONDITIONAL" | "BLOCK" | "" (REV only),
   "error": "<message if not completed>"
 }
 
@@ -207,7 +207,7 @@ You MUST call report_agent_job_result EXACTLY ONCE before exiting. NO exceptions
     "findings":       { "type": "string", "maxLength": 500 },
     "files_modified": { "type": "string" },
     "finding_count":  { "type": "string" },
-    "verdict":        { "type": "string", "enum": ["PASS", "WARN", "BLOCK", ""] },
+    "verdict":        { "type": "string", "enum": ["APPROVE", "CONDITIONAL", "BLOCK", ""] },
     "error":          { "type": "string" }
   },
   "required": ["id", "result_status", "findings"]

@@ -123,7 +123,7 @@ Write collected configuration to `.workflow/config.json`.
 Run `Bash("maestro spec init")` to create empty seed files in `.workflow/specs/`.
 
 If project state is **code** (existing source files detected in Step 2):
-- Auto-trigger `Skill({ skill: "spec-setup" })` to scan codebase and populate specs with detected conventions
+- Auto-trigger `$spec-setup` to scan codebase and populate specs with detected conventions
 - This runs unconditionally for `code` state — existing source means conventions can be extracted
 
 If project state is **empty** (greenfield, no source files found in Step 2):
@@ -155,4 +155,7 @@ Display created files and next steps: `$maestro-blueprint` (full spec), `$maestr
 - [ ] `config.json` written with configuration
 - [ ] `specs/` initialized with convention files
 - [ ] Completion report displayed with next steps
+
+### Artifact Verification
+Before reporting completion, verify: .workflow/project.md, .workflow/state.json, .workflow/config.json all exist. If any missing: DO NOT report completion.
 </success_criteria>

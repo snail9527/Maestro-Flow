@@ -52,7 +52,7 @@ Multi-dimension tech debt scanner. Scan codebase across 5 dimensions (code, arch
 ## Phase 3: Multi-Dimension Scan
 
 **Low Complexity** (inline):
-- Use `mcp__ace-tool__search_context` for code smells, TODO/FIXME, deprecated APIs, complex functions, dead code, missing tests
+- Use `` for code smells, TODO/FIXME, deprecated APIs, complex functions, dead code, missing tests
 - Classify findings into dimensions
 
 **Medium/High Complexity** (Fan-out):

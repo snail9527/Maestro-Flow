@@ -52,6 +52,7 @@ const ParamsSchema = z.object({
   // add params
   type: z.enum(CATEGORIES).optional(),
   title: z.string().optional(),
+  description: z.string().optional(), // one-line summary for search results
   body: z.string().optional(),
   tags: z.array(z.string()).optional(),
   // type-specific fields (persisted to frontmatter)
@@ -61,6 +62,7 @@ const ParamsSchema = z.object({
   assetType: z.string().optional(),  // asset: asset subtype
   codePaths: z.array(z.string()).optional(), // asset/blueprint: related code paths
   category: z.string().optional(),  // spec category for tool discovery (coding, arch, test, etc.)
+  specCategory: z.enum(['coding', 'arch', 'debug', 'test', 'review', 'learning', 'ui']).optional(),
   // search params
   query: z.string().optional(),
   limit: z.number().optional().default(20),
@@ -81,13 +83,17 @@ function slugify(text: string): string {
     .replace(/^-|-$/g, '');
 }
 
-function generateId(type: KnowHowCategory): { id: string; filename: string } {
+function generateId(type: KnowHowCategory, title?: string): { id: string; filename: string } {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
-  const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+  const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
   const prefix = PREFIX_MAP[type];
-  const filename = `${prefix}-${ts}.md`;
-  return { id: `knowhow-${slugify(ts)}`, filename };
+  const slug = title ? slugify(title).slice(0, 40) : '';
+  const filename = slug
+    ? `${prefix}-${ts}-${slug}.md`
+    : `${prefix}-${ts}-${pad(now.getHours())}${pad(now.getMinutes())}.md`;
+  const idSuffix = slug || `${pad(now.getHours())}${pad(now.getMinutes())}`;
+  return { id: `knowhow-${slugify(ts)}-${idSuffix}`, filename };
 }
 
 function escapeYamlValue(value: string): string {
@@ -109,7 +115,7 @@ function parseFrontmatter(raw: string): { data: Record<string, unknown>; body: s
 // --- Operations ---
 
 function executeAdd(params: Params): CcwToolResult {
-  const { type, title, body, tags, lang, source, status, assetType, codePaths, category } = params;
+  const { type, title, description, body, tags, lang, source, status, assetType, codePaths, category, specCategory } = params;
 
   if (!type) return { success: false, error: 'Parameter "type" is required for add operation' };
   if (!title) return { success: false, error: 'Parameter "title" is required for add operation' };
@@ -135,13 +141,14 @@ function executeAdd(params: Params): CcwToolResult {
   const dir = getKnowhowDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  const { id, filename } = generateId(type);
+  const { id, filename } = generateId(type, title);
   const filePath = join(dir, filename);
 
   // Build YAML frontmatter with type-specific fields
   const now = new Date().toISOString();
   const fmLines = ['---'];
   fmLines.push(`title: ${escapeYamlValue(title)}`);
+  if (description) fmLines.push(`description: ${escapeYamlValue(description)}`);
   fmLines.push(`type: ${type}`);
   fmLines.push(`created: ${now}`);
   if (tags && tags.length > 0) {
@@ -153,6 +160,7 @@ function executeAdd(params: Params): CcwToolResult {
   if (source) fmLines.push(`source: ${escapeYamlValue(source)}`);
   if (status) fmLines.push(`status: ${status}`);
   if (category) fmLines.push(`category: ${category}`);
+  if (specCategory) fmLines.push(`specCategory: ${specCategory}`);
   if (assetType) fmLines.push(`assetType: ${escapeYamlValue(assetType)}`);
   if (codePaths && codePaths.length > 0) {
     fmLines.push('codePaths:');
@@ -251,13 +259,14 @@ export const schema: ToolSchema = {
 
 *   **add** — Create a new knowhow entry.
     Required: type, title, body
+    Optional: description (one-line summary for search results), tags
     Type-specific fields:
       template:  lang (programming language)
       reference: source (URL)
       decision:  status (proposed | accepted | superseded)
       asset:     assetType (e.g. api-contract, prompt), codePaths (related source paths)
       blueprint: codePaths (related source paths)
-    Optional: tags (string[]), category (spec category for agent discovery)
+    Optional: tags (string[]), category, specCategory (spec category for agent injection)
 
 *   **search** — Full-text search knowhow entries.
     Required: query
@@ -291,6 +300,10 @@ Entries are automatically indexed by WikiIndexer (type=knowhow, category={type})
       title: {
         type: 'string',
         description: 'Entry title. Required for add.',
+      },
+      description: {
+        type: 'string',
+        description: 'One-line description for search results. Falls back to first paragraph of body.',
       },
       body: {
         type: 'string',
@@ -327,6 +340,11 @@ Entries are automatically indexed by WikiIndexer (type=knowhow, category={type})
       category: {
         type: 'string',
         description: 'Spec category for agent auto-discovery (coding, arch, test, debug, review, learning).',
+      },
+      specCategory: {
+        type: 'string',
+        enum: ['coding', 'arch', 'debug', 'test', 'review', 'learning', 'ui'],
+        description: 'Spec category for cross-system alignment. Allows knowhow entries to be injected alongside spec entries by spec-injector.',
       },
       // search
       query: {

@@ -11,7 +11,8 @@ allowed-tools:
   - AskUserQuestion
 ---
 <purpose>
-Turn a user's natural-language instruction into a command overlay — a JSON patch file that augments one or more `.claude/commands/*.md` files non-invasively. Overlays live at `~/.maestro/overlays/` and are auto-applied by every `maestro install` run, so injected steps survive reinstalls. Use this skill when the user says things like "always run CLI verification after `/maestro-execute`", "require reading doc X before `/maestro-plan`", or "add a `ccw cli` quality check at the end of every quality-review".
+Turn natural-language instructions into command overlays — JSON patch files that augment
+`.claude/commands/*.md` non-invasively. Auto-applied by `maestro install`.
 </purpose>
 
 <required_reading>
@@ -73,7 +74,7 @@ After confirming the injection point, ask whether this overlay should chain to a
 
 Use AskUserQuestion:
 - **"No chain"** — standard overlay, no skill handoff
-- **"Chain to skill"** → ask for the target skill name (e.g., `quality-review`, `maestro-verify`, `quality-test`)
+- **"Chain to skill"** → ask for the target skill name (e.g., `quality-review`, `maestro-execute`, `quality-test`)
 - **"Chain with alternatives"** → ask for primary skill + 1-2 alternative skills
 
 If chain is selected, record the skill name(s) for use in Step 3.
@@ -115,11 +116,11 @@ Build a slug from the user's intent (kebab-case, lowercase). Write to `~/.maestr
 After the above step completes, use AskUserQuestion:
 - "Proceed to /quality-review" — Hand off to quality review
 - "Skip" — Continue with current command flow
-- "Alternative: /maestro-verify" — Run verification instead
+- "Alternative: /maestro-execute" — Run execution with built-in verification instead
 
 On user selection:
 - Proceed → Skill({ skill: "quality-review", args: "{phase}" })
-- Alternative → Skill({ skill: "maestro-verify", args: "{phase}" })
+- Alternative → Skill({ skill: "maestro-execute", args: "{phase}" })
 - Skip → continue normally
 ```
 
@@ -176,3 +177,12 @@ After the report, remind the user they can run `maestro overlay list` for the in
 - [ ] Injection point preview shown (with existing overlays + `>>>` marker) and confirmed before drafting
 - [ ] If chain configured, `content` includes Skill Handoff block with AskUserQuestion + Skip option + `Skill()` calls
 </success_criteria>
+
+<completion>
+### Next-step routing
+| Condition | Suggestion |
+|-----------|-----------|
+| Overlay installed | `maestro overlay list` for interactive management |
+| Want to create another | `/maestro-overlay "<intent>"` |
+| Want to remove | `maestro overlay remove <slug>` |
+</completion>

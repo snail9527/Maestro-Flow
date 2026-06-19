@@ -13,12 +13,8 @@ allowed-tools:
   - Agent
 ---
 <purpose>
-Load registered tool documents and execute them step-by-step. Two invocation modes:
-
-1. **Direct** — Specify tool name, load full steps, execute sequentially
-2. **Category-based** — List available tools for a category, user selects, then execute
-
-Execution follows the tool definition steps in order, reporting progress per step and asking user on blockers.
+Load registered tool documents and execute them step-by-step.
+Direct (by name) or category-based (list + select) invocation.
 </purpose>
 
 <required_reading>
@@ -71,10 +67,10 @@ maestro wiki load <knowhow-id>
 
 ### Step 3: Confirm Execution
 
-Ask user:
-- Execute steps as-is?
-- Adjust parameters/scope?
-- View only, do not execute?
+AskUserQuestion (single-select, header: "执行方式"):
+- **Execute as-is** (Recommended) — run all steps with current parameters
+- **Adjust parameters** — modify scope or parameters before executing
+- **View only** — display steps without executing
 
 ### Step 4: Step-by-Step Execution
 
@@ -115,3 +111,12 @@ After completion, output:
 - [ ] Blockers handled interactively
 - [ ] Results reported clearly
 </success_criteria>
+
+<completion>
+### Next-step routing
+| Condition | Suggestion |
+|-----------|-----------|
+| Tool completed successfully | `/manage-status` or continue workflow |
+| Want to register a new tool | `/maestro-tools-register` |
+| Need to adjust tool definition | `/maestro-tools-register --optimize <name>` |
+</completion>

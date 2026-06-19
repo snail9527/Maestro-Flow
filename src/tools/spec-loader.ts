@@ -6,7 +6,7 @@
  * discovers knowhow tools with matching category, returns concatenated content.
  */
 
-import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseSpecEntries, formatSpecEntries, type SpecEntryParsed } from './spec-entry-parser.js';
 import { paths } from '../config/paths.js';
@@ -112,13 +112,15 @@ export interface LoadSpecsOptions {
   excludeKeywords?: string[];
   /** Extra spec filenames to include for the category (dynamic CATEGORY_MAP extension) */
   extraSpecFiles?: string[];
+  /** Linked workspace specs directories (read-only, inserted between global and baseline layers) */
+  linkedWorkspaces?: Array<{ name: string; specsDir: string }>;
 }
 
 export function loadSpecs(projectPath: string, category?: SpecCategory, uid?: string, keyword?: string, scope?: SpecScope, options?: LoadSpecsOptions): SpecLoadResult {
   const globalDir = options?.globalDir ?? paths.specs;
 
   // Build ordered list of (directory, label) pairs to scan
-  const layers = buildLayers(projectPath, uid, scope, globalDir);
+  const layers = buildLayers(projectPath, uid, scope, globalDir, options?.linkedWorkspaces);
 
   // Auto-init baseline and global layers.
   // Team/personal are per-user — auto-creating them for arbitrary uids is wrong.
@@ -160,6 +162,11 @@ export function loadSpecs(projectPath: string, category?: SpecCategory, uid?: st
     }
   }
 
+  // Hit tracking: silently log which specs were loaded for decay analysis
+  if (totalCount > 0) {
+    recordHit(projectPath, category, keyword, allMatched);
+  }
+
   return {
     content: allSections.length > 0
       ? `# Project Specs (${totalCount} loaded)\n\n${allSections.join('\n\n---\n\n')}`
@@ -178,11 +185,20 @@ interface LayerDef {
   label: string;
 }
 
-function buildLayers(projectPath: string, uid?: string, scope?: SpecScope, globalDir?: string): LayerDef[] {
+function buildLayers(projectPath: string, uid?: string, scope?: SpecScope, globalDir?: string, linkedWorkspaces?: Array<{ name: string; specsDir: string }>): LayerDef[] {
   const layers: LayerDef[] = [];
 
   // Global layer — always included as lowest priority
   layers.push({ dir: globalDir ?? paths.specs, label: LAYER_LABELS.global });
+
+  // Linked workspace layers — between global and baseline (read-only)
+  if (linkedWorkspaces) {
+    for (const lw of linkedWorkspaces) {
+      if (existsSync(lw.specsDir)) {
+        layers.push({ dir: lw.specsDir, label: `# Linked Specs (${lw.name})` });
+      }
+    }
+  }
 
   // Baseline — always included
   layers.push({
@@ -270,7 +286,10 @@ function shouldInclude(filename: string, category?: SpecCategory, extraSpecFiles
 
   // Category filter: include primary doc + all other files (for keyword cross-matching)
   const cat = CATEGORY_MAP[filename];
-  if (!cat) return false; // Unknown file
+  if (!cat) {
+    console.warn(`[spec] file not in category map, skipped: ${filename}`);
+    return false;
+  }
 
   // Primary category doc → always include (full load)
   if (cat === category) return true;
@@ -570,4 +589,28 @@ export function loadExtraDocs(projectPath: string, docPaths?: string[]): ExtraDo
     content: sections.length > 0 ? sections.join('\n\n---\n\n') : '',
     count: sections.length,
   };
+}
+
+// ============================================================================
+// Hit tracking — append-only JSONL log for decay analysis
+// ============================================================================
+
+function recordHit(
+  projectPath: string,
+  category: SpecCategory | undefined,
+  keyword: string | undefined,
+  matchedFiles: string[],
+): void {
+  try {
+    const hitLog = join(projectPath, SPECS_DIR, '.hit-log.jsonl');
+    const entry = JSON.stringify({
+      ts: new Date().toISOString(),
+      cat: category ?? null,
+      kw: keyword ?? null,
+      files: matchedFiles,
+    });
+    appendFileSync(hitLog, entry + '\n', 'utf-8');
+  } catch {
+    // Best-effort — never block loading
+  }
 }

@@ -1,11 +1,6 @@
 # Workflow: sync
 
-Change detection, impact chain traversal, and codebase documentation synchronization.
-
-## Trigger
-
-- Auto-triggered after `/workflow:execute` completes
-- Manual via `/workflow:sync [--since <ref>] [--dry-run]`
+Change detection, impact chain traversal, and codebase doc synchronization. Auto-triggered after execute, or manual via `/workflow:sync`.
 
 ## Arguments
 
@@ -14,11 +9,6 @@ Change detection, impact chain traversal, and codebase documentation synchroniza
 | `--full` | Complete resync of all tracked files (ignores git diff, rebuilds all docs) | `false` |
 | `--since <ref>` | Git ref for diff baseline (commit hash, `HEAD~N`, branch) | `HEAD~1` |
 | `--dry-run` | Show impact analysis without writing changes | `false` |
-
-## Prerequisites
-
-- `.workflow/codebase/doc-index.json` must exist (run `/workflow:codebase rebuild` first if missing)
-- Git repository initialized with at least one commit
 
 ---
 
@@ -45,19 +35,9 @@ No files changed → emit W001, exit
 ```
 Read .workflow/codebase/doc-index.json
 Extract: components[], features[], requirements[], architecture_decisions[]
-```
 
-**Degradation path — doc-index.json missing:**
-
-```
-If .workflow/codebase/doc-index.json does NOT exist:
-  1. Emit WARNING: "doc-index.json missing — sync cannot perform impact analysis."
-  2. Prompt user with two choices:
-     (a) Run `/manage-codebase-rebuild` to build doc-index, then re-run sync (recommended)
-     (b) Fall back to git-diff-only mode: skip Steps 3-5, emit raw changed-file
-         list from Step 2 as the sync output (no component/feature mapping)
-  3. If user picks (b): set DEGRADED_MODE = true and continue with git diff only.
-  4. If user picks (a) or no answer: exit with code E002.
+If missing: prompt → (a) run /manage-codebase-rebuild then re-run (recommended)
+             or    → (b) DEGRADED_MODE: git-diff-only, skip Steps 3-5
 ```
 
 ### Step 4: Impact Chain Traversal
@@ -73,47 +53,37 @@ Aggregate deduplicated: { files, components, features, requirements }
 ### Step 5: Update Doc Index (skip if --dry-run)
 
 ```
-Affected components → refresh last_updated, re-scan code_locations for exported symbols[]
-Affected features   → refresh last_updated, update status from component changes
+Affected components → refresh last_updated, re-scan code_locations for symbols[]
+Affected features   → refresh last_updated, update status
 Write updated doc-index.json
 ```
 
 ### Step 6: Regenerate Affected Docs (skip if --dry-run)
 
 ```
-Affected components → regenerate .workflow/codebase/tech-registry/{component-slug}.md
-  Template: name, id, type, code_locations, feature_ids, symbols list, timestamp
-
-Affected features → regenerate .workflow/codebase/feature-maps/{feature-slug}.md
-  Template: name, id, status, phase, component_ids, requirement_ids, component details, timestamp
+Components → regenerate .workflow/codebase/tech-registry/{component-slug}.md
+Features   → regenerate .workflow/codebase/feature-maps/{feature-slug}.md
 ```
 
 ### Step 7: Update State and Specs (skip if --dry-run)
 
 ```
-state.json → set last_sync timestamp, record change summary, update last_updated
+state.json → last_sync timestamp, change summary
 index.json → update affected phase indexes
-
-Spec updates: if patterns/conventions changed → append learnings to relevant spec files
-
-Dependency manifest check (package.json, go.mod, pyproject.toml, Cargo.toml,
-  requirements.txt, pom.xml, build.gradle, Gemfile):
-  If any changed AND .workflow/project.md exists → refresh Tech Stack section
+Dependency manifests changed + project.md exists → refresh Tech Stack section
 ```
 
 ### Step 8: Create Action Log
 
 ```
-hash = git rev-parse --short HEAD (or since-ref)
 Write .workflow/codebase/action-logs/{hash}.md:
-  Sections: date, baseline, files changed, components/features/requirements affected, impact counts
+  date, baseline, files changed, affected components/features/requirements, impact counts
 ```
 
 ### Step 9: Report
 
 ```
-Display: changed files count, affected components/features/requirements (with IDs),
-  specs updated, action log path. Note if --dry-run (no writes).
+Display: changed files, affected components/features/requirements, specs updated, action log path
 ```
 
 ---

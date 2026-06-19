@@ -36,6 +36,11 @@ Command --role analyze → cli-tools.json → fallbackChain: [codex, gemini, cla
 ```json
 {
   "version": "1.1.0",
+  "proxy": {
+    "enabled": true,
+    "httpProxy": "http://127.0.0.1:7890",
+    "noProxy": "127.0.0.1,localhost"
+  },
   "tools": {
     "gemini": {
       "enabled": true,
@@ -48,7 +53,8 @@ Command --role analyze → cli-tools.json → fallbackChain: [codex, gemini, cla
       "primaryModel": "claude-sonnet-4-20250514",
       "tags": ["fullstack"],
       "type": "builtin",
-      "settingsFile": "~/.maestro/profiles/claude-review.json"
+      "settingsFile": "~/.maestro/profiles/claude-review.json",
+      "proxy": false
     },
     "codex": {
       "enabled": true,
@@ -135,6 +141,53 @@ Used by `maestro execute` to auto-assign execution tools by file domain:
 
 </details>
 
+---
+
+## Proxy Configuration
+
+Inject proxy environment variables into CLI subprocesses via the `proxy` field in `cli-tools.json`, without affecting the global `$env:HTTP_PROXY`.
+
+### Global Configuration
+
+```json
+{
+  "proxy": {
+    "enabled": true,
+    "httpProxy": "http://127.0.0.1:7890",
+    "httpsProxy": "http://127.0.0.1:7891",
+    "noProxy": "127.0.0.1,localhost"
+  }
+}
+```
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `enabled` | Whether to enable proxy injection | — |
+| `httpProxy` | HTTP proxy URL | — |
+| `httpsProxy` | HTTPS proxy URL | Same as `httpProxy` |
+| `noProxy` | Proxy bypass list (comma-separated) | — |
+
+### Per-tool Toggle
+
+Set the `proxy` field on a `ToolEntry` to control proxy usage per tool:
+
+| Value | Behavior |
+|-------|----------|
+| `true` or omitted | Inherit global proxy config |
+| `false` | Skip proxy — no proxy env vars injected |
+
+```json
+{
+  "proxy": { "enabled": true, "httpProxy": "http://127.0.0.1:7890" },
+  "tools": {
+    "codex": { "enabled": true, "proxy": true },
+    "claude": { "enabled": true, "proxy": false }
+  }
+}
+```
+
+Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and lowercase variants) are only injected into the CLI subprocess environment spawned by delegate — the current shell is not modified.
+
 ### TUI Management
 
 ```bash
@@ -216,4 +269,5 @@ Delegate command parameter resolution:
 Role mapping: Project config → Global config → DEFAULT_ROLE_MAPPINGS
 Tool state: Project config → Global config
 settingsFile: ToolEntry → CliRunOptions → AgentConfig → adapter --settings
+proxy: config.proxy + ToolEntry.proxy → resolveProxyEnv() → AgentConfig.env → subprocess
 ```

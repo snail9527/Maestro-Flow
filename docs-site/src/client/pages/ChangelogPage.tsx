@@ -17,6 +17,153 @@ interface ChangelogEntry {
 
 const changelog: ChangelogEntry[] = [
   {
+    version: '0.5.33',
+    date: '2026-06',
+    changes: [
+      { type: 'fix', text_en: 'Install component selection changed to group bundles — 53→25 items, individual control via `install toggle`', text_zh: 'Install 组件选择改为分组打包——53→25 项，个别控制用 `install toggle`' },
+      { type: 'fix', text_en: 'Fix ComponentGrid cursor index mismatch — navigation and rendering now share unified ordered array', text_zh: '修复 ComponentGrid 光标索引错位——导航和渲染统一使用 ordered 数组' },
+      { type: 'fix', text_en: 'Add viewport scrolling to ComponentGrid — 20-row window prevents terminal overflow', text_zh: 'ComponentGrid 添加 viewport 滚动——20 行窗口防止终端溢出' },
+      { type: 'fix', text_en: 'Improve group label visibility in GroupedHub and ComponentGrid — primary color instead of dimColor', text_zh: '改善 GroupedHub 和 ComponentGrid 分组标签可见度——主色替代暗色' },
+      { type: 'fix', text_en: 'Add manifest migration for legacy individual skill IDs to new group bundle IDs', text_zh: '新增 manifest 迁移——旧个别 skill ID 自动映射到新 group bundle ID' },
+    ],
+  },
+  {
+    version: '0.5.32',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'New `maestro install toggle` — per-skill/command enable/disable controller with tri-state Tab view', text_zh: '新增 `maestro install toggle` 命令/技能独立控制器，三态 Tab 视图' },
+      { type: 'feat', text_en: 'Granular skill selection install — each new skill independently selectable + command group selection', text_zh: '细粒度技能选择安装——每个新增技能独立可选 + 命令族分组选择' },
+      { type: 'feat', text_en: 'Script plugins disabled by default — secure by default, explicit opt-in required', text_zh: '脚本插件默认禁用——secure by default，需显式启用' },
+      { type: 'fix', text_en: 'Odyssey zero-residual execution hardening — 6 systematic fixes eliminating premature stops', text_zh: 'Odyssey 零遗留执行强化——6 项系统性修复消除过早停止' },
+      { type: 'fix', text_en: 'KG code index streaming writes + atomic commits — no more OOM on large repos', text_zh: 'KG 代码索引流式写入 + 原子提交，大仓库不再 OOM' },
+      { type: 'fix', text_en: 'Install toggle multi-dimensional review fixes — module split, dedup, boundary corrections', text_zh: 'Install toggle 多维度审查修复——拆分模块、消除重复、修复边界' },
+    ],
+  },
+  {
+    version: '0.5.31',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'KG custom extractor plugin system — declarative config + script plugins + generator command', text_zh: 'KG 自定义提取器插件机制——声明式配置 + 脚本插件 + 生成命令' },
+      { type: 'fix', text_en: 'Switch kg CLI to MaestroGraph surface — compatibility aliases for index/sync-all/search, symbol name resolution for context/callers/callees/impact', text_zh: '切换 kg 命令到 MaestroGraph——兼容别名 index/sync-all/search，context/callers/callees/impact 支持符号名解析' },
+      { type: 'refactor', text_en: 'Core workflow files optimization — 13 files, -675 lines removed', text_zh: '核心 workflow 文件精简优化——13 个文件 -675 行' },
+      { type: 'refactor', text_en: 'Full command and workflow instruction optimization — purpose trimming + structure completion + Phase Gates normalization', text_zh: '全量优化命令文件和 workflow 指令——purpose 精简 + 结构补全 + Phase Gates 规范化' },
+      { type: 'docs', text_en: 'Instruction authoring guide update — optimization principles and anti-patterns for model behavior consistency', text_zh: '更新指令文件编写指南——优化原则与反模式，确保模型行为一致性' },
+      { type: 'docs', text_en: 'docs-site: add Odyssey command family documentation with category registration and i18n', text_zh: 'docs-site 新增 Odyssey 命令族文档——类别注册 + i18n' },
+    ],
+  },
+  {
+    version: '0.5.3',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'MaestroGraph: self-built KG engine with 9-language extractors, 24 framework resolvers, BM25F search — fully replacing CodeGraph', text_zh: 'MaestroGraph 自研知识图谱引擎——9 语言提取器、24 框架 resolver、BM25F 搜索，完全替换 CodeGraph' },
+      { type: 'feat', text_en: 'Odyssey command family: 5 new long-running deep-cycle commands (debug/improve/planex/ui/review-test-fix)', text_zh: '新增 Odyssey 长时命令族——5 个深度循环命令（debug/improve/planex/ui/review-test-fix）' },
+      { type: 'feat', text_en: 'Odyssey exhaustive iteration: 3-sentence philosophy constraints (zero-residual / exhaustive iteration / improvement-is-standard) + Goal reinforcement across all 5 commands', text_zh: 'Odyssey 穷尽迭代优化——三句哲学约束（零遗留 / 穷尽迭代 / 改进即标准）+ Goal 强化，覆盖全部 5 个命令' },
+      { type: 'feat', text_en: 'Domain knowledge system: glossary CRUD, code discovery, Hook injection, WikiIndexer search integration', text_zh: 'Domain 领域知识系统——glossary CRUD、代码发现、Hook 注入、WikiIndexer 搜索集成' },
+      { type: 'feat', text_en: 'Install TUI redesign: grouped Hub, granular Hooks config, Config Profile export/import', text_zh: 'Install TUI 重设计——分组 Hub、Hooks 颗粒度配置、Config Profile 导出导入' },
+      { type: 'feat', text_en: 'Cross-workspace knowledge sharing: workspace link/unlink/list/status + WikiIndexer multi-source aggregation', text_zh: '跨工作空间知识共享——workspace link/unlink/list/status + WikiIndexer 多源聚合' },
+      { type: 'fix', text_en: 'FTS5 DELETE trigger cross-index misfire causing DB corruption + Windows mmap safety guard', text_zh: 'FTS5 DELETE trigger 跨索引误删导致 DB 损坏 + Windows mmap 安全防护' },
+    ],
+  },
+  {
+    version: '0.5.2',
+    date: '2026-06',
+    changes: [
+      { type: 'fix', text_en: 'skill-scanner: add ~/.agents/skills/ global scanning for agent platform (parity with claude/codex/agy)', text_zh: 'skill-scanner: agent 平台添加 ~/.agents/skills/ 全局扫描（与 claude/codex/agy 一致）' },
+      { type: 'fix', text_en: 'codex skills: unify invocation syntax — Skill({}) and /name replaced with $name across 45 files', text_zh: 'codex skills: 统一调用语法——Skill({}) 和 /name 全部替换为 $name，涉及 45 个文件' },
+      { type: 'fix', text_en: 'codex maestro SKILL.md: AskUserQuestion → request_user_input, command_path aligned to .codex/skills/', text_zh: 'codex maestro SKILL.md: AskUserQuestion 改为 request_user_input，command_path 对齐 .codex/skills/ 路径' },
+    ],
+  },
+  {
+    version: '0.5.1',
+    date: '2026-06',
+    changes: [
+      { type: 'fix', text_en: 'knowhow/spec description attribute full sync across all commands, skills, and workflows', text_zh: 'knowhow/spec description 属性全量同步至所有命令、技能和工作流' },
+      { type: 'feat', text_en: 'install TUI: add CodeGraph toggle for one-click tree-sitter KG installation', text_zh: 'install TUI 新增 CodeGraph 开关，一键安装 tree-sitter 代码分析' },
+      { type: 'fix', text_en: 'install: fix statusline not recorded in manifest and defaulting to off', text_zh: '修复 statusline 未记录到 manifest 导致默认关闭的问题' },
+      { type: 'feat', text_en: 'forceInstall: add --statusline and --codegraph CLI options', text_zh: 'forceInstall 新增 --statusline 和 --codegraph CLI 选项' },
+    ],
+  },
+  {
+    version: '0.5.0',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'knowledge system reform: unified search, KG Hook auto-injection, CodeGraph function-level call graph', text_zh: '知识系统改革——统一搜索入口、KG Hook 自动注入、CodeGraph 函数级调用图' },
+      { type: 'refactor', text_en: 'install pipeline overhaul: .agy/ removed from git, realtime conversion from .claude/ on install', text_zh: 'install 管线改造——.agy/ 从 git 移除，install 时从 .claude/ 实时转换' },
+      { type: 'feat', text_en: 'ralph skills --platform enforcement: add agent/agy platforms, warn on missing', text_zh: 'ralph skills --platform 强制化——新增 agent/agy 平台，缺失时警告' },
+      { type: 'refactor', text_en: 'maestro-verify merged into maestro-execute as built-in verification gate', text_zh: 'maestro-verify 合并到 maestro-execute 作为内置验证 gate' },
+      { type: 'feat', text_en: 'spec/knowhow entries gain title/description attributes, unified search sync', text_zh: 'spec/knowhow 条目增加 title/description 属性，搜索命令统一同步' },
+      { type: 'feat', text_en: 'global command writing style optimization: descriptive to prescriptive', text_zh: '全局命令撰写风格优化——从描述性到规范性' },
+    ],
+  },
+  {
+    version: '0.4.26',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'delegate: add proxy config in cli-tools.json — per-tool proxy toggle, subprocess-only env injection', text_zh: 'delegate: cli-tools.json 新增代理配置，支持 per-tool 开关，仅注入子进程环境变量' },
+      { type: 'fix', text_en: 'codex adapter: classify Rust tracing stderr (RMCP/MCP errors) as non-fatal thinking instead of error', text_zh: 'codex adapter: 将 Rust tracing stderr（RMCP/MCP 错误）归类为非致命诊断信息而非错误' },
+    ],
+  },
+  {
+    version: '0.4.25',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'spec: add scope filtering for project-level or global spec loading', text_zh: '规范加载新增范围过滤，支持按项目或全局维度' },
+      { type: 'feat', text_en: 'graph: integrate codegraph enhancements into native graph module', text_zh: '集成 codegraph 增强功能至原生 graph 模块' },
+      { type: 'feat', text_en: 'docs-site: add new commands with Chinese descriptions, enhance QuickStartPage', text_zh: '新增多个命令及中文描述，增强快速启动页面' },
+      { type: 'fix', text_en: 'fix AskUserQuestion parenthetical annotation causing interactions to be skipped', text_zh: '修复 AskUserQuestion 括注式写法导致交互被跳过的问题' },
+      { type: 'docs', text_en: 'sync command docs, mark deprecated commands, remove duplicates', text_zh: '同步命令文档，标记废弃命令，移除重复条目' },
+    ],
+  },
+  {
+    version: '0.4.24',
+    date: '2026-06',
+    changes: [
+      { type: 'refactor', text_en: 'codebase-rebuild: remove UA external graph tool legacy, migrate to native kg index', text_zh: '移除 UA 外部图工具遗留，迁移至原生 kg index' },
+      { type: 'fix', text_en: 'execute: clarify summary/commit/status ownership in E2 Agent path', text_zh: '明确 E2 Agent 路径中 summary/commit/status 的职责归属' },
+    ],
+  },
+  {
+    version: '0.4.23',
+    date: '2026-05',
+    changes: [
+      { type: 'feat', text_en: 'docs-site: add sidebar navigation for workflow enhancement, security audit, and swarm intelligence guides', text_zh: 'docs-site: 侧边栏导航新增工作流增强、安全审计、蚁群智能指南' },
+      { type: 'refactor', text_en: 'commands: extract interview-mechanics.md to streamline runtime references', text_zh: 'commands: 抽取 interview-mechanics.md 精简运行时引用' },
+      { type: 'docs', text_en: 'commands: add Pipeline command authoring standard and unify 12 commands to spec', text_zh: 'commands: 新增 Pipeline 命令撰写标准并统一 12 个命令至规范' },
+      { type: 'docs', text_en: 'guide: add workflow enhancement, security audit, and swarm intelligence guide docs', text_zh: 'guide: 添加工作流增强、安全审计、蚁群智能指南文档' },
+      { type: 'chore', text_en: 'swarm: add scoring and pheromone modules for team adversarial swarm', text_zh: 'swarm: 新增 team adversarial swarm 评分和信息素模块' },
+    ],
+  },
+  {
+    version: '0.4.22',
+    date: '2026-05',
+    changes: [
+      { type: 'fix', text_en: 'swarm: fix GBK encoding errors in Python scripts on Chinese Windows', text_zh: 'swarm: 修复 Python 脚本在中文 Windows 下的 GBK 编码错误' },
+    ],
+  },
+  {
+    version: '0.4.21',
+    date: '2026-05',
+    changes: [
+      { type: 'feat', text_en: 'graph: remove UA external dependency, create native src/graph/ module (types, merger, loader, query, FsAnalyzer)', text_zh: 'graph: 移除 UA 外部依赖，创建原生 src/graph/ 模块（类型、合并、加载、查询、FsAnalyzer）' },
+      { type: 'feat', text_en: 'kg: new maestro kg index command — local codebase scanning with git-aware enumeration', text_zh: 'kg: 新增 maestro kg index 命令 — 本地代码库扫描 + git 感知枚举' },
+      { type: 'feat', text_en: 'graph: enhanced indexing — call graph extraction, tested_by edges, topological sort tour, file category classification', text_zh: 'graph: 图索引增强 — 调用图提取(calls)、测试配对(tested_by)、拓扑排序 tour、文件分类' },
+      { type: 'feat', text_en: 'swarm: new team-adversarial-swarm — ACO + modular Workflow + adversarial decision gates', text_zh: 'swarm: 新增 team-adversarial-swarm — ACO 蚁群 + 模块化 Workflow + 对抗决策门' },
+      { type: 'feat', text_en: 'commands: new maestro-universal-workflow for dynamic adversarial workflow generation', text_zh: 'commands: 新增 maestro-universal-workflow 动态对抗工作流生成' },
+      { type: 'fix', text_en: 'universal-workflow: hardened script generation to prevent Unicode parse errors', text_zh: 'universal-workflow: 强化脚本生成防错机制，消除 Unicode 解析错误' },
+    ],
+  },
+  {
+    version: '0.4.20',
+    date: '2026-05',
+    changes: [
+      { type: 'feat', text_en: 'kg: deep integration of Understand-Anything knowledge graph with Wiki search and codebase-rebuild pipeline', text_zh: 'kg: Understand-Anything 知识图谱与 Wiki 搜索、codebase-rebuild 管道深度集成' },
+      { type: 'feat', text_en: 'commands: new maestro-swarm-workflow parallel acceleration layer — 8 fixed Workflow scripts covering core commands', text_zh: 'commands: 新增 maestro-swarm-workflow 并行加速层 — 8 个固定 Workflow 脚本覆盖核心命令' },
+      { type: 'feat', text_en: 'skills: new maestro-companion for task context management and knowledge routing', text_zh: 'skills: 新增 maestro-companion 任务上下文管理与知识路由技能' },
+      { type: 'fix', text_en: 'plan: enforce P3 agent invocation and align read_first/action fields', text_zh: 'plan: 强制 P3 agent 调用并对齐 read_first/action 字段' },
+      { type: 'docs', text_en: 'github skills: added Phase 3 (Phase Files Design) and Phase 4 (Validation & Integration) documentation', text_zh: 'github skills: 新增 Phase 3（阶段文件设计）和 Phase 4（验证与集成）文档' },
+    ],
+  },
+  {
     version: '0.4.19',
     date: '2026-05',
     changes: [

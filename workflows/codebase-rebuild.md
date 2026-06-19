@@ -181,9 +181,56 @@ b. Update project.md Tech Stack (if exists):
 
 ```
 Display summary: component/feature/requirement/ADR/file counts.
+If KG pipeline ran: include KG node/edge/layer/tour counts.
 If mapper agents failed: log W001.
 If not --skip-commit: suggest committing generated docs.
-Suggest next: manage-status (review) or manage-codebase-refresh (incremental updates).
+Suggest next:
+  - manage-status (review)
+  - manage-codebase-refresh (incremental updates)
+  - maestro kg stats (verify KG)
+  - maestro wiki list --keyword kg (verify wiki integration)
+  - maestro kg diff-wiki (future change impact analysis)
+```
+
+---
+
+## Knowledge Graph Pipeline (Step 10)
+
+Uses the native `maestro kg index` command (`src/graph/analyzers/fs-analyzer.ts`) to scan the codebase and generate the knowledge graph. No external dependencies required.
+
+### Step 10: Generate Knowledge Graph
+
+```
+maestro kg index --src "$PROJECT_ROOT/src"
+```
+
+This single command performs:
+  - File system scan and code entity extraction (nodes, edges)
+  - Import/call graph analysis and test pairing (tested_by edges)
+  - Layer classification and topological tour generation
+  - Validation (referential integrity, layer coverage, tour structure)
+  - Write to `.workflow/codebase/knowledge-graph.json`
+
+If validation fails: the graph is still written with `"valid": false` flag.
+
+### Step 11: KG → Wiki Index Integration
+
+```
+When knowledge-graph.json is successfully written:
+  The WikiIndexer automatically indexes KG nodes as virtual wiki entries
+  on next wiki access (via adaptKnowledgeGraph virtual adapter).
+
+  Generated virtual entries:
+    - kg-{node-id} for each GraphNode (type: knowhow, virtualKind: kg-node)
+    - kg-layer-{id} for each Layer (virtualKind: kg-layer)
+    - kg-tour-{order} for each TourStep (virtualKind: kg-tour-step)
+
+  Cross-referencing:
+    - KG nodes are linked to existing codebase-comp-* entries via filePath matching
+    - Edge semantics preserved in ext.kgEdges for downstream semantic traversal
+
+  No manual action required — indexing is lazy and triggered on first wiki access.
+  To verify: run `maestro wiki list --keyword kg` after rebuild.
 ```
 
 ---
@@ -196,6 +243,8 @@ Suggest next: manage-status (review) or manage-codebase-refresh (incremental upd
 | .workflow/ missing | Fail: "Run /workflow:init first" |
 | File read errors | Log warning, skip file, continue scan |
 | Existing codebase/ without --force | Prompt user for confirmation |
+| KG validation failed | Write knowledge-graph.json with `"valid": false`, log errors |
+| Wiki index rebuild failed | Non-fatal — KG data still written, wiki indexing retries on next access |
 
 ## Output Files
 
@@ -206,5 +255,7 @@ Suggest next: manage-status (review) or manage-codebase-refresh (incremental upd
 | `.workflow/codebase/tech-registry/{slug}.md` | Per-component documentation |
 | `.workflow/codebase/feature-maps/_index.md` | Feature index |
 | `.workflow/codebase/feature-maps/{slug}.md` | Per-feature documentation |
+| `.workflow/codebase/knowledge-graph.json` | Knowledge Graph with nodes, edges, layers, and tour |
+| `.workflow/wiki-index.json` | Updated on next wiki access: KG nodes indexed as virtual entries (automatic) |
 | `.workflow/state.json` | Updated: last_codebase_rebuild timestamp |
 | `.workflow/project.md` | Updated: Tech Stack section refreshed |

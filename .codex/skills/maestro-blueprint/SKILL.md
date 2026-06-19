@@ -82,11 +82,18 @@ P6 gate: Pass (>=80%) → Handoff | Review (60-79%) → Handoff w/caveats | Fail
 
 | Condition | Suggestion |
 |-----------|-----------|
-| Need codebase analysis | /maestro-analyze {topic} --from blueprint:BLP-xxx |
-| Ready for roadmap | /maestro-roadmap --from blueprint:BLP-xxx |
-| Small scope, direct plan | /maestro-plan --from blueprint:BLP-xxx |
-| Need project setup | /maestro-init |
+| Need codebase analysis | $maestro-analyze {topic} --from blueprint:BLP-xxx |
+| Ready for roadmap | $maestro-roadmap --from blueprint:BLP-xxx |
+| Small scope, direct plan | $maestro-plan --from blueprint:BLP-xxx |
+| Need project setup | $maestro-init |
 </execution>
+
+<invariants>
+1. **Invariant violation = BLOCK** — violating any invariant above blocks the current operation.
+2. **Phase gate enforcement** — each phase produces artifacts that are prerequisites for the next. Do NOT advance to phase N+1 without verifying phase N's output exists: P2→product-brief.md, P3→requirements/_index.md, P4→architecture/_index.md, P5→epics/_index.md, P6→readiness-report.md.
+3. **Evidence required on ADRs** — Architecture Decision Records (ADR-*.md) MUST cite evidence (code analysis, requirement traceability REQ-xxx, upstream context). Generic rationale without project-specific references is INVALID.
+4. **Artifact verification before completion** — verify blueprint-config.json, product-brief.md, glossary.json (≥5 terms), requirements/_index.md, architecture/_index.md, epics/_index.md, readiness-report.md, blueprint-summary.md, context-package.json all exist. If any missing: DO NOT report completion.
+</invariants>
 
 <error_codes>
 | Code | Severity | Condition | Recovery |
@@ -95,7 +102,7 @@ P6 gate: Pass (>=80%) → Handoff | Review (60-79%) → Handoff w/caveats | Fail
 | E002 | error | Context source not found (--from) | Show available sessions/sources |
 | E006 | error | `.workflow/` not initialized | Run maestro-init first |
 | E007 | error | Phase 6 readiness Fail after 2 auto-fix iterations | Present manual fix options |
-| W001 | warning | CLI analysis failed, using fallback | Continue with available data |
+| W001 | warning | CLI analysis failed | Retry once. If still fails: continue but flag affected phase outputs as LOW CONFIDENCE |
 | W002 | warning | Codebase exploration failed | Continue without codebase context |
 | W003 | warning | Glossary has < 5 terms | Note in readiness check |
 | W004 | warning | Review-level readiness score (60-79%) | Proceed with caveats |

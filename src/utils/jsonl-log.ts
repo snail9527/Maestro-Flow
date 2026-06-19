@@ -163,7 +163,8 @@ export function rotateIfLarge(
       mkdirSync(archiveDir, { recursive: true });
     }
     renameSync(path, archivePath);
-  } catch {
+  } catch (err) {
+    process.stderr.write(`[jsonl-log] rotation failed: ${(err as Error).message ?? err}\n`);
     return null;
   }
 

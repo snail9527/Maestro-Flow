@@ -12,7 +12,7 @@ export type StepStatus = 'pending' | 'running' | 'completed' | 'skipped' | 'fail
 export type CompletionStatus = 'DONE' | 'DONE_WITH_CONCERNS' | 'NEEDS_RETRY' | 'BLOCKED';
 export type SessionStatus = 'running' | 'paused' | 'completed' | 'failed';
 export type CommandScope = 'global' | 'project' | 'missing' | null;
-export type SessionPlatform = 'claude' | 'codex';
+export type SessionPlatform = 'claude' | 'codex' | 'agent' | 'agy';
 
 export interface RalphStepLoad {
   loaded_at: string | null;        // ISO timestamp

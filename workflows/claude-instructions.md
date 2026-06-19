@@ -1,7 +1,5 @@
 # Maestro
 
-Workflow orchestration CLI with MCP endpoint support and extensible architecture.
-
 - **Coding Philosophy**: @~/.maestro/workflows/coding-philosophy.md
 
 ## Delegate & CLI
@@ -11,29 +9,37 @@ Workflow orchestration CLI with MCP endpoint support and extensible architecture
 
 **Strictly follow the cli-tools.json configuration**
 
-Available CLI endpoints are dynamically defined by the config file
-
-## Code Diagnostics
-
-- **Prefer `mcp__ide__getDiagnostics`** for code error checking over shell-based TypeScript compilation
-
 ## Knowledge System
 
-### Search — Query Before Acting
+**ALWAYS search before acting.** Never assume context is pre-loaded.
 
-**Before planning or implementing any task, search wiki and spec first** — the knowledge base contains reusable methods, tools, and hard-won experience. Load the right knowledge at the right time: search before you plan, load relevant entries before you implement, and revisit when you hit unfamiliar territory mid-task.
+### Search Commands
 
-When tackling unfamiliar domains or cross-cutting concerns, search existing knowledge first:
-- `maestro spec load --category <cat>` — load rules by category (coding/arch/debug/test/review/learning)
-- `maestro spec load --keyword <kw>` — cross-category keyword match
-- `maestro wiki search "<query>"` — full-text search across all knowhow
-- `maestro wiki list --category <cat>` → `maestro wiki load <id>` — browse then load full detail
+| Layer | Command | Purpose |
+|-------|---------|---------|
+| **1. Unified** | `maestro search "<query>" [--type spec\|knowhow\|issue] [--category <cat>]` | All knowledge types |
+| **2. Domain rules** | `maestro spec load --category <cat> [--keyword <kw>]` | Load rules before coding |
+| **3. Code structure** | `maestro kg search <symbol>` / `maestro kg context <node>` | Dependencies, call chains |
 
-### Record — Capture Knowledge
 
-When execution surfaces non-obvious knowledge (decisions, root causes, pitfalls, patterns), persist it:
+### Proactive Search — ALWAYS Execute
 
-- **Spec entry** (short rule/constraint) → `/spec-add <category> "title" "content" --keywords kw1,kw2`
-- **Knowhow document** (detailed recipe/template/decision/reference) → `/manage-knowhow-capture`
+**L0 — Every task, no exceptions:**
+- `maestro search "<feature/module keywords>"`
 
-Category routing: decisions→`arch`, patterns→`coding`, pitfalls→`debug`/`learning`, rules→`review`, test strategy→`test`.
+**L1 — Unfamiliar code:**
+- `maestro kg search "<symbol>"`
+- `maestro kg context <file-or-symbol>`
+
+**L2 — Architecture / debugging / refactoring / tests:**
+- `maestro search --type spec --category arch`
+- `maestro kg callers <fn>` / `maestro kg callees <fn>` (注意: `--json` 返回 `{node, callers/callees: [...]}` 对象，非数组)
+- `maestro search --type spec --category test "<module>"`
+- `maestro kg search "<module>" --code`
+
+### Record
+
+- **Spec** → `/spec-add <category> "title" "content" --keywords kw1,kw2 --description "summary"`
+- **Knowhow** → `/manage-knowhow-capture` (use `--spec-category <cat>` to bridge into agent injection)
+
+Category routing: decisions→`arch`, patterns→`coding`, pitfalls→`debug`/`learning`, rules→`review`, tests→`test`.

@@ -5,6 +5,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { C, SYM, SP } from './tokens.js';
+import { t } from '../../i18n/index.js';
 
 // ---------------------------------------------------------------------------
 // KeyHints — context-sensitive keyboard shortcut footer
@@ -101,6 +102,30 @@ export function Checkbox({ checked, highlighted }: CheckboxProps) {
     : C.neutral;
   return (
     <Text color={color}>{checked ? SYM.checkOn : SYM.checkOff} </Text>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Breadcrumb — navigation path (Hub > Section > Panel)
+// ---------------------------------------------------------------------------
+
+interface BreadcrumbProps {
+  path: string[];
+}
+
+export function Breadcrumb({ path }: BreadcrumbProps) {
+  return (
+    <Box>
+      {path.map((segment, i) => (
+        <Box key={i}>
+          {i > 0 && <Text dimColor> {'>'} </Text>}
+          <Text color={i === path.length - 1 ? C.primary : C.neutral} bold={i === path.length - 1}>
+            {segment}
+          </Text>
+        </Box>
+      ))}
+      <Text dimColor>{'  '}{t.install.breadcrumbBack}</Text>
+    </Box>
   );
 }
 

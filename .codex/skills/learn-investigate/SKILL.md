@@ -2,7 +2,7 @@
 name: learn-investigate
 description: Investigate questions with hypothesis testing and evidence logging
 argument-hint: "<question> [--scope <path>] [--max-hypotheses N]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -29,7 +29,7 @@ $ARGUMENTS — question text and optional flags.
 ### Stage 1: Frame the Question
 - Parse question, generate slug, create investigation directory
 - Load debug specs: `maestro spec load --category debug` for known issues and patterns
-- Search prior knowledge: `maestro wiki list --category debug`, wiki search, grep .workflow/specs/learnings.md
+- Search prior knowledge: `maestro search --category debug`, wiki search, grep .workflow/specs/learnings.md
 - Write initial `understanding.md`
 
 ### Stage 2: Evidence Collection
@@ -60,7 +60,7 @@ If all hypotheses fail: broaden scope, search wiki with alt keywords, or mark IN
    - Disproved → category: "gotcha"
 3. Display summary with next-step routing
 
-**Next steps:** `/spec-add debug <finding>`, `/learn-follow <path>`, `/learn-decompose <module>`
+**Next steps:** `$spec-add debug <finding>`, `$learn-follow <path>`, `$learn-decompose <module>`
 </execution>
 
 <error_codes>

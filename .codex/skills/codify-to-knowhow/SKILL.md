@@ -1,6 +1,6 @@
 ---
 name: codify-to-knowhow
-description: Manifest-driven knowledge asset generator — converts structured packages into knowhow + spec entries
+description: "Manifest-driven knowledge asset generator — converts structured packages into knowhow + spec entries"
 argument-hint: "<package-path>"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 ---
@@ -56,7 +56,7 @@ $codify-to-knowhow ".workflow/reference_style/my-style-v1"
 - `<package-path>` (positional, required): Directory containing `knowhow-manifest.json`
 
 **Upstream**: `maestro-ui-codify`, `learn-decompose`, or any skill that generates a manifest
-**Downstream**: `maestro wiki list --category coding`, `maestro spec load --keyword <slug>`
+**Downstream**: `maestro search --category coding`, `maestro spec load --keyword <slug>`
 </context>
 
 <manifest_schema>
@@ -246,7 +246,7 @@ type: ${asset.category}`;
     for (let i = 0; i < asset.entries.length; i++) {
       const entry = asset.entries[i];
       const entryId = `${asset.prefix}-${manifest.slug}-${String(i + 1).padStart(3, '0')}`;
-      body += `\n\n<knowhow-entry keywords="${entry.category},${entry.keywords}" date="${today}" id="${entryId}" roles="${manifest.roles.join(',')}" source="codify-to-knowhow">
+      body += `\n\n<knowhow-entry keywords="${entry.category},${entry.keywords}" date="${today}" title="${entry.title}" description="${entry.description || ''}" id="${entryId}" roles="${manifest.roles.join(',')}" source="codify-to-knowhow">
 
 ### ${entry.title}
 
@@ -303,7 +303,7 @@ for (const spec of manifest.specs) {
 
   const entryBlock = `
 
-<spec-entry roles="${manifest.roles.join(',')}" keywords="${spec.keywords}" date="${today}"${refAttr}>
+<spec-entry roles="${manifest.roles.join(',')}" keywords="${spec.keywords}" date="${today}" title="${spec.title}" description="${spec.description || ''}"${refAttr}>
 
 ### ${spec.title}
 
@@ -312,7 +312,8 @@ ${spec.body}
 </spec-entry>`;
 
   // Prefer CLI, fallback to direct append
-  const cliResult = Bash(`maestro spec add ${spec.category} "${spec.title}" "${spec.body}" --keywords "${spec.keywords}" 2>/dev/null`);
+  const descFlag = spec.description ? ` --description "${spec.description}"` : '';
+  const cliResult = Bash(`maestro spec add ${spec.category} "${spec.title}" "${spec.body}" --keywords "${spec.keywords}"${descFlag} 2>/dev/null`);
 
   if (cliResult.exitCode !== 0) {
     // Fallback: direct file append
@@ -396,7 +397,7 @@ Ref Links: spec -> knowhow bridge established
 Wiki Index: refreshed
 
 Next steps:
-  maestro wiki list --category coding    # Browse by role
+  maestro search --category coding    # Browse by role
   maestro spec load --keyword {slug}    # Load related specs
   maestro wiki load <id>                # Load full entry
 ```

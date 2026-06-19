@@ -353,18 +353,6 @@ Next: maestro-analyze (deep analysis) | maestro-roadmap (generate roadmap) | mae
 
 ---
 
-## Key Design Principles
-
-1. **Document Chain**: Each phase builds on previous outputs with traceability
-2. **Multi-Perspective Analysis**: CLI tools provide product, technical, and user perspectives
-3. **Interactive by Default**: Each phase offers user confirmation; `-y` enables auto mode
-4. **Resumable Sessions**: blueprint-config.json tracks phases; `-c` resumes from checkpoint
-5. **Template-Driven**: All documents from standardized templates with YAML frontmatter
-6. **Spec Type Specialization**: Templates adapt to service/api/library/platform via profiles
-7. **Terminology Consistency**: glossary.json from Phase 2 injected into all subsequent phases
-8. **Iterative Quality**: Phase 6.5 auto-fix loop (max 2 iterations)
-9. **Context Package Integration**: `--from` loads upstream context-package.json as seed (brainstorm:ID, @file, or path). `--from-brainstorm` retained as backward-compatible alias
-
 ## State Management
 
 **blueprint-config.json**:
@@ -396,22 +384,6 @@ Next: maestro-analyze (deep analysis) | maestro-roadmap (generate roadmap) | mae
 ```
 
 Resume: `-c` reads blueprint-config.json, resumes from first incomplete phase.
-
-## Quality Dimensions (Phase 6)
-
-| Dimension | Weight | Focus |
-|-----------|--------|-------|
-| Completeness | 25% | All sections present with substance |
-| Consistency | 25% | Terminology, scope, non-goals alignment |
-| Traceability | 25% | Goals → Reqs → Arch → Epics chain |
-| Depth | 25% | Testable criteria, justified decisions, estimable stories |
-
-**Gate**: Pass (>=80%) / Review (60-79%) / Fail (<60%)
-
-## Handoff to Downstream Workflows
-
-When blueprint completes, the specification package (Product Brief, PRD, Architecture, Epics) is ready.
-Run `maestro-analyze` for deep analysis or `maestro-roadmap` to generate a phased execution roadmap from the Epics.
 
 ## Error Handling
 

@@ -55,7 +55,7 @@ const __dirname = dirname(__filename);
 export const PRESERVE_FILES = new Set(['settings.json', 'settings.local.json']);
 
 // Re-export component definitions from shared module
-export { COMPONENT_DEFS, type ComponentDef } from '../core/component-defs.js';
+export { COMPONENT_DEFS, migrateComponentIds, type ComponentDef } from '../core/component-defs.js';
 
 // ---------------------------------------------------------------------------
 // Disabled items — preserve disabled state across reinstalls
@@ -103,6 +103,7 @@ export function scanDisabledItems(targetBase: string): DisabledItem[] {
   scanDir(join(targetBase, '.claude', 'commands'), '.md.disabled', 'command', false);
   scanDir(join(targetBase, '.claude', 'agents'), '.md.disabled', 'agent', false);
   scanDir(join(targetBase, '.codex', 'skills'), '', 'skill', true);
+  scanDir(join(targetBase, '.codex', 'commands'), '.md.disabled', 'command', false);
   scanDir(join(targetBase, '.codex', 'agents'), '.md.disabled', 'agent', false);
 
   return items;
@@ -120,6 +121,15 @@ export function restoreDisabledState(items: DisabledItem[], targetBase: string):
   }
   return restored;
 }
+
+// Toggle — re-exported from core/toggle.ts (single responsibility extraction)
+export {
+  scanToggleItems,
+  applyToggle,
+  updateManifestDisabledItems,
+  type ToggleItem,
+  type ToggleState,
+} from '../core/toggle.js';
 
 // ---------------------------------------------------------------------------
 // Overlay post-install hook
@@ -352,6 +362,17 @@ export function countFiles(dir: string): number {
   return count;
 }
 
+export function countFilesFiltered(dir: string, filter: (name: string) => boolean): number {
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return 0;
+  let count = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!filter(entry.name)) continue;
+    if (entry.isFile()) count++;
+    else if (entry.isDirectory()) count += countFiles(join(dir, entry.name));
+  }
+  return count;
+}
+
 export interface ScannedComponent {
   def: ComponentDef;
   sourceFull: string;
@@ -367,7 +388,10 @@ export function scanComponents(
 ): ScannedComponent[] {
   return COMPONENT_DEFS.map((def) => {
     const sourceFull = join(pkgRoot, def.sourcePath);
-    const fileCount = countFiles(sourceFull);
+    const countDir = def.sourceCountDir ? join(pkgRoot, def.sourceCountDir) : sourceFull;
+    const fileCount = def.fileFilter
+      ? countFilesFiltered(countDir, def.fileFilter)
+      : countFiles(countDir);
     const targetDir = def.target(mode, projectPath);
     return { def, sourceFull, targetDir, fileCount, available: fileCount > 0 };
   });
@@ -386,6 +410,7 @@ export function copyRecursive(
   dest: string,
   stats: CopyStats,
   manifest: Manifest,
+  fileFilter?: (name: string) => boolean,
 ): void {
   const srcStat = statSync(src);
 
@@ -416,6 +441,7 @@ export function copyRecursive(
   }
 
   for (const entry of readdirSync(src)) {
+    if (fileFilter && !fileFilter(entry)) continue;
     if (PRESERVE_FILES.has(entry) && existsSync(join(dest, entry))) {
       stats.skipped++;
       continue;

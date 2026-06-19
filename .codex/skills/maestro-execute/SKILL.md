@@ -164,6 +164,9 @@ Each wave generates `wave-{N}.csv` with extra `prev_context` column populated fr
 8. **Max 3 Fix Attempts**: Per task, auto-fix convergence failures up to 3 times, then mark blocked
 9. **Breakpoint Resume**: Always detect completed tasks and skip them on re-run
 10. **DO NOT STOP**: Continuous execution until all waves complete or user explicitly stops
+11. **Invariant violation = BLOCK** — violating any invariant above blocks the current operation.
+12. **Evidence required in task summaries** — task summaries MUST include: files actually modified (not just planned targets), convergence criteria verification results (pass/fail with evidence), any deviations from plan with rationale. "Task completed successfully" without evidence is INVALID.
+13. **Artifact verification before completion** — for each completed task, .summaries/TASK-{NNN}-summary.md MUST exist with concrete evidence. EXC artifact MUST be registered in state.json. If any missing: DO NOT report completion.
 </invariants>
 
 <execution>
@@ -233,7 +236,7 @@ If exit code is 1, present warnings and ask whether to proceed.
 
 7. **Load codebase + wiki context** (optional, passed to all agents):
    - If `.workflow/codebase/ARCHITECTURE.md` exists: read and include as `codebase_context` in agent instructions
-   - Run `maestro wiki search "<phase keywords>" --json 2>/dev/null`; if results: include top 5 entries as `wiki_context`
+   - Run `maestro search "<phase keywords>" --json 2>/dev/null`; if results: include top 5 entries as `wiki_context`
    - Both are optional — proceed without if unavailable
 
 7. **User validation**: Display task/wave breakdown. Skip if AUTO_YES.
@@ -347,24 +350,24 @@ Blocked/failed tasks cascade: mark all downstream dependents as `skipped` with e
 4. **Register EXC artifact in state.json**: Find matching plan artifact, create `{ id: "EXC-{next_id}", type: "execute", milestone, phase, scope, path, status: "completed", depends_on: plan_artifact.id, harvested: false, created_at, completed_at }`. `milestone` MUST come from D-007 `phase_slugs` reverse lookup (numeric phase) — inherit from matching plan artifact if available, otherwise reverse-lookup directly.
 
 5. **Extract incremental specs**: Read `.summaries/`, use `maestro spec add` CLI:
-   - Learnings/pitfalls → `maestro spec add learning "<title>" "<content>" --keywords ... --source execute:{PLAN_DIR}`
-   - Design rationale → `maestro spec add coding "<title>" "<content>" --keywords ...`
-   - Root cause/workaround → `maestro spec add debug "<title>" "<content>" --keywords ...`
+   - Learnings/pitfalls → `maestro spec add learning "<title>" "<content>" --keywords ... --description "<summary>" --source execute:{PLAN_DIR}`
+   - Design rationale → `maestro spec add coding "<title>" "<content>" --keywords ... --description "<summary>"`
+   - Root cause/workaround → `maestro spec add debug "<title>" "<content>" --keywords ... --description "<summary>"`
    Mark artifact `harvested: true`
 
 6. **Post-task Knowledge Inquiry**: After each task completes, evaluate inquiry triggers:
 
    - **Execution deviation**: If task summary mentions approach change, dependency swap, or plan deviation:
      → Prompt: "TASK-{NNN} deviated from the plan. Record as architecture constraint?"
-     → On confirm: `maestro spec add arch "<decision>" "<rationale>" --keywords ... --source execute:{PLAN_DIR}`
+     → On confirm: `maestro spec add arch "<decision>" "<rationale>" --keywords ... --description "<summary>" --source execute:{PLAN_DIR}`
 
    - **Retry success**: If task required >=2 retries before completion:
      → Prompt: "TASK-{NNN} succeeded after {N} retries. Document this fix pattern?"
-     → On confirm: `maestro spec add debug "<pattern>" "<content>" --keywords ... --source execute:{PLAN_DIR}`
+     → On confirm: `maestro spec add debug "<pattern>" "<content>" --keywords ... --description "<summary>" --source execute:{PLAN_DIR}`
 
    - **Implicit knowledge**: If task summary contains design rationale ("chose X because", "rejected Y due to"):
      → Prompt: "Design decision detected. Record as a learning?"
-     → On confirm: `maestro spec add learning "<decision>" "<rationale>" --keywords ... --source execute:{PLAN_DIR}`
+     → On confirm: `maestro spec add learning "<decision>" "<rationale>" --keywords ... --description "<summary>" --source execute:{PLAN_DIR}`
 
    Use `request_user_input` for prompts:
    ```json
@@ -375,7 +378,7 @@ Blocked/failed tasks cascade: mark all downstream dependents as `skipped` with e
 
 8. **Auto-sync** (if config.json.codebase.auto_sync_after_execute == true): detect changed files, trigger codebase doc update.
 
-9. **Display completion report**: Phase, completed/blocked counts, wave progress, paths to `.summaries/` and `.task/`, next step suggestions (`maestro-verify`, `manage-status`).
+9. **Display completion report**: Phase, completed/blocked counts, wave progress, paths to `.summaries/` and `.task/`, next step suggestions (`quality-review`, `manage-status`).
 
 ### Shared Discovery Board Protocol
 

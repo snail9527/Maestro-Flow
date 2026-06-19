@@ -2,7 +2,7 @@
 name: maestro-merge
 description: Merge milestone worktree branch back to main
 argument-hint: "-m <milestone-number> [--force] [--dry-run] [--no-cleanup] [--continue]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
 ---
 
 <purpose>
@@ -41,12 +41,16 @@ $ARGUMENTS — milestone number and optional flags.
 Follow '~/.maestro/workflows/merge.md' completely.
 
 **Knowledge inquiry on completion:**
-After successful merge, ask user once: "Record milestone learnings?" If yes, persist via `maestro spec add learning "<title>" "<insight>" --keywords <kw1>,<kw2>`.
+After successful merge, ask user once: "Record milestone learnings?" If yes, persist via `maestro spec add learning "<title>" "<insight>" --keywords <kw1>,<kw2> --description "<summary>"`.
 
 **Next steps:**
 - View dashboard → `$manage-status`
 - Audit milestone → `$maestro-milestone-audit`
 </execution>
+
+<invariants>
+**Phase order enforcement** — git merge MUST complete before artifact sync. Do NOT sync artifacts until git merge succeeds — prevents partial state corruption.
+</invariants>
 
 <error_codes>
 | Code | Severity | Condition | Recovery |

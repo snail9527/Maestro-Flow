@@ -6,11 +6,9 @@ Tiered multi-dimensional code review with parallel agents, severity classificati
 
 ## Spec Compliance Pre-Check (Phase 0)
 
-**Before any dimensional code quality review**, verify the implementation matches its spec:
-
-1. Load `convergence.criteria[]` from each `.task/TASK-{NNN}.json` in the phase
-2. For each criterion, check if the code implements it (grep for functions, endpoints, components named in the criterion)
-3. Classify each: **MET** (evidence found) | **UNMET** (not implemented) | **PARTIAL** (incomplete)
+1. Load `convergence.criteria[]` from each `.task/TASK-{NNN}.json`
+2. For each criterion, grep for functions/endpoints/components named in the criterion
+3. Classify: **MET** (evidence found) | **UNMET** (not implemented) | **PARTIAL** (incomplete)
 
 | Result | Action |
 |--------|--------|
@@ -18,27 +16,16 @@ Tiered multi-dimensional code review with parallel agents, severity classificati
 | Any UNMET | Report as spec_compliance_failures, add to findings with severity=critical, dimension="spec-compliance" |
 | Any PARTIAL | Report with severity=high |
 
-This prevents code that is well-written but doesn't meet requirements from passing review.
-
 ---
 
 ## Receiving Review Feedback
 
-When external review feedback is received (from human reviewers, PR comments, or other agents):
-
-1. **Verify before implementing** — Check each suggestion against codebase reality. Reviewer may lack full context.
-2. **Technical acknowledgment only** — No performative agreement ("You're absolutely right!", "Great point!"). Just state the fix or provide technical reasoning.
-3. **Push back when wrong** — If a suggestion would break existing functionality, violate architecture constraints, or is technically incorrect for this codebase, explain why with evidence.
-4. **YAGNI check** — If reviewer suggests adding a feature/abstraction, verify it's actually needed. Unused features should be questioned.
-5. **Implement one at a time** — Fix one item, test, then move to next. Never batch-implement all feedback at once.
-6. **Priority order** — Blocking issues (breaks, security) → Simple fixes (typos, imports) → Complex fixes (refactoring, logic).
-
----
-
-## Prerequisites
-
-- Phase execution completed (task summaries exist)
-- Recommended: maestro-verify already run (review uses verification gaps as context)
+1. **Verify before implementing** — Check each suggestion against codebase reality.
+2. **Technical acknowledgment only** — No performative agreement. State the fix or provide technical reasoning.
+3. **Push back when wrong** — If a suggestion would break functionality or violate constraints, explain why with evidence.
+4. **YAGNI check** — Verify suggested features/abstractions are actually needed.
+5. **Implement one at a time** — Fix one item, test, then next. NEVER batch-implement all feedback.
+6. **Priority order** — Blocking (breaks, security) → Simple (typos, imports) → Complex (refactoring, logic).
 
 ---
 
@@ -66,8 +53,6 @@ Resolve phase from .workflow/state.json artifacts (type=execute, match by phase 
 
 ## Review Levels
 
-Three tiers that scale with task depth:
-
 | Aspect | Quick | Standard | Deep |
 |--------|-------|----------|------|
 | **Trigger** | `--level quick`, or auto ≤3 files | Default, or auto 4-19 files | `--level deep`, or auto ≥20 files / critical phase |
@@ -80,8 +65,6 @@ Three tiers that scale with task depth:
 ---
 
 ## Step 1: Collect Changed Files
-
-**Purpose:** Build the file list to review from phase execution artifacts.
 
 ### 1a: Extract from task summaries
 
@@ -132,13 +115,12 @@ dimensions = --dimensions flag (comma-separated), or level defaults:
 
 ## Step 3: Load Project Specs
 
-**Skip if `--skip-specs` flag is set.**
+**Skip if `--skip-specs`.**
 
 ```
 specs_content = maestro spec load --category review
+→ Pass to reviewer agents as quality standards context
 ```
-
-Pass specs_content to reviewer agents as quality standards context.
 
 ---
 
@@ -160,11 +142,7 @@ review_context = {
 
 ## Step 5: Execute Review
 
-**Execution strategy depends on review level.**
-
 ### Quick Level — Inline Scan
-
-No agents spawned. The orchestrator performs the review directly.
 
 ```
 Scan each review_file against each dimension, collecting findings:
@@ -178,11 +156,9 @@ Each finding: { id: "{PREFIX}-{NNN}", dimension, severity, title, file, line, sn
                description, impact, suggestion }
 ```
 
-**After inline scan, skip to Step 6 (Aggregate).**
+**After inline scan, skip to Step 6.**
 
 ### Standard Level — Parallel Agent Review
-
-Spawn one workflow-reviewer agent per dimension, all in parallel:
 
 ```
 Per dimension → spawn workflow-reviewer agent (all parallel):
@@ -196,24 +172,18 @@ Per dimension → spawn workflow-reviewer agent (all parallel):
     - Top 20 findings by severity, each with file:line evidence
 ```
 
-**Launch ALL dimension agents in a single message** (parallel execution).
-
-Collect dimension_results from each agent (JSON findings array). Log W001 on agent failure, continue with partial results.
+Launch ALL dimension agents in a single message. Collect dimension_results (JSON findings array). Log W001 on agent failure, continue with partial results.
 
 ### Deep Level — Enhanced Agent Review
 
-Same parallel agent spawning as standard, but with enhanced prompt:
-
 ```
-Same parallel agent spawning as standard, with deep-mode enhancements:
+Same as standard, with deep-mode enhancements:
   - Also read direct imports for context
   - Trace callers/dependents for critical/high findings
   - Cross-reference patterns across files (duplication, inconsistency)
   - Return includes additional field: related_files[]
   - Top 30 findings (vs 20 for standard)
 ```
-
-Collect results same as standard.
 
 ---
 
@@ -253,8 +223,6 @@ verdict:
 ## Step 6.5: CLI Supplementary Analysis (standard + deep only)
 
 **Skip for quick level or if no enabled CLI tools.**
-
-**Purpose:** Use external CLI tool as a second opinion on critical findings before deep-dive. The CLI analysis supplements (not replaces) the agent review — its results are merged into findings.
 
 ```
 IF level == "quick" OR no CLI tools enabled: skip to Step 7
@@ -298,13 +266,12 @@ Recalculate severity_dist after merge
 
 ## Step 7: Deep-Dive (Conditional)
 
-**Skip entirely for quick level.**
+**Skip for quick level.**
 
-**Trigger conditions:**
-- **Standard**: `severity_dist.critical > 0` (auto-trigger)
-- **Deep**: Always triggered (forced)
-
-**Skip if level == "standard" AND severity_dist.critical == 0.**
+| Level | Trigger |
+|-------|---------|
+| Standard | `severity_dist.critical > 0` |
+| Deep | Always |
 
 ### 7a: Select deep-dive targets
 
@@ -343,16 +310,14 @@ Iterate up to max_iterations (deep=3, standard=1) over unresolved targets:
 
 ## Step 8: Auto-Create Issues
 
-**Issue creation thresholds by level:**
-
-| Level | Severities that create issues |
-|-------|-------------------------------|
+| Level | Create issues for |
+|-------|-------------------|
 | Quick | Critical only |
 | Standard | Critical + High |
 | Deep | Critical + High + Medium |
 
 ```
-Filter findings by level threshold (quick=critical, standard=critical+high, deep=+medium)
+Filter findings by level threshold
 
 For each qualifying finding → append issue to .workflow/issues/issues.jsonl:
   id: "ISS-{YYYYMMDD}-{NNN}" (auto-increment from existing today's entries)
@@ -368,16 +333,11 @@ For each qualifying finding → append issue to .workflow/issues/issues.jsonl:
 Link finding.issue_id back to created issue
 ```
 
-**severity_to_priority mapping**: critical → 1, high → 2, medium → 3
-
 ---
 
 ## Step 9: Write review.json
 
-**Archive previous review artifacts** before writing:
-```
-Archive existing review.json → ${PHASE_DIR}/.history/review-{YYYY-MM-DDTHH-mm-ss}.json
-```
+Archive existing `review.json` → `${PHASE_DIR}/.history/review-{YYYY-MM-DDTHH-mm-ss}.json`
 
 ```
 Write ${PHASE_DIR}/review.json:

@@ -446,6 +446,7 @@ After writing DESIGN.md:
    ```bash
    maestro spec add ui "Design System: {project_name}" "{style_name} — {color_strategy}" \
      --keywords "design,colors,typography,{style_name}" \
+     --description "{style_name} design system for {project_name}" \
      --ref ".workflow/impeccable/DESIGN.md"
    ```
 

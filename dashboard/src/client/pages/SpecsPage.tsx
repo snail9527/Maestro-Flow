@@ -4,12 +4,21 @@ import Columns from 'lucide-react/dist/esm/icons/columns-3.js';
 import List from 'lucide-react/dist/esm/icons/list.js';
 import Search from 'lucide-react/dist/esm/icons/search.js';
 import Plus from 'lucide-react/dist/esm/icons/plus.js';
+import Globe from 'lucide-react/dist/esm/icons/globe.js';
+import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js';
+import Layers from 'lucide-react/dist/esm/icons/layers.js';
 import { ViewSwitcherContext } from '@/client/hooks/useViewSwitcher.js';
-import { useSpecsStore } from '@/client/store/specs-store.js';
+import { useSpecsStore, type ScopeFilter } from '@/client/store/specs-store.js';
 import { SpecsKanbanView } from '@/client/components/specs/SpecsKanbanView.js';
 import { SpecsTableView } from '@/client/components/specs/SpecsTableView.js';
 import { SpecDetailPanel } from '@/client/components/specs/SpecDetailPanel.js';
 import { SpecAddDialog } from '@/client/components/specs/SpecAddDialog.js';
+
+const SCOPE_CHIPS: { value: ScopeFilter; label: string; icon: React.ReactNode }[] = [
+  { value: 'all', label: 'All', icon: <Layers size={12} strokeWidth={2} /> },
+  { value: 'project', label: 'Project', icon: <FolderOpen size={12} strokeWidth={2} /> },
+  { value: 'global', label: 'Global', icon: <Globe size={12} strokeWidth={2} /> },
+];
 
 // ---------------------------------------------------------------------------
 // SpecsPage -- Specs Manager with 2 views: Kanban, Table
@@ -29,12 +38,14 @@ export function SpecsPage() {
     activeView, setActiveView,
     fetchEntries, fetchFiles,
     entries, search, setSearch,
+    scopeFilter, setScopeFilter,
     selectedEntry, setSelectedEntry,
     loading, error,
   } = useSpecsStore(useShallow((s) => ({
     activeView: s.activeView, setActiveView: s.setActiveView,
     fetchEntries: s.fetchEntries, fetchFiles: s.fetchFiles,
     entries: s.entries, search: s.search, setSearch: s.setSearch,
+    scopeFilter: s.scopeFilter, setScopeFilter: s.setScopeFilter,
     selectedEntry: s.selectedEntry, setSelectedEntry: s.setSelectedEntry,
     loading: s.loading, error: s.error,
   })));
@@ -119,6 +130,24 @@ export function SpecsPage() {
         <span className="text-[11px] text-text-tertiary font-mono tabular-nums">
           {entries.length} entries
         </span>
+        {/* Scope filter chips */}
+        <div className="flex items-center gap-[2px] ml-2 px-[3px] py-[2px] rounded-[8px] bg-[var(--color-bg-inset)]">
+          {SCOPE_CHIPS.map((chip) => (
+            <button
+              key={chip.value}
+              type="button"
+              onClick={() => setScopeFilter(chip.value)}
+              className={`flex items-center gap-[4px] px-[10px] py-[3px] rounded-[6px] border-none text-[11px] font-semibold cursor-pointer font-sans transition-all ${
+                scopeFilter === chip.value
+                  ? 'bg-bg-card text-text-primary shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
+                  : 'bg-transparent text-text-tertiary hover:text-text-secondary'
+              }`}
+            >
+              {chip.icon}
+              {chip.label}
+            </button>
+          ))}
+        </div>
         <div className="flex-1" />
         {/* Search box */}
         <div className="flex items-center gap-[6px] px-3 py-[5px] rounded-[8px] bg-bg-card w-[240px] focus-within:border-[#9178B5] transition-colors" style={{ border: 'var(--style-btn-secondary-border)' }}>
