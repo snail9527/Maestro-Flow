@@ -1,48 +1,23 @@
-# Workflow: Grill
+---
+name: grill
+prepare: grill
+commands: [maestro-grill]
+session-mode: inherited
+---
 
-Socratic stress-testing of a plan/idea/requirement against codebase reality. Produces a verified context package for downstream consumption.
+# Workflow: Grill
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────┐
-│                /maestro-grill                    │
-│        Entry Point + Interactive Routing          │
-└───────────────────────┬──────────────────────────┘
-                        │
-  Step 1: Parse & Route (mode, depth, upstream)
-  Step 2: Discovery (docs + codebase scan)
-  Step 3: Terminology Alignment (code vs proposal)
-  Step 4: Branch Walking (Socratic grilling loop)
-  Step 5: Synthesis (report + terminology)
-  Step 6: Context Package (context-package.json)
-  Step 7: Register Artifact + finish-work
+Step 1: Parse & Route (mode, depth, upstream)
+Step 2: Discovery (docs + codebase scan)
+Step 3: Terminology Alignment (code vs proposal)
+Step 4: Branch Walking (Socratic grilling loop)
+Step 5: Synthesis (report + terminology)
+Step 6: Context Package (context-package.json)
+Step 7: Register Artifact + Wrap-up
 ```
-
-## Input
-
-- `$ARGUMENTS`: topic/plan text, or `--from <source>` for upstream input
-- All output goes to `.workflow/scratch/{YYYYMMDD}-grill-{slug}/`
-- Registers artifact (type=grill) in state.json on completion
-- **Output boundary**: ALL file writes MUST target `{output_dir}/` or `.workflow/state.json` only.
-
-### Parameters
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `--yes`, `-y` | Auto mode — use code exploration instead of human answers | - |
-| `--depth` | Grilling depth: `shallow` (3 branches), `standard` (5), `deep` (8) | `standard` |
-| `--from <source>` | Load upstream material: `blueprint:ID`, `@file`, or path | - |
-| `--session ID` | Resume existing grill session | - |
-| `-c`, `--continue` | Continue from last grill session | - |
-
-### Produced Files
-
-| File | Description |
-|------|-------------|
-| `grill-report.md` | Main output — all grilling branches with decisions, evidence, risks |
-| `terminology.md` | Glossary crystallized during grilling, cross-referenced with code |
-| `context-package.json` | Standardized context package for downstream consumption |
 
 ---
 
@@ -55,21 +30,18 @@ Parse $ARGUMENTS to determine execution mode:
 2. `--session ID` → **Resume Mode** (specific session)
 3. `--yes` / `-y` → **Auto Mode** (code exploration replaces human answers)
 4. Text provided → **Interactive Mode** (default, full Socratic grilling)
-5. No args → error E001
+5. No args → error
 
 **Parameter Parsing**:
 - `--depth shallow|standard|deep`: branch count 3/5/8, default `standard` (5)
 - `--from <source>`: upstream material to grill against
-- Missing/empty args without `--from` or `--continue` = error E001
+- Missing/empty args without `--from` or `--continue` = error
 
-**Session Detection**:
-- Check `.workflow/scratch/*-grill-*/` for existing sessions
-- Resume: load `grill-report.md` → find last completed branch → continue from next
-- New: create `.workflow/scratch/{YYYYMMDD}-grill-{slug}/`
+**Session Resolution**: Runtime handles session resolution, artifact registration, and state updates. Contract inputs are resolved and injected by the runtime via `maestro run create`.
 
 **Output Directory Resolution**:
 ```
-output_dir = .workflow/scratch/{YYYYMMDD}-grill-{slug}/
+output_dir = {run_dir}/outputs/
 ```
 
 ---
@@ -82,8 +54,8 @@ output_dir = .workflow/scratch/{YYYYMMDD}-grill-{slug}/
 1. Read .workflow/project.md (if exists) → tech_stack, validated_requirements, active_requirements
 2. Read .workflow/state.json (if exists) → accumulated_context, artifacts[]
 3. Read .workflow/roadmap.md (if exists) → phase structure
-4. specs_content = maestro spec load --category arch
-5. wiki_hits = maestro wiki search "{topic keywords}"
+4. specs_content = maestro spec load --category arch  # MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep
+5. wiki_hits = maestro wiki search "{topic keywords}"  # MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep
 ```
 
 ### 2.2: Load Upstream Material
@@ -97,7 +69,7 @@ Store as `upstream_material` (in-memory).
 
 ### 2.3: Codebase Scan
 
-Spawn `Agent(subagent_type: Explore)` to map the codebase surface relevant to the topic:
+MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: spawn `Agent(subagent_type: Explore)` to map the codebase surface relevant to the topic:
 
 ```
 Agent(
@@ -116,7 +88,7 @@ Agent(
 )
 ```
 
-Store as `codebase_context`. W001 on failure: continue without code grounding.
+Store as `codebase_context`. On failure: continue without code grounding; flag grill output as [LOW CONFIDENCE] (no code grounding).
 
 ### 2.4: Initialize Report
 
@@ -191,9 +163,11 @@ AskUserQuestion({
 })
 ```
 
-**Auto mode (`-y`)**: Use CLI exploration to resolve — prefer existing code naming unless semantically wrong.
+**Auto mode (`-y`)**: Use CLI exploration to resolve — prefer existing code naming; override only when name is semantically incorrect (verify via symbol lookup).
 
 ### 3.4: Write Terminology File
+
+**GATE: terminology-aligned** — terminology.md written with code-collision resolutions.
 
 Write `{output_dir}/terminology.md`:
 
@@ -209,7 +183,7 @@ Write `{output_dir}/terminology.md`:
 
 ## Step 4: Branch Walking (Core Grilling Loop)
 
-One branch at a time, one question per turn. Each branch fully explored before next.
+One branch at a time, one question per turn. Each branch fully explored before next. → Q&A mechanics follow ref/interview-mechanics.md.
 
 ### Branch Categories
 
@@ -302,6 +276,7 @@ AskUserQuestion({
 
 **Auto mode**: Instead of asking the user, use code exploration to answer:
 ```
+# MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep
 maestro delegate "PURPOSE: Answer '{question}' for the proposal '{topic}'
 TASK: Search codebase for evidence | Analyze existing patterns | Determine most likely answer
 MODE: analysis
@@ -337,6 +312,8 @@ All questions asked (or user signals "enough") → update branch status, update 
 ---
 
 ## Step 5: Synthesis
+
+Entered after all depth-selected branches are walked to completion. **GATE: branches-walked**
 
 ### 5.1: Decision Summary
 
@@ -427,31 +404,37 @@ Write `{output_dir}/context-package.json`:
 
 ---
 
-## Step 7: Register Artifact
+## Step 6.5: Artifact Verification (before completion)
 
-### 7.1: Register in state.json
+Verify all required artifacts exist before proceeding to artifact registration:
+- `grill-report.md` — Branch Log + Q&A entries + synthesis
+- `terminology.md` — ≥5 terms with code refs
+- `context-package.json` — schema "context-package/1.0"
 
-```jsonc
-{
-  "id": "GRL-{NNN}",
-  "type": "grill",
-  "scope": "standalone",
-  "path": "{output_dir relative to .workflow/}",
-  "status": "completed",
-  "context_package": "{output_dir}/context-package.json",
-  "created_at": "{ISO-8601}",
-  "metadata": {
-    "topic": "{topic}",
-    "depth": "{depth}",
-    "branches_completed": {N},
-    "decisions_locked": {N},
-    "decisions_open": {N},
-    "terms_defined": {N}
-  }
-}
+If any missing: produce the missing artifact before Step 7. Do NOT register completion without all artifacts present.
+
+---
+
+## Step 7: Wrap-up
+
+### 7.1: Artifact Registration
+
+Artifact registration and state updates are handled by `maestro run complete`.
+
+### 7.2: Domain Knowledge Flow
+
+Domain terms produced by Grill settle into the project knowledge base via the following path:
+
+```
+terminology.md (locked terms)  ──→  wrap-up domain extraction  ──→  .workflow/domain/glossary.yaml
+context-package.json#domain.terminology[]  ──→  wrap-up domain extraction  ──→  glossary.yaml
 ```
 
-### 7.2: Completion Report
+- During Grill, **do NOT** call `maestro domain add` directly — terms may be modified or overturned during the grilling process
+- After all terms are locked via Step 5 synthesis, extraction is automatically triggered by `harvest --auto` at the end of the chain
+- Domain extraction always requires interactive confirmation (`-y` has no effect on domain registration)
+
+### 7.3: Completion Report
 
 ```
 Grill session {artifact_id} completed.
@@ -460,10 +443,29 @@ Grill session {artifact_id} completed.
 - Open questions: {N}
 - Terms defined: {N}
 - Risk items: {N}
-
-Next steps:
-  /maestro-brainstorm "{topic}" --from grill:{artifact_id}   — Multi-role brainstorm with grilled context
-  /maestro-analyze "{topic}" --from grill:{artifact_id}      — Deep analysis with grilled constraints
-  /maestro-roadmap --from grill:{artifact_id}                — Direct to roadmap (if scope is clear)
 ```
 
+→ Wrap-up follows ref/finish-work.md (SESSION_TYPE=grill, SESSION_ID={artifact_id}).
+
+---
+
+## Error Codes
+
+| Code | Severity | Condition | Recovery |
+|------|----------|-----------|----------|
+| E001 | error | No topic/plan and no --from/--continue flag | Prompt user for topic text |
+| E002 | error | --session ID not found | Show available sessions |
+| W001 | warning | Codebase scan failed or returned empty | Continue without code grounding, note limitation |
+| W002 | warning | CLI exploration timeout in auto mode | Skip question, mark as open |
+| W003 | warning | Max branch depth reached without resolution | Force synthesis, offer continuation |
+
+## Success Criteria
+
+- [ ] All depth-selected branches walked (shallow=3, standard=5, deep=8)
+- [ ] Each branch has >= 2 question-answer pairs with evidence or explicit user input
+- [ ] `grill-report.md` written with Branch Log table, all Q&A entries, synthesis section
+- [ ] `terminology.md` written with >= 5 terms, code references where applicable
+- [ ] Every locked decision has evidence (code reference or explicit user confirmation)
+- [ ] Contradictions between answers and code surfaced and resolved (or logged as risks)
+- [ ] Risk register captures all unresolved tensions
+- [ ] `context-package.json` generated with schema "context-package/1.0"

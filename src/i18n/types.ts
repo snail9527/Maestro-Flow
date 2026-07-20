@@ -7,6 +7,7 @@ export interface LocaleStrings {
   install: {
     // Progress step labels
     stepMode: string;
+    stepPlatforms: string;
     stepMenu: string;
     stepConfirm: string;
     stepInstall: string;
@@ -41,10 +42,16 @@ export interface LocaleStrings {
     hubTools: string; // "{count} tools"
 
     // Grouped Hub
+    groupPlatforms: string;
+    groupAddons: string;
     groupCore: string;
     groupClaude: string;
     groupCodex: string;
     groupOther: string;
+    groupHooks: string;
+    groupMcp: string;
+    groupAppearance: string;
+    groupEmbedding: string;
     hubScope: string;
     hubGlobal: string;
     hubProject: string;

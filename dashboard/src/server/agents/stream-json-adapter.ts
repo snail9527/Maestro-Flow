@@ -404,7 +404,7 @@ export class StreamJsonAdapter extends BaseAgentAdapter {
 
   // --- Helpers -------------------------------------------------------------
 
-  private buildArgs(config: AgentConfig): string[] {
+  protected buildArgs(config: AgentConfig): string[] {
     const args: string[] = ['-o', 'stream-json'];
 
     if (config.model) {

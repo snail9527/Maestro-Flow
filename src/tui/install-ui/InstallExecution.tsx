@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
 import { C, SYM } from '../shared/index.js';
 import { executeInstallPipeline, CancelledError, type InstallResult, type StepName } from '../../core/install-executor.js';
+import { GENERIC_HOOKS_PLATFORMS } from '../../commands/hooks.js';
 import type { InstallFlowConfig } from './types.js';
 import { t } from '../../i18n/index.js';
 
@@ -46,8 +47,8 @@ function StepRow({ step }: { step: ExecutionStep }) {
       ) : (
         <Text color={color}>{icon}</Text>
       )}
-      <Text color={color}> {step.label.padEnd(20)}</Text>
-      <Text dimColor>{step.detail}</Text>
+      <Text color={color}> {step.label.padEnd(16)}</Text>
+      <Text color={C.neutral}>{step.detail}</Text>
     </Box>
   );
 }
@@ -57,13 +58,13 @@ function getStepLabels(): Record<string, string> {
     backup: t.install.hubLabelBackup,
     cleanup: t.install.execCleaning.replace('...', ''),
     components: t.install.hubLabelComponents,
-    hooks: t.install.hubLabelHooks,
+    hooks: 'Claude Hooks',
     statusline: t.install.hubLabelStatusline,
-    mcp: t.install.hubLabelMcpServer,
-    codexHooks: t.install.hubLabelCodexHooks,
-    codexMcp: t.install.hubLabelCodexMcp,
-    agyHooks: t.install.hubLabelAgyHooks,
-    extraMcp: t.install.hubLabelExtraMcp,
+    mcp: 'Claude MCP',
+    codexHooks: 'Codex Hooks',
+    codexMcp: 'Codex MCP',
+    agyHooks: 'Agy Hooks',
+    extraMcp: 'Extra MCP',
     manifest: 'Manifest',
   };
 }
@@ -80,12 +81,21 @@ export function InstallExecution({ config, pkgRoot, version, onComplete }: Insta
     if (config.installCodexHooks) keys.push('codexHooks');
     if (config.installCodexMcp) keys.push('codexMcp');
     if (config.installAgyHooks) keys.push('agyHooks');
+    for (const [platId, level] of Object.entries(config.genericHookLevels)) {
+      if (level !== 'none') keys.push(`ghooks-${platId}`);
+    }
     if (config.installExtraMcp) keys.push('extraMcp');
     keys.push('manifest');
     return keys;
   }, [config]);
 
-  const stepLabels = useMemo(() => getStepLabels(), []);
+  const stepLabels = useMemo(() => {
+    const labels = getStepLabels();
+    for (const gp of GENERIC_HOOKS_PLATFORMS) {
+      labels[`ghooks-${gp.id}`] = `${gp.label} Hooks`;
+    }
+    return labels;
+  }, []);
 
   const [steps, setSteps] = useState<ExecutionStep[]>(() =>
     stepKeys.map((key) => ({
@@ -127,9 +137,22 @@ export function InstallExecution({ config, pkgRoot, version, onComplete }: Insta
     return () => { cancelledRef.current = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const doneCount = steps.filter((s) => s.status === 'done').length;
-  const totalCount = steps.length;
-  const percent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+  // Weighted progress: components step gets weight proportional to component count
+  const componentWeight = config.installComponents ? Math.max(config.selectedComponentIds.length, 1) : 1;
+  const percent = (() => {
+    let totalW = 0, doneW = 0;
+    for (const step of steps) {
+      const w = step.key === 'components' ? componentWeight : 1;
+      totalW += w;
+      if (step.status === 'done') {
+        doneW += w;
+      } else if (step.status === 'active') {
+        const m = step.detail.match(/\[(\d+)\/(\d+)\]/);
+        if (m) doneW += ((parseInt(m[1], 10) - 1) / parseInt(m[2], 10)) * w;
+      }
+    }
+    return totalW > 0 ? Math.round((doneW / totalW) * 100) : 0;
+  })();
 
   const timeStr = elapsed >= 60
     ? `${Math.floor(elapsed / 60)}m ${(elapsed % 60).toString().padStart(2, '0')}s`
@@ -146,18 +169,19 @@ export function InstallExecution({ config, pkgRoot, version, onComplete }: Insta
 
   const barWidth = 30;
   const filled = Math.round(barWidth * percent / 100);
-  const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
+  const remaining = barWidth - filled;
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box>
+      <Box gap={2}>
         <Text bold color={C.primary}>{t.install.execTitle}</Text>
-        <Text dimColor>{'  '}{timeStr}</Text>
+        <Text dimColor>{timeStr}</Text>
+        <Text bold color={percent === 100 ? C.success : C.primary}>{percent}%</Text>
       </Box>
 
       <Box marginTop={1}>
-        <Text color={C.primary}>[{bar}]</Text>
-        <Text bold> {percent}%</Text>
+        <Text color={C.success}>{'█'.repeat(filled)}</Text>
+        <Text color={C.neutral}>{'░'.repeat(remaining)}</Text>
       </Box>
 
       <Box flexDirection="column" marginTop={1}>

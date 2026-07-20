@@ -1,8 +1,14 @@
 ---
 name: team-issue
+disable-model-invocation: true
 description: Unified team skill for issue resolution. Uses team-worker agent architecture with role directories for domain logic. Coordinator orchestrates pipeline, workers are team-worker agents. Triggers on "team issue".
 allowed-tools: TeamCreate(*), TeamDelete(*), SendMessage(*), TaskCreate(*), TaskUpdate(*), TaskList(*), TaskGet(*), Agent(*), AskUserQuestion(*), Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*), mcp__maestro__team_msg(*)
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team Issue Resolution
 
@@ -44,8 +50,8 @@ Skill(skill="team-issue", args="<issue-ids> [--mode=<mode>]")
 ## Pre-load (coordinator, before dispatch)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for module boundaries
-2. **Specs (coding)**: `maestro spec load --category coding` — load coding constraints as shared context
-3. **Specs (debug)**: `maestro spec load --category debug` — load debug constraints as shared context
+2. **Specs (coding)**: `maestro load --type spec --category coding` — load coding constraints as shared context
+3. **Specs (debug)**: `maestro load --type spec --category debug` — load debug constraints as shared context
 4. **Wiki knowledge**: `maestro search "issue resolution fix" --json` — top 5 entries as prior context
 5. All optional — proceed without if unavailable
 ## Role Router
@@ -57,10 +63,10 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `TISL`
-- **Session path**: `.workflow/.team/TISL-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **Team name**: `issue`
 - **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 
 ## Worker Spawn Template
 
@@ -76,14 +82,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: issue
 requirement: <task-description>
 inner_loop: false
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -104,15 +110,15 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: issue
 requirement: <task-description>
 agent_name: <role>-<N>
 inner_loop: false
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -132,8 +138,8 @@ Execute built-in Phase 1 (task discovery, owner=<role>-<N>) -> role Phase 2-4 ->
 ## Session Directory
 
 ```
-.workflow/.team/TISL-<slug>-<date>/
-├── session.json                    # Session metadata + pipeline + fix_cycles
+{run_dir}/work/team/
+├── team-session.json                    # Session metadata + pipeline + fix_cycles
 ├── task-analysis.json              # Coordinator analyze output
 ├── .msg/
 │   ├── messages.jsonl              # Message bus log
@@ -145,12 +151,12 @@ Execute built-in Phase 1 (task discovery, owner=<role>-<N>) -> role Phase 2-4 ->
 │   └── issues.md
 ├── explorations/                   # Explorer output
 │   └── context-<issueId>.json
-├── solutions/                      # Planner output
+├── {run_dir}/outputs/solutions/                      # Planner output
 │   └── solution-<issueId>.json
-├── audits/                         # Reviewer output
+├── {run_dir}/outputs/audits/                         # Reviewer output
 │   └── audit-report.json
-├── queue/                          # Integrator output (also .workflow/issues/queue/)
-└── builds/                         # Implementer output
+├── {run_dir}/outputs/queue/                            # Integrator output
+└── {run_dir}/outputs/builds/                         # Implementer output
 ```
 
 ## Specs Reference

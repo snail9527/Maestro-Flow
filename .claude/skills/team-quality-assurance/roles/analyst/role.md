@@ -10,15 +10,13 @@ message_types:
 
 # Quality Analyst
 
-Analyze defect patterns, coverage gaps, test effectiveness, and generate comprehensive quality reports. Maintain defect pattern database and provide quality scoring.
-
 ## Phase 2: Context Loading
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| .msg/meta.json | <session>/wisdom/.msg/meta.json | Yes |
+| .msg/meta.json | {run_dir}/work/team/wisdom/.msg/meta.json | Yes |
 | Discovered issues | meta.json -> discovered_issues | No |
 | Test strategy | meta.json -> test_strategy | No |
 | Generated tests | meta.json -> generated_tests | No |
@@ -28,13 +26,13 @@ Analyze defect patterns, coverage gaps, test effectiveness, and generate compreh
 1. Extract session path from task description
 2. Read .msg/meta.json for all accumulated QA data
 3. Read coverage data from `coverage/coverage-summary.json` if available
-4. Read layer execution results from `<session>/results/run-*.json`
+4. Read layer execution results from `{run_dir}/outputs/results/run-*.json`
 5. Select analysis mode:
 
 | Data Points | Mode |
 |-------------|------|
 | <= 5 issues + results | Direct inline analysis |
-| > 5 | CLI-assisted deep analysis via gemini |
+| > 5 | CLI-assisted deep analysis via agy |
 
 ## Phase 3: Multi-Dimensional Analysis
 
@@ -73,8 +71,8 @@ After quality analysis, emit context-aware trigger signals (based on detected co
 ## Phase 4: Report Generation & Output
 
 1. Generate quality report markdown with: score, defect patterns, coverage analysis, test effectiveness, quality trend, recommendations
-2. Write report to `<session>/analysis/quality-report.md`
-3. Update `<session>/wisdom/.msg/meta.json`:
+2. Write report to `{run_dir}/outputs/analysis/quality-report.md`
+3. Update `{run_dir}/work/team/wisdom/.msg/meta.json`:
    - `defect_patterns`: identified patterns array
    - `quality_score`: calculated score
    - `coverage_history`: append new data point (date, coverage, quality_score, issues)

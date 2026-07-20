@@ -1,8 +1,14 @@
 ---
 name: team-perf-opt
+disable-model-invocation: true
 description: Unified team skill for performance optimization. Coordinator orchestrates pipeline, workers are team-worker agents. Supports single/fan-out/independent parallel modes. Triggers on "team perf-opt".
 allowed-tools: Agent, TaskCreate, TaskList, TaskGet, TaskUpdate, TeamCreate, TeamDelete, SendMessage, AskUserQuestion, Read, Write, Edit, Bash, Glob, Grep, mcp__maestro__team_msg
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team Performance Optimization
 
@@ -55,7 +61,7 @@ Pipeline (Independent mode):
 ## Pre-load (coordinator, before dispatch)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for module boundaries
-2. **Specs (coding)**: `maestro spec load --category coding` — load coding constraints as shared context
+2. **Specs (coding)**: `maestro load --type spec --category coding` — load coding constraints as shared context
 3. **Wiki knowledge**: `maestro search "performance optimization profiling" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 ## Role Router
@@ -67,10 +73,10 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `PERF-OPT`
-- **Session path**: `.workflow/.team/PERF-OPT-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **Team name**: `perf-opt`
 - **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 
 ## Worker Spawn Template
 
@@ -86,14 +92,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: perf-opt
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -120,9 +126,9 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 ## Session Directory
 
 ```
-.workflow/.team/PERF-OPT-<slug>-<date>/
-+-- session.json                    # Session metadata + status + parallel_mode
-+-- artifacts/
+{run_dir}/work/team/
++-- team-session.json                    # Session metadata + status + parallel_mode
++-- {run_dir}/outputs/              # Run deliverables (via maestro run)
 |   +-- baseline-metrics.json       # Profiler: before-optimization metrics
 |   +-- bottleneck-report.md        # Profiler: ranked bottleneck findings
 |   +-- optimization-plan.md        # Strategist: prioritized optimization plan
@@ -132,7 +138,7 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 |   +-- pipelines/A/...             # Independent pipeline artifacts
 +-- explorations/                   # Shared explore cache
 +-- wisdom/patterns.md              # Discovered patterns and conventions
-+-- discussions/                    # Discussion records
++-- {run_dir}/evidence/discussions/                    # Discussion records
 +-- .msg/messages.jsonl             # Team message bus
 +-- .msg/meta.json                  # Session metadata
 ```

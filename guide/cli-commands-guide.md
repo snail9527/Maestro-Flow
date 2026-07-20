@@ -2,9 +2,9 @@
 title: "CLI 终端命令参考"
 ---
 
-Maestro 提供 24 个终端命令，通过 `maestro <command>` 直接调用。覆盖安装、委派、协调、Wiki、Hook、协作等全场景。
+Maestro 提供 35+ 个终端命令，通过 `maestro <command>` 直接调用。覆盖安装、委派、协调、知识管理、搜索、Hook、协作等全场景。
 
-> **别名**: `coord`->`coordinate`、`msg`->`agent-msg`、`kh`->`knowhow`、`bv`->`brainstorm-visualize`、`team`->`collab`。
+> **别名**: `coord`->`coordinate`、`msg`->`agent-msg`、`kh`->`knowhow`、`bv`->`brainstorm-visualize`、`team`->`collab`、`ch`->`command-help`、`cfg`->`config`、`dc`->`delegate-config`、`ws`->`workspace`。
 
 ---
 
@@ -15,17 +15,25 @@ Maestro 提供 24 个终端命令，通过 `maestro <command>` 直接调用。�
 | `install` | -- | 安装 Maestro 资源（交互式） |
 | `uninstall` | -- | 卸载已安装资源 |
 | `update` | -- | 检查/安装最新版本 |
-| `view` | -- | 启动 Dashboard 看板 |
-| `stop` | -- | 停止 Dashboard 服务 |
+| `view` | -- | ~~启动 Dashboard 看板~~ (已废弃) |
+| `stop` | -- | ~~停止 Dashboard 服务~~ (已废弃) |
 | `delegate` | -- | 委派任务给 AI 智能体 |
+| `explore` | -- | 轻量并行代码搜索（API 端点驱动） |
+| `load` | -- | 统一知识加载（spec/knowhow/session/domain 等） |
+| `search` | -- | 统一知识搜索（wiki + code 混合） |
+| `search-daemon` | -- | 搜索守护进程管理（start/stop/status） |
+| `embedding` | -- | 嵌入模型管理（status/warmup/rebuild） |
 | `coordinate` | `coord` | 图工作流协调器 |
 | `cli` | -- | 运行 CLI 智能体工具 |
-| `run` | -- | 执行指定工作流 |
+| `run` | -- | Session/Run 生命周期、chain allocator 与 machine protocol |
+| `session` | -- | Session 恢复、chain 与 orchestration meta 管理 |
 | `serve` | -- | 启动工作流服务器 |
 | `launcher` | -- | Claude Code 启动器 |
 | `spec` | -- | 项目 Spec 管理 |
 | `wiki` | -- | Wiki 知识图谱查询 |
 | `kg` | -- | 代码知识图谱查询 |
+| `domain` | -- | 领域知识术语管理 |
+| `workspace` | `ws` | 跨工作区知识共享 |
 | `hooks` | -- | Hook 管理与运行 |
 | `overlay` | -- | 命令 Overlay 管理 |
 | `collab` | `team` | 人类团队协作 |
@@ -34,9 +42,11 @@ Maestro 提供 24 个终端命令，通过 `maestro <command>` 直接调用。�
 | `brainstorm-visualize` | `bv` | 头脑风暴可视化服务器 |
 | `ext` | -- | 扩展管理 |
 | `tool` | -- | 工具交互（list/exec） |
-| `next` | -- | 单命令推荐引擎 |
+| `config` | `cfg` | 配置管理 |
+| `delegate-config` | `dc` | 委派配置管理 |
+| `impeccable` | -- | 完美执行模式 |
+| `command-help` | `ch` | 命令帮助查询 |
 | `ralph` | -- | Ralph CLI 子命令族 |
-| `kg` | -- | 代码知识图谱查询 |
 
 ---
 
@@ -89,38 +99,14 @@ maestro update --check         # 仅检查
 
 ---
 
-## Dashboard
+## Dashboard (已废弃)
 
-<details>
-<summary>maestro view / stop</summary>
-
-**view** -- 启动 Dashboard 看板（浏览器或 TUI）：
-
-```bash
-maestro view                   # 启动（自动打开浏览器）
-maestro view --tui             # 终端 UI 模式
-maestro view --dev             # Vite 开发模式
-maestro view --port 8080       # 指定端口
-```
-
-| 选项 | 默认值 | 说明 |
-|------|--------|------|
-| `--port`, `-p` | `3001` | 服务端口 |
-| `--host` | `127.0.0.1` | 绑定主机 |
-| `--path <dir>` | CWD | 工作区根目录 |
-| `--no-browser` | -- | 不自动打开浏览器 |
-| `--tui` | -- | 终端 UI 模式 |
-| `--dev` | -- | Vite 开发服务器模式 |
-
-**stop** -- 停止 Dashboard（graceful -> 端口查找 -> force kill）：
-
-```bash
-maestro stop                   # 优雅停止
-maestro stop --force           # 强制终止
-maestro stop --port 8080       # 指定端口
-```
-
-</details>
+> **⚠️ 废弃通知**: Dashboard 前端已在 v0.5.36 移除。`maestro view` 和 `maestro stop` 命令仅保留为向后兼容占位符，调用时会显示废弃警告并退出。
+>
+> 如需查看工作流状态，请使用：
+> - `maestro collab status` — 查看团队协作状态
+> - `maestro delegate status <id>` — 查看委派任务状态
+> - `maestro ralph status` — 查看 Ralph 会话状态
 
 ---
 
@@ -157,6 +143,174 @@ maestro delegate "continue" --to gemini --resume
 
 </details>
 
+---
+
+## 知识管理
+
+<details>
+<summary>maestro load</summary>
+
+统一知识加载命令 — 替代旧版 `maestro-spec load`/`wiki load`/`session load`，支持 9 种类型。
+
+```bash
+maestro load --type spec --category coding           # 加载 coding 类 spec
+maestro load --type knowhow --list                   # 列出 knowhow 条目
+maestro load --type session --id WFS-20260624-abc    # 加载特定 session
+maestro load --type domain --keyword auth            # 按关键词过滤 domain
+maestro load --type spec --list --json               # JSON 格式输出
+```
+
+| 选项 | 说明 |
+|------|------|
+| `--type <type>` | **必填**。条目类型：`spec`, `knowhow`, `note`, `domain`, `issue`, `project`, `roadmap`, `session`, `scratch` |
+| `--id <ids>` | 按 ID 加载（逗号分隔） |
+| `--category <cat>` | 按类别过滤（如 coding, arch, debug, test, review, learning） |
+| `--keyword <word>` | 按关键词搜索标题/正文 |
+| `--list` | 列出匹配条目（紧凑模式，不含正文） |
+| `--scope <scope>` | Spec 作用域：`project`/`global`/`team`/`personal`（默认 project） |
+| `--limit <n>` | 最大条目数（默认：list=20, load=10） |
+| `--json` | JSON 格式输出 |
+
+> **与旧版命令的关系**: `maestro load --type spec` 等效于 `maestro spec load`，`maestro load --type knowhow` 等效于 `maestro wiki list --type knowhow`。推荐使用统一命令。
+
+</details>
+
+<details>
+<summary>maestro search</summary>
+
+统一知识搜索 — BM25F 排名，支持 wiki + code 混合搜索。
+
+```bash
+maestro search "user authentication"              # 混合搜索（wiki + code）
+maestro search "auth" --type spec                 # 仅搜索 spec 类型
+maestro search "login" --code                     # 仅代码图搜索
+maestro search "api" --wiki-only                  # 仅 wiki 搜索
+maestro search "domain term" --kg                 # KG 全源统一搜索
+maestro search "hook" --category coding --limit 5 # 按类别过滤，限制 5 条
+```
+
+| 选项 | 说明 |
+|------|------|
+| `--type <type>` | 按类型过滤：`project`, `roadmap`, `spec`, `issue`, `knowhow`, `note`, `domain`, `session`, `scratch` |
+| `--category <cat>` | 按类别过滤（如 coding, arch, debug, test, review, learning） |
+| `--code` | 仅代码图结果（无 wiki） |
+| `--kg` | KG 统一搜索（MaestroGraph 全源：codegraph + domain + spec + knowhow） |
+| `--wiki-only` | 仅 wiki 结果（无代码搜索） |
+| `--workspace <name>` | 过滤到特定链接工作区 |
+| `--no-emb` | 跳过嵌入，仅用 BM25 |
+| `--limit <n>` | 最大结果数（默认 20） |
+| `--json` | JSON 格式输出 |
+
+**搜索模式**:
+- **默认**: wiki + code 混合，按归一化分数交错排列
+- `--code`: 仅 CodeGraph 结果
+- `--wiki-only`: 仅 wiki 结果
+- `--kg`: MaestroGraph 全源统一搜索（代码符号 + 领域术语 + spec 规则 + knowhow 文档）
+
+**评分**: Wiki 使用 BM25F + 类型加权（spec > knowhow > note）；Code 使用 BM25 + kind 加权 + 名称匹配奖励。Per-source caps: session ≤3, scratch ≤3。
+
+</details>
+
+<details>
+<summary>maestro search-daemon</summary>
+
+管理搜索守护进程 — 保持 ONNX 模型热缓存，避免冷启动惩罚。
+
+```bash
+maestro search-daemon start     # 启动守护进程
+maestro search-daemon stop      # 停止守护进程
+maestro search-daemon status    # 查看状态
+```
+
+| 操作 | 说明 |
+|------|------|
+| `start` | 启动守护进程（如果已运行则跳过） |
+| `stop` | 停止守护进程 |
+| `status` | 显示状态（pid、port、startedAt） |
+
+> 守护进程空闲 30 分钟后自动退出。首次搜索会自动启动守护进程。
+
+</details>
+
+<details>
+<summary>maestro embedding</summary>
+
+嵌入模型管理 — 状态查看、预热、重建索引。
+
+```bash
+maestro embedding status    # 查看模型和索引状态
+maestro embedding warmup    # 预热模型（首次使用前）
+maestro embedding rebuild   # 重建嵌入索引
+```
+
+| 操作 | 说明 |
+|------|------|
+| `status` | 显示 Transformers 可用性、设备信息、索引状态（文档数、维度、模型） |
+| `warmup` | 预热模型（加载到内存，减少首次搜索延迟） |
+| `rebuild` | 重建嵌入索引（所有文档重新编码） |
+
+> 嵌入默认启用（v0.5.37+），可通过 `--no-emb` 标志跳过。
+
+</details>
+
+<details>
+<summary>maestro domain</summary>
+
+领域知识术语管理 — 项目术语表的增删改查。
+
+```bash
+maestro domain init --project myapp              # 初始化术语表
+maestro domain add "API Gateway" "统一入口服务"   # 添加术语
+maestro domain list                              # 列出所有术语
+maestro domain show api-gateway                  # 查看术语详情
+maestro domain search "auth"                     # 搜索术语
+maestro domain discover                          # 自动发现术语
+maestro domain validate                          # 验证术语表
+```
+
+| 子命令 | 说明 |
+|--------|------|
+| `init` | 初始化 `.workflow/domain/` 和 `glossary.yaml` |
+| `add <term> <def>` | 添加术语（`--aliases`, `--keywords`, `--tier`） |
+| `list` | 列出所有术语 |
+| `show <id>` | 查看术语详情 |
+| `update <id>` | 更新术语 |
+| `remove <id>` | 删除术语 |
+| `search <query>` | 搜索术语 |
+| `discover` | 自动发现代码库中的领域术语 |
+| `import` | 导入外部术语表 |
+| `deprecate <id>` | 标记术语为废弃 |
+| `validate` | 验证术语表完整性 |
+
+</details>
+
+<details>
+<summary>maestro workspace</summary>
+
+跨工作区知识共享管理 — 链接其他 Maestro 项目的知识。
+
+```bash
+maestro workspace link ../other-project --share spec,knowhow   # 链接工作区
+maestro workspace unlink other-project                          # 取消链接
+maestro workspace list                                          # 列出链接
+maestro workspace status                                        # 查看状态
+```
+
+| 子命令 | 说明 |
+|--------|------|
+| `link <path>` | 链接工作区（`--name`, `--share spec,knowhow,domain`） |
+| `unlink <name>` | 取消链接 |
+| `list` | 列出所有链接（`--json`） |
+| `status` | 查看链接状态和共享类型 |
+
+> 链接的工作区知识会自动集成到 `search` 和 `load` 命令的结果中。
+
+</details>
+
+---
+
+## 工作流执行
+
 <details>
 <summary>maestro coordinate</summary>
 
@@ -183,7 +337,7 @@ maestro coordinate report --session <id> --node <id> --status SUCCESS
 </details>
 
 <details>
-<summary>maestro cli / run / serve</summary>
+<summary>maestro cli / serve</summary>
 
 **cli** -- 统一 CLI 智能体工具接口：
 
@@ -194,19 +348,77 @@ maestro cli -p "fix bug" --tool gemini --mode write
 
 选项同 `delegate`（`-p` 必填），另有 `show`、`output <id>`、`watch <id>` 子命令。
 
-**run** -- 执行指定名称的工作流：
-
-```bash
-maestro run <workflow>           # 执行
-maestro run <workflow> --dry-run # 预览
-maestro run <workflow> -c config.json
-```
-
 **serve** -- 启动工作流服务器：
 
 ```bash
 maestro serve --port 3600 --host localhost
 ```
+
+</details>
+
+<details>
+<summary>maestro run / maestro session</summary>
+
+`run` 管理一次 command invocation 的生命周期；`session` 管理 canonical Session 的 paused recovery、chain 与 orchestration meta。Runtime writer 当前固定写出 `session/1.3` + `command-run/1.3`。
+
+```bash
+maestro run prepare <step> --platform codex
+maestro run create <command> --session <id> --intent "<intent>" --json
+maestro run brief <run-id> --session <id> --json
+maestro run check <run-id> --session <id> --json
+maestro run complete <run-id> --session <id> --json
+maestro run seal-session <session-id> --json
+```
+
+`run brief` 的成功结果固定为 `brief-result/1.0`：`session`/`run` 是 durable authority，
+`guidance` 携带 prepare、workflow、完整 run-mode 以及 captured/current hash drift，
+`execution_contract` 是 invocation、inputs、outputs、gates、reuse 的唯一结构化执行视图，
+`continuity` 携带 handoff/anchor，`recovery.next` 与外层 envelope `next` 必须完全一致。
+顶层只保留 human locator（`session_id/run_id/run_dir`）和 Pi bridge 使用的 canonical
+`upstream` map；不再重复输出 args、argument requirements、reuse assessments、gate summary
+或 outputs。
+
+Canonical paused recovery 必须按 `resolve` → `resume` 执行：
+
+```bash
+maestro session resolve --session <id> --decision <point-id> --disposition proceed \
+  --request-id <id> --actor <name> --reason "<reason>" --evidence <ref> \
+  --expected-identity-revision <n> --expected-activity-revision <n> --json
+
+maestro session resume --session <id> \
+  --request-id <id> --actor <name> --reason "<reason>" --evidence <ref> \
+  --expected-identity-revision <n> --expected-activity-revision <n> --json
+
+maestro run next --session <id> --json
+```
+
+`resolve` 每次只处置一个 escalated decision（`--decision` + `proceed|retry`）或 failed step（`--step` + `retry|skip`），成功后 Session 仍为 `paused`。`resume` 只在所有 blocker 清空后转为 `running`。两者都不创建 Run；`run next` 是恢复后唯一的 chain allocator。若 Session 有 lease，两条命令都必须同时提供 `--execution-owner`、`--owner-epoch`、`--lease-id`。
+
+#### `run-response/1.0` operation matrix
+
+| `operation` | CLI surface | 关键参数 / 行为 |
+|-------------|-------------|-----------------|
+| `create` | `run create`；legacy confirmed `run new` | `create` 需要 command；Session identity 建议显式传 `--session` |
+| `next` | `run next` | 可选 `--session`/`--pick`；选择 pending step 并分配 chain Run |
+| `complete` | `run complete` | 可选 run ID；verdict path 支持 request/revision/lease guards |
+| `brief` | `run brief <run-id>` | 返回强校验的 `brief-result/1.0` Resume Packet；外层与结果层 next 一致 |
+| `recall` | `run recall <command> --intent <text>` | 只读 advisory projection，不授权 mutation |
+| `fork` | legacy `run recall-confirm fork` / `run fork` | confirmation-token 管理兼容面 |
+| `import` | legacy `run recall-confirm import` / `run import` | confirmation-token 管理兼容面 |
+| `check` | `run check <run-id>` | 幂等扫描 outputs 并求值 gates |
+| `decide` | `run decide <point-id>` | 必填 `--session --verdict --confidence`；receipt-backed |
+| `seal-session` | `run seal-session <session-id>` | Session seal；非 receipt-backed，成功时 `replay: null` |
+| `resolve` | `session resolve` | 必填 audit/revision flags 和且仅一个 recovery target；保持 paused |
+| `resume` | `session resume` | 必填 audit/revision flags；只执行 paused → running |
+| `chain-insert` | `session chain insert` | 必填 `--session --after --command`；receipt-backed |
+| `chain-replace` | `session chain replace` | 必填 `--session --step`；仅 pending step |
+| `chain-skip` | `session chain skip` | 必填 `--session --step`；仅 pending step |
+| `meta-update` | `session meta update` | 必填 `--session`，且至少一个 `--position-file`/`--decomposition-file` |
+| `accept-reuse` | `run accept-reuse <run-id>` | 必填 request/revision guards、`--actor`、`--reason` 和至少一个 `--evidence`；receipt-backed |
+
+对 `decide`、recovery、chain 与 meta mutation，`--request-id` 提供幂等 transition receipt；`--expected-identity-revision`、`--expected-activity-revision` 与完整 lease triple 提供 fence。`resolve`/`resume` 将这些 audit/revision 字段设为必填；chain/meta mutation 接受同一组 guard options。
+
+显式 `--json` 时，表中所有 surface 的 success、business error、replay 和 Commander usage 都只向 stdout 写出 **一行** `run-response/1.0`，stderr 为空，process status 与 envelope 的 `exit_code` 一致。统一字段为 `operation`、`request_id`、`locator`、suggest-only `next`、`replay`、`result`/`error`；usage error 为 `COMMANDER_USAGE`、exit 2。
 
 </details>
 
@@ -240,7 +452,11 @@ maestro spec init                              # 初始化
 maestro spec load --category coding --keyword auth
 maestro spec list                              # 列出文件
 maestro spec status                            # 状态
-maestro spec add <category> "<title>" "<content>"
+maestro spec add <category> "<title>" "<content>" --json  # --json 返回 sid
+maestro spec supersede <old-sid> --by <new-sid>          # 演化替代
+maestro spec history <sid> [--json]                      # 查看演化链
+maestro spec health [--json]                             # 知识健康报告
+maestro spec backfill-sid                                # 回填存量无 sid 条目
 ```
 
 </details>
@@ -257,7 +473,7 @@ maestro wiki list -q "authentication"                # BM25 内联搜索
 maestro wiki search "auth token"                     # 全文搜索
 maestro wiki get <id>                                # 获取单条
 
-# 创建（spec / memory / note）
+# 创建（spec / knowhow）
 maestro wiki create --type spec --slug auth --title "Auth" --body "# Auth\n..."
   # 可选: --created-by, --source-ref, --parent, --frontmatter
 
@@ -452,30 +668,6 @@ maestro tool exec read_file '{"path":"README.md"}'
 ---
 
 ## 智能路由
-
-<details>
-<summary>maestro next</summary>
-
-单命令推荐引擎 — 解析意图和项目状态，从候选池中评分推荐一个原子命令。
-
-```bash
-maestro next "实现用户认证"           # 推荐并确认
-maestro next "test auth" -y           # 跳过确认直接执行
-maestro next --dry-run "review code"  # 仅显示推荐
-maestro next --top 5 "debug"          # 显示前 5 候选
-maestro next --list                   # 列出全部候选命令池
-```
-
-| 选项 | 说明 |
-|------|------|
-| `-y` / `--yes` | 跳过确认，直接执行推荐命令 |
-| `--dry-run` | 仅显示推荐，不执行 |
-| `--top N` | 显示前 N 个候选（默认 3） |
-| `--list` | 列出可推荐命令池（不含编排器） |
-
-> 与 `/maestro` 和 `/maestro-ralph` 的区别：不创建 session，不写 status.json，不触发链。始终推荐 1 个命令 + 2-3 个备选。
-
-</details>
 
 <details>
 <summary>maestro ralph</summary>

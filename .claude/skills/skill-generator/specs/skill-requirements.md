@@ -1,3 +1,5 @@
+
+
 # Skill Requirements Specification
 
 Requirements collection specification for new Skill creation.
@@ -42,7 +44,7 @@ Requirements collection specification for new Skill creation.
 |-------|------|----------|-------------|
 | `llm_integration` | object | Optional | LLM invocation configuration |
 | `llm_integration.enabled` | boolean | - | Enable LLM invocation |
-| `llm_integration.default_tool` | enum | - | `gemini` \| `qwen` \| `codex` |
+| `llm_integration.default_tool` | enum | - | `agy` \| `qwen` \| `codex` |
 | `llm_integration.fallback_chain` | string[] | - | Fallback tool chain on failure |
 
 ### 3. Tool Dependencies
@@ -80,8 +82,8 @@ interface SkillConfig {
   // LLM Integration Configuration (P1 Enhancement)
   llm_integration?: {
     enabled: boolean;                    // Enable LLM invocation
-    default_tool: 'gemini' | 'qwen' | 'codex';
-    fallback_chain: string[];            // ['gemini', 'qwen', 'codex']
+    default_tool: 'agy' | 'qwen' | 'codex';
+    fallback_chain: string[];            // ['agy', 'qwen', 'codex']
     mode: 'analysis' | 'write';          // Default mode
   };
 
@@ -122,7 +124,7 @@ interface SkillConfig {
   // Output configuration
   output: {
     format: 'markdown' | 'html' | 'json';
-    location: string;           // ".workflow/.scratchpad/{skill}-{timestamp}"
+    location: string;           // "{run_dir}/outputs" for formal deliverables
     filename_pattern: string;   // "{name}-output.{ext}"
   };
 
@@ -256,7 +258,7 @@ AskUserQuestion({
       options: [
         {
           label: "File Strategy (file)",
-          description: "Persist to .scratchpad, supports debugging and recovery (recommended)"
+          description: "Persist through the active Session/Run, supports debugging and recovery (recommended)"
         },
         {
           label: "Memory Strategy (memory)",
@@ -280,7 +282,7 @@ AskUserQuestion({
       options: [
         {
           label: "Enable LLM Invocation",
-          description: "Use gemini/qwen/codex for analysis or generation"
+          description: "Use agy/qwen/codex for analysis or generation"
         },
         {
           label: "Not needed",
@@ -300,7 +302,7 @@ if (llmEnabled) {
         header: "LLM Tool",
         multiSelect: false,
         options: [
-          { label: "Gemini", description: "Large context, suitable for analysis tasks (recommended)" },
+          { label: "Agy", description: "Large context, suitable for analysis tasks (recommended)" },
           { label: "Qwen", description: "Strong code generation capability" },
           { label: "Codex", description: "Strong autonomous execution, suitable for implementation tasks" }
         ]
@@ -324,7 +326,7 @@ AskUserQuestion({
         { label: "User interaction", description: "AskUserQuestion" },
         { label: "Chrome screenshot", description: "mcp__chrome__*" },
         { label: "External search", description: "mcp__exa__search" },
-        { label: "maestro delegate invocation", description: "maestro delegate (gemini/qwen/codex)" }
+        { label: "maestro delegate invocation", description: "maestro delegate (agy/qwen/codex)" }
       ]
     }
   ]
@@ -397,8 +399,8 @@ function validateSkillConfig(config) {
   "context_strategy": "file",
   "llm_integration": {
     "enabled": true,
-    "default_tool": "gemini",
-    "fallback_chain": ["gemini", "qwen"],
+    "default_tool": "agy",
+    "fallback_chain": ["agy", "qwen"],
     "mode": "analysis"
   },
   "sequential_config": {
@@ -413,7 +415,7 @@ function validateSkillConfig(config) {
         "id": "02-analyze",
         "name": "LLM Analysis",
         "output": "analysis.json",
-        "agent": { "type": "llm", "tool": "gemini", "mode": "analysis" }
+        "agent": { "type": "llm", "tool": "agy", "mode": "analysis" }
       },
       {
         "id": "03-generate",
@@ -426,7 +428,7 @@ function validateSkillConfig(config) {
   "allowed_tools": ["Task", "Read", "Write", "Glob", "Grep", "Bash"],
   "output": {
     "format": "markdown",
-    "location": ".workflow/.scratchpad/api-docs-{timestamp}",
+    "location": "{run_dir}/outputs/api-docs",
     "filename_pattern": "{name}-api-docs.md"
   }
 }
@@ -459,7 +461,7 @@ function validateSkillConfig(config) {
   "allowed_tools": ["Task", "AskUserQuestion", "Read", "Write"],
   "output": {
     "format": "json",
-    "location": ".workflow/.scratchpad/tasks",
+    "location": "{run_dir}/outputs/tasks",
     "filename_pattern": "tasks.json"
   }
 }

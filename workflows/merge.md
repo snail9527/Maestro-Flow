@@ -1,10 +1,9 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Workflow: merge
-
-Two-phase merge of a completed milestone worktree branch back into main. Phase 1: git merge (source code). Phase 2: artifact sync (workflow state). Artifact sync only proceeds after successful git merge.
-
-Merges operate at the **milestone level** — one worktree per milestone, all phases merged together.
-
----
 
 ## Step 1: Parse Arguments and Flags
 
@@ -121,6 +120,6 @@ Display:
   Roadmap: .workflow/roadmap.md updated
 
   Next steps:
-    Skill({ skill: "manage-status" })          -- View dashboard
-    Skill({ skill: "maestro-milestone-audit" }) -- Audit merged milestone
+    /maestro-manage status          -- View dashboard
+    /maestro-session-seal   -- Seal merged session (knowledge extraction + DAG progression)
 ```

@@ -2,9 +2,11 @@
 role: coordinator
 ---
 
-# Coordinator Role
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
-Orchestrate the team-coordinate workflow: task analysis, dynamic role-spec generation, task dispatching, progress monitoring, session state, and completion action. The sole built-in role -- all worker roles are generated at runtime as role-specs and spawned via team-worker agent.
+# Coordinator Role
 
 ## Identity
 
@@ -57,7 +59,7 @@ All coordinator state changes MUST be logged to team_msg BEFORE SendMessage:
 2. `SendMessage(...)` — communicate to worker/user
 3. `TaskUpdate(...)` — update task state
 
-Read state before every handler: `team_msg(operation="get_state", session_id=<session-id>)`
+Read state before every handler: `team_msg(operation="get_state", session_id=<run-id>)`
 
 ---
 
@@ -107,7 +109,7 @@ When coordinator is invoked, first detect the invocation type:
 | Manual resume | Arguments contain "resume" or "continue" | -> handleResume |
 | Capability gap | Message contains "capability_gap" | -> handleAdapt |
 | Pipeline complete | All tasks completed, no pending/in_progress | -> handleComplete |
-| Interrupted session | Active/paused session exists in `.workflow/.team/TC-*` | -> Phase 0 (Resume Check) |
+| Interrupted session | Active/paused session exists in `{run_dir}/work/team/` | -> Phase 0 (Resume Check) |
 | New session | None of above | -> Phase 1 (Task Analysis) |
 
 For callback/check/resume/adapt/complete: load `@commands/monitor.md` and execute the appropriate handler, then STOP.
@@ -115,7 +117,7 @@ For callback/check/resume/adapt/complete: load `@commands/monitor.md` and execut
 ### Router Implementation
 
 1. **Load session context** (if exists):
-   - Scan `.workflow/.team/TC-*/team-session.json` for active/paused sessions
+   - Scan `{run_dir}/work/team/team-session.json` for active/paused sessions
    - If found, extract `session.roles[].name` for callback detection
 
 2. **Parse $ARGUMENTS** for detection keywords
@@ -132,7 +134,7 @@ For callback/check/resume/adapt/complete: load `@commands/monitor.md` and execut
 **Objective**: Detect and resume interrupted sessions before creating new ones.
 
 **Workflow**:
-1. Scan `.workflow/.team/TC-*/team-session.json` for sessions with status "active" or "paused"
+1. Scan `{run_dir}/work/team/team-session.json` for sessions with status "active" or "paused"
 2. No sessions found -> proceed to Phase 1
 3. Single session found -> resume it (-> Session Reconciliation)
 4. Multiple sessions -> AskUserQuestion for user selection
@@ -174,7 +176,7 @@ For callback/check/resume/adapt/complete: load `@commands/monitor.md` and execut
    - Role minimization: merge overlapping, absorb trivial, cap at 5
    - **Role-spec metadata**: Generate frontmatter fields (prefix, inner_loop, additional_members, message_types)
 
-4. **Output**: Write `<session>/task-analysis.json`
+4. **Output**: Write `{run_dir}/work/team/task-analysis.json`
 
 5. **If `needs_research: true`**: Phase 2 will spawn researcher worker first
 
@@ -213,20 +215,34 @@ Regardless of complexity score or role count, coordinator MUST:
      - Merge research findings into task context
      - Update task-analysis.json with enriched context
 
-3. **Generate session ID**: `TC-<slug>-<date>` (slug from first 3 meaningful words of task)
+3. **Generate session ID**: `TC-<slug>-<date>` (slug from first 3 meaningful words of task). This is the internal `team-session.json` identifier, distinct from the Run slug composed in Run Lifecycle Integration below. When the slug feeds a Run slug, constrain it to ASCII-only, ≤64 chars, never raw Chinese words.
 
 4. **Create session folder structure**:
    ```
-   .workflow/.team/<session-id>/
-   +-- role-specs/
-   +-- artifacts/
-   +-- wisdom/
-   +-- explorations/
-   +-- discussions/
-   +-- .msg/
+   {run_dir}/
+   +-- outputs/                 # Formal deliverables
+   +-- evidence/discussions/    # Inline discuss records
+   +-- report.md                # Human-readable synthesis + handoff
+   +-- work/team/               # Team coordination (non-artifact)
+       +-- role-specs/
+       +-- wisdom/
+       +-- explorations/
+       +-- .msg/
    ```
 
 5. **Call TeamCreate** with team name derived from session ID
+
+### Run Lifecycle Integration
+
+After session folder creation and before role-spec generation:
+
+1. **Resolve Run** (birth-packet first): if the dispatch context already carries `run_id` / `run_dir` (injected by an orchestrator), store them in `team-session.json` and skip create — a second create mints an empty duplicate Run. Otherwise: `maestro run create team-coordinate --session <slug> --intent "<task summary>"`
+   - Slug format: `YYYYMMDD-team-coordinate-<topic>` (ASCII, ≤64 chars)
+   - Store returned `run_id` and `run_dir` in `team-session.json`:
+     ```json
+     "run": { "run_id": "<id>", "run_dir": "<path>" }
+     ```
+2. **Resume**: Resolve `run_dir` / `run_id` through the chain `birth-packet (dispatch prompt) > team-session.json.run > artifacts`. Take the first that resolves, then `maestro run check <run_id>` (idempotent); if status=sealed, create a new run and update `team-session.json`. If none resolves, fail closed — surface the missing run_dir to the user, do NOT glob/mtime-guess a path.
 
 6. **Read `specs/role-spec-template.md`** for Behavioral Traits + Reference Patterns
 
@@ -237,7 +253,7 @@ Regardless of complexity score or role count, coordinator MUST:
      - Phase 3: Describe **execution goal** (WHAT to achieve) from task description — do NOT prescribe specific CLI tool or approach
      - Phase 4: Combine **Behavioral Traits** (from template) + **output_type** (from task analysis) to compose verification steps
      - Reference Patterns may guide phase structure, but task description determines specific content
-   - Write generated role-spec to `<session>/role-specs/<role-name>.md`
+   - Write generated role-spec to `{run_dir}/work/team/role-specs/<role-name>.md`
 
 8. **Register roles** in team-session.json#roles (with `role_spec` path instead of `role_file`)
 
@@ -252,7 +268,7 @@ Regardless of complexity score or role count, coordinator MUST:
 // 注意: 此处为动态角色，执行时需将 <placeholders> 替换为 task-analysis.json 中生成的实际角色列表
 mcp__maestro__team_msg({
   operation: "log",
-  session_id: "<session-id>",
+  session_id: "<run-id>",
   from: "coordinator",
   type: "state_update",
   summary: "Session initialized",
@@ -280,7 +296,7 @@ Delegate to `@commands/dispatch.md` which creates the full task chain:
 2. Topological sorts tasks
 3. Creates tasks via TaskCreate, then sets dependencies via TaskUpdate({ addBlockedBy })
 4. Assigns owner based on role mapping from task-analysis.json
-5. Includes `Session: <session-folder>` in every task description
+5. Includes `Session: {run_dir}/work/team` in every task description
 6. Sets InnerLoop flag for multi-task roles
 7. Updates team-session.json with pipeline and tasks_total
 
@@ -314,7 +330,7 @@ Delegate to `@commands/dispatch.md` which creates the full task chain:
 
 **Workflow**:
 1. Load session state -> count completed tasks, duration
-2. List all deliverables with output paths in `<session>/artifacts/`
+2. List all deliverables with output paths in `{run_dir}/outputs/`
 3. Include discussion summaries (if inline discuss was used)
 4. Summarize wisdom accumulated during execution
 5. Output report:
@@ -331,7 +347,7 @@ Delegate to `@commands/dispatch.md` which creates the full task chain:
 [coordinator] Roles: <role-list>
 [coordinator] Duration: <elapsed>
 [coordinator]
-[coordinator] Session: <session-folder>
+[coordinator] Session: {run_dir}/work/team
 [coordinator] ============================================
 ```
 

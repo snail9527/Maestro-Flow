@@ -1,6 +1,9 @@
-# Workflow: Issue Management
+<!-- session-mode: inherited -->
 
-CRUD operations and lifecycle management for project issues.
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
+# Workflow: Issue Management
 
 ## Input
 
@@ -14,7 +17,7 @@ CRUD operations and lifecycle management for project issues.
 ```
 Extract SUBCOMMAND (first token) and ARGS (remaining) from $ARGUMENTS.
 Valid: create | list | status | update | close | link
-Missing/invalid → error with usage: /manage-issue <create|list|status|update|close|link> [options]
+Missing/invalid → error with usage: /maestro-manage issue <create|list|status|update|close|link> [options]
 ```
 
 ---
@@ -179,8 +182,8 @@ If no issues found:
 ```
 No issues found{with applied filters}.
 
-Create one: Skill({ skill: "manage-issue", args: "create --title \"...\"" })
-Discover issues: Skill({ skill: "manage-issue-discover" })
+Create one: recommend `/maestro-manage issue create --title "..."`
+Discover issues: recommend `/maestro-manage issue discover`
 ```
 
 ---
@@ -319,7 +322,7 @@ Process bidirectional link:
 ```
 Find issue by ID in issues.jsonl → error if not found.
 Locate task file via artifact registry (.workflow/{path}/.task/{TASK_ID}.json)
-  or scratch fallback (.workflow/scratch/*/.task/{TASK_ID}.json) → error if not found.
+  or ArtifactRegistry lookup ({run_dir}/outputs/.task/{TASK_ID}.json) → error if not found.
 
 Update issue: set gap_ref (if null), add TASK_ID to affected_components, append issue_history entry.
 Update task: append issue ID to "issue_refs" field.
@@ -335,4 +338,3 @@ Suggest: status {ISSUE_ID}, update --status in_progress.
 - **Storage**: `.workflow/issues/issues.jsonl` (active), `.workflow/issues/issue-history.jsonl` (closed)
 - **Format**: One JSON object per line (JSONL), append-friendly
 - **ID scheme**: `ISS-YYYYMMDD-NNN` (NNN auto-incremented per day)
-

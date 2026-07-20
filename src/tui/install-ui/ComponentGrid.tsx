@@ -3,6 +3,7 @@ import { Box, Text, useInput } from 'ink';
 import { CyberItem } from './CyberItem.js';
 import {
   toggleSelection,
+  restoreDefaults,
   moveUp,
   moveDown,
   parseNumberKey,
@@ -19,6 +20,11 @@ import { C } from '../shared/index.js';
 const CATEGORY_LABELS: Record<string, string> = {
   commands: '── Commands ──────────────────',
   skills: '── Skills ────────────────────',
+  'platform-shared': '── Shared (Core) ─────────────',
+  'platform-claude': '── Claude Code ───────────────',
+  'platform-codex': '── Codex ─────────────────────',
+  'platform-agy': '── Agy (Antigravity) ─────────',
+  'platform-agents-standard': '── Open Standard (.agents/) ──',
 };
 
 type VisualRow =
@@ -50,52 +56,77 @@ export function ComponentGrid({
     }
   }, [components.length]);
 
-  // Build grouped order: ungrouped first, then by category.
+  const mandatoryIds = useMemo(() => new Set(
+    components.filter(c => c.def.mandatory).map(c => c.def.id),
+  ), [components]);
+
+  // Build grouped order: platform groups first, then sub-grouped by category.
   // `ordered` is the source of truth for both navigation and rendering.
+  // Order: shared → claude → codex → agy → agents-standard
   const { ordered, visualRows, itemToVisualRow } = useMemo(() => {
-    const ungrouped: ScannedComponent[] = [];
-    const catMap = new Map<string, ScannedComponent[]>();
-    const catOrder: string[] = [];
+    const PLATFORM_ORDER = ['shared', 'claude', 'codex', 'agy', 'agents-standard'] as const;
+
+    // Bucket components by platform (undefined → 'shared')
+    const platformMap = new Map<string, ScannedComponent[]>();
+    for (const p of PLATFORM_ORDER) platformMap.set(p, []);
 
     for (const comp of components) {
-      const cat = comp.def.category;
-      if (!cat) {
-        ungrouped.push(comp);
-      } else {
-        if (!catMap.has(cat)) {
-          catMap.set(cat, []);
-          catOrder.push(cat);
-        }
-        catMap.get(cat)!.push(comp);
-      }
+      const plat = comp.def.platform ?? 'shared';
+      if (!platformMap.has(plat)) platformMap.set(plat, []);
+      platformMap.get(plat)!.push(comp);
     }
 
-    // Flat ordered array: navigation index = render index
-    const orderedList: ScannedComponent[] = [...ungrouped];
-    for (const cat of catOrder) {
-      orderedList.push(...catMap.get(cat)!);
-    }
-
-    // Visual rows include headers between category groups
+    // Within each platform group, separate uncategorized from categorized
+    const orderedList: ScannedComponent[] = [];
     const rows: VisualRow[] = [];
     const mapping = new Map<number, number>();
     let itemIdx = 0;
 
-    // Ungrouped items
-    for (const comp of ungrouped) {
-      mapping.set(itemIdx, rows.length);
-      rows.push({ type: 'item', comp, itemIndex: itemIdx });
-      itemIdx++;
-    }
+    for (const plat of PLATFORM_ORDER) {
+      const items = platformMap.get(plat);
+      if (!items || items.length === 0) continue;
 
-    // Categorized groups
-    for (const cat of catOrder) {
-      const label = CATEGORY_LABELS[cat] || `── ${cat} ──`;
-      rows.push({ type: 'header', label, category: cat });
-      for (const comp of catMap.get(cat)!) {
+      // Platform header
+      const platKey = `platform-${plat}`;
+      const platLabel = CATEGORY_LABELS[platKey] || `── ${plat} ──`;
+      rows.push({ type: 'header', label: platLabel, category: platKey });
+
+      // Split into uncategorized and categorized within this platform
+      const uncategorized: ScannedComponent[] = [];
+      const catMap = new Map<string, ScannedComponent[]>();
+      const catOrder: string[] = [];
+
+      for (const comp of items) {
+        const cat = comp.def.category;
+        if (!cat) {
+          uncategorized.push(comp);
+        } else {
+          if (!catMap.has(cat)) {
+            catMap.set(cat, []);
+            catOrder.push(cat);
+          }
+          catMap.get(cat)!.push(comp);
+        }
+      }
+
+      // Uncategorized items first within this platform
+      for (const comp of uncategorized) {
+        orderedList.push(comp);
         mapping.set(itemIdx, rows.length);
         rows.push({ type: 'item', comp, itemIndex: itemIdx });
         itemIdx++;
+      }
+
+      // Then categorized sub-groups
+      for (const cat of catOrder) {
+        const subLabel = CATEGORY_LABELS[cat] || `── ${cat} ──`;
+        rows.push({ type: 'header', label: subLabel, category: cat });
+        for (const comp of catMap.get(cat)!) {
+          orderedList.push(comp);
+          mapping.set(itemIdx, rows.length);
+          rows.push({ type: 'item', comp, itemIndex: itemIdx });
+          itemIdx++;
+        }
       }
     }
 
@@ -107,9 +138,9 @@ export function ComponentGrid({
 
   const toggleId = useCallback(
     (id: string) => {
-      onSelectionChange(toggleSelection(selectedIds, id));
+      onSelectionChange(toggleSelection(selectedIds, id, mandatoryIds));
     },
-    [selectedIds, onSelectionChange],
+    [selectedIds, mandatoryIds, onSelectionChange],
   );
 
   const toggleAt = useCallback(
@@ -128,8 +159,12 @@ export function ComponentGrid({
   }, [ordered, onSelectionChange]);
 
   const handleDeselectAll = useCallback(() => {
-    onSelectionChange([]);
-  }, [onSelectionChange]);
+    onSelectionChange(mandatoryIds.size > 0 ? Array.from(mandatoryIds) : []);
+  }, [mandatoryIds, onSelectionChange]);
+
+  const handleRestoreDefaults = useCallback(() => {
+    onSelectionChange(restoreDefaults(ordered.map(c => c.def), mandatoryIds));
+  }, [ordered, mandatoryIds, onSelectionChange]);
 
   useInput(
     (input, key) => {
@@ -155,6 +190,10 @@ export function ComponentGrid({
       }
       if (input === 'n' || input === 'N') {
         handleDeselectAll();
+        return;
+      }
+      if (input === 'd' || input === 'D') {
+        handleRestoreDefaults();
         return;
       }
       const idx = parseNumberKey(input, count);
@@ -216,6 +255,7 @@ export function ComponentGrid({
               available={comp.available}
               highlighted={itemIndex === safeIndex}
               description={comp.def.description}
+              mandatory={!!comp.def.mandatory}
             />
           );
         })}

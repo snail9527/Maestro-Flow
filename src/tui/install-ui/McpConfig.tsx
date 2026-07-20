@@ -103,7 +103,7 @@ export function McpConfig({
 
       {enabled && (
         <Box flexDirection="column" marginTop={1}>
-          <Text bold>{t.install.mcpTools}</Text>
+          <Text bold color={C.primary}>{t.install.mcpTools}</Text>
           <Box flexDirection="column" marginTop={1}>
             {MCP_TOOLS.map((tool, i) => {
               const checked = tools.includes(tool);

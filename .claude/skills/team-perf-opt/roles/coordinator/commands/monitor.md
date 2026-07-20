@@ -1,17 +1,15 @@
 # Command: Monitor
 
-Handle all coordinator monitoring events: worker callbacks, status checks, pipeline advancement, and completion. Supports single, fan-out, and independent parallel modes with per-branch/pipeline tracking.
-
 ## Phase 2: Context Loading
 
 | Input | Source | Required |
 |-------|--------|----------|
-| Session state | <session>/session.json | Yes |
+| Session state | {run_dir}/work/team/team-session.json | Yes |
 | Task list | TaskList() | Yes |
 | Trigger event | From Entry Router detection | Yes |
 | Pipeline definition | From SKILL.md | Yes |
 
-1. Load session.json for current state, `parallel_mode`, `branches`, `fix_cycles`
+1. Load team-session.json for current state, `parallel_mode`, `branches`, `fix_cycles`
 2. Run TaskList() to get current task statuses
 3. Identify trigger event type from Entry Router
 
@@ -74,14 +72,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: ~  or <project>/.claude/skills/team-perf-opt/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: perf-opt
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -139,7 +137,7 @@ When both BENCH-{P}01 and REVIEW-{P}01 are completed for a specific pipeline:
 
 #### Fix Cycle Count Tracking
 
-Fix cycles are tracked per branch/pipeline in `session.json`:
+Fix cycles are tracked per branch/pipeline in `team-session.json`:
 
 ```json
 // Single mode
@@ -169,10 +167,10 @@ TASK:
   - Fix benchmark regressions: <specific-regressions>
   - Re-validate after fixes
 CONTEXT:
-  - Session: <session-folder>
+  - Session: {run_dir}/work/team
   - Branch: B{NN}
   - Upstream artifacts: branches/B{NN}/review-report.md, branches/B{NN}/benchmark-results.json
-  - Shared memory: <session>/.msg/meta.json (namespace: optimizer.B{NN})
+  - Shared memory: {run_dir}/work/team/.msg/meta.json (namespace: optimizer.B{NN})
 EXPECTED: Fixed source files for B{NN} only
 CONSTRAINTS: Targeted fixes only | Do not touch other branches
 ---
@@ -237,7 +235,7 @@ Pipeline Status:
   [WAIT]  REVIEW-001   (reviewer)    -> blocked by IMPL-001
 
 Fix Cycles: 0/3
-Session: <session-id>
+Session: <run-id>
 ```
 
 **Fan-out mode**:
@@ -263,7 +261,7 @@ Pipeline Status (fan-out, 3 branches):
     [FAIL]  IMPL-B03     (optimizer)   -> failed
     Fix Cycles: 0/3 [BRANCH FAILED]
 
-Session: <session-id>
+Session: <run-id>
 ```
 
 **Independent mode**:
@@ -277,7 +275,7 @@ Pipeline Status (independent, 2 pipelines):
     [DONE]  PROFILE-B01  -> [DONE]  STRATEGY-B01 -> [DONE] IMPL-B01 -> ...
     Fix Cycles: 1/3
 
-Session: <session-id>
+Session: <run-id>
 ```
 
 Output status -- do NOT advance pipeline.
@@ -314,9 +312,16 @@ Triggered when all pipeline tasks are completed and no fix cycles remain.
 | Fan-out | ALL branches have BENCH + REVIEW completed with PASS/APPROVE (or escalated), shared stages done |
 | Independent | ALL pipelines have BENCH + REVIEW completed with PASS/APPROVE (or escalated) |
 
+  +- Run lifecycle completion:
+  |   - Read run_id from team-session.json.run.run_id
+  |   - Write {run_dir}/report.md with frontmatter (verdict/summary/concerns)
+  |   - Run `maestro run complete <run_id>`
+  |   - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
+  |
+
 **Aggregate results** before transitioning to Phase 5:
 
-1. For fan-out mode: collect per-branch benchmark results into `<session>/artifacts/aggregate-results.json`:
+1. For fan-out mode: collect per-branch benchmark results into `{run_dir}/outputs/aggregate-results.json`:
    ```json
    {
      "branches": {
@@ -357,6 +362,6 @@ Triggered by user "feedback <text>" command.
 
 After every handler execution:
 
-1. Update session.json with current state (active tasks, fix cycle counts per branch, last event, resolved parallel_mode)
+1. Update team-session.json with current state (active tasks, fix cycle counts per branch, last event, resolved parallel_mode)
 2. Verify task list consistency
 3. STOP and wait for next event

@@ -11,15 +11,13 @@ message_types:
 
 # Test Generator
 
-Generate test code according to strategist's strategy and layers. Support L1 unit tests, L2 integration tests, L3 E2E tests. Follow project's existing test patterns and framework conventions.
-
 ## Phase 2: Strategy & Pattern Loading
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| .msg/meta.json | <session>/wisdom/.msg/meta.json | Yes |
+| .msg/meta.json | {run_dir}/work/team/wisdom/.msg/meta.json | Yes |
 | Test strategy | meta.json -> test_strategy | Yes |
 | Target layer | task description `layer: L1/L2/L3` | Yes |
 
@@ -36,7 +34,7 @@ Generate test code according to strategist's strategy and layers. Support L1 uni
 
 | Condition | Mode |
 |-----------|------|
-| GC fix task | Read failure info from `<session>/results/run-<layer>.json`, fix failing tests only |
+| GC fix task | Read failure info from `{run_dir}/outputs/results/run-<layer>.json`, fix failing tests only |
 | <= 3 focus files | Direct: inline Read source -> Write test file |
 | > 3 focus files | Batch by module, delegate via CLI tool |
 
@@ -63,6 +61,6 @@ Generate test code according to strategist's strategy and layers. Support L1 uni
 1. Collect generated/modified test files
 2. Run syntax check (TypeScript: `tsc --noEmit`, or framework-specific)
 3. Auto-fix syntax errors (max 3 attempts)
-4. Write test metadata to `<session>/wisdom/.msg/meta.json` under `generated_tests[layer]`:
+4. Write test metadata to `{run_dir}/work/team/wisdom/.msg/meta.json` under `generated_tests[layer]`:
    - layer, files list, count, syntax_clean, mode, gc_fix flag
 5. Message type: `tests_generated` for new, `tests_revised` for GC fix iterations

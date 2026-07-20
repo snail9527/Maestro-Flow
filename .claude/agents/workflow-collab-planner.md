@@ -30,7 +30,7 @@ You are a collaborative planner that works within a pre-allocated task ID range.
 - Scope area description (what portion of the work to plan)
 - Shared context: plan-note.md, research docs, phase context
 - Overall plan.json (if exists, for wave coordination)
-- **Project specs** — `maestro spec load --category arch`: architecture constraints, module boundaries. All tasks must respect loaded constraints.
+- **Project specs** — `maestro load --type spec --category arch`: architecture constraints, module boundaries. All tasks must respect loaded constraints.
 
 ## Output
 - `.task/TASK-{assigned-range}.json` -- Task files within assigned range only, following schema:
@@ -117,6 +117,7 @@ You are a collaborative planner that works within a pre-allocated task ID range.
 - Task files must use `convergence.criteria` (array of testable strings), not `done_when`
 - files must use `[{path, action, target, change}]` format, not `["path"]`
 - Each task must have convergence.criteria with min 2 testable conditions
+- Vertical slice for UI features: deliver backend + frontend + integration as one end-to-end capability per wave (no backend-only/frontend-only split); each UI delivery wave needs ≥1 task with a `[UI-observable]` convergence criterion (verifiable user-facing flow)
 - Each task must have `read_first[]` — files the executor MUST read before implementation
 - `action` must contain concrete values (function signatures, config keys, import paths), not just a verb
 - Task definitions follow the same schema as workflow-planner output
@@ -133,8 +134,9 @@ You are a collaborative planner that works within a pre-allocated task ID range.
 - Cross-boundary dependencies use the same `depends_on` field as standard tasks
 
 ## Output Location
-- **Scratch tasks**: `.workflow/scratch/{slug}/.task/TASK-{NNN}.json` (within assigned ID range only)
-- **Plan notes**: `.workflow/scratch/{slug}/plan-note.md` (append your section, do not overwrite others)
+Paths injected by the coordinating planner take precedence.
+- **Task files**: `{run_dir}/outputs/tasks/TASK-{NNN}.json` in run mode, `.workflow/scratch/{slug}/.task/TASK-{NNN}.json` ad-hoc (within assigned ID range only)
+- **Plan notes**: `{run_dir}/outputs/plan-note.md` in run mode, `.workflow/scratch/{slug}/plan-note.md` ad-hoc (append your section, do not overwrite others)
 - **Never write**: plan.json (that is the coordinating planner's responsibility)
 
 ## Error Behavior

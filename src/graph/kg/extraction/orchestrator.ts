@@ -1,17 +1,15 @@
 // src/graph/kg/extraction/orchestrator.ts — 统一编排: code + knowledge → 同一 DB
 // 参考: plan-maestrograph.md 第三节 Unified Extraction Pipeline
 
-import { resolve, join } from 'node:path';
-import { existsSync } from 'node:fs';
-import { MaestroGraph } from '../engine.js';
-import { extractDomain } from './knowledge/domain-extractor.js';
-import { extractSpec } from './knowledge/spec-extractor.js';
-import { extractWiki } from './knowledge/wiki-extractor.js';
-import { extractCodebase } from './knowledge/codebase-extractor.js';
-import { extractIssues } from './knowledge/issue-extractor.js';
+import { isAbsolute, relative, resolve } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import type { MaestroGraph } from '../engine.js';
+import { KnowledgeExtractorRegistry } from './knowledge-extractor-registry.js';
 import { forEachCodeExtractionResult } from './code/code-extractor.js';
 import { resolveKnowledgeEdges } from '../resolution/knowledge-resolver.js';
 import type { SyncResult, SourceType } from '../db/types.js';
+import { FileLock } from '../sync/file-lock.js';
+import { writeSyncState, getGitHead } from '../sync-state.js';
 
 export interface CodegraphSyncOptions {
   srcDirs?: string[];
@@ -23,20 +21,38 @@ export interface CodegraphSyncOptions {
   allowExtractorScripts?: boolean;
 }
 
+export interface SyncKnowledgeGraphOptions {
+  full?: boolean;
+  sources?: SourceType[];
+  codegraph?: CodegraphSyncOptions;
+  /** Existing graph connection. The caller retains lifecycle ownership. */
+  graph?: MaestroGraph;
+}
+
 export async function syncKnowledgeGraph(
   projectPath: string,
-  options?: { full?: boolean; sources?: SourceType[]; codegraph?: CodegraphSyncOptions },
+  options?: SyncKnowledgeGraphOptions,
+): Promise<SyncResult[]> {
+  const lockPath = resolve(projectPath, '.workflow', 'kg', 'maestro.db.lock');
+  return new FileLock(lockPath).withLock(() => syncKnowledgeGraphUnlocked(projectPath, options));
+}
+
+async function syncKnowledgeGraphUnlocked(
+  projectPath: string,
+  options?: SyncKnowledgeGraphOptions,
 ): Promise<SyncResult[]> {
   const workflowRoot = resolve(projectPath, '.workflow');
   const results: SyncResult[] = [];
 
-  // 初始化或打开 DB
-  let mg: MaestroGraph;
+  // 初始化或打开 DB。传入 graph 时由调用方持有生命周期。
+  let mg = options?.graph;
+  const ownsGraph = !mg;
   const dbPath = resolve(workflowRoot, 'kg', 'maestro.db');
-  if (existsSync(dbPath)) {
-    mg = await MaestroGraph.open(projectPath);
-  } else {
-    mg = await MaestroGraph.init(projectPath);
+  if (!mg) {
+    const { MaestroGraph: MaestroGraphImpl } = await import('../engine.js');
+    mg = existsSync(dbPath)
+      ? await MaestroGraphImpl.open(projectPath)
+      : await MaestroGraphImpl.init(projectPath);
   }
 
   try {
@@ -46,180 +62,127 @@ export async function syncKnowledgeGraph(
     };
 
     // ── Knowledge sources (优先同步) ───────────────────────────────
-    // 同步前清理旧节点（ON DELETE CASCADE 会级联删除关联 edges）
     const queries = mg.getQueryBuilder();
 
-    if (shouldSync('domain')) {
-      const startMs = Date.now();
-      const domainResult = extractDomain(
-        resolve(workflowRoot, 'domain', 'glossary.json'),
-        workflowRoot,
-      );
-      const removed = mg.getConnection().transaction(() => {
-        const n = queries.deleteNodesBySourceType('domain');
-        if (domainResult.nodes.length > 0) {
-          mg.insertExtractionResults(domainResult);
-        }
-        return n;
-      });
-      results.push({
-        source: 'domain',
-        nodesAdded: domainResult.nodes.length,
-        nodesUpdated: 0,
-        nodesRemoved: removed,
-        edgesAdded: domainResult.edges.length,
-        edgesRemoved: 0,
-        durationMs: Date.now() - startMs,
-      });
-    }
+    const changedKnowledgeNodes = new Map<string, string>();
+    for (const entry of KnowledgeExtractorRegistry.getAll()) {
+      if (!shouldSync(entry.sourceType)) continue;
 
-    if (shouldSync('spec')) {
       const startMs = Date.now();
-      const specDir = resolve(workflowRoot, 'specs');
-      const specResult = extractSpec(specDir, workflowRoot);
-      const removed = mg.getConnection().transaction(() => {
-        const n = queries.deleteNodesBySourceType('spec');
-        if (specResult.nodes.length > 0) {
-          mg.insertExtractionResults(specResult);
+      try {
+        const sourcePath = entry.resolvePath(workflowRoot);
+        const extractionResult = entry.extractFn(sourcePath, workflowRoot);
+        for (const node of extractionResult.nodes) {
+          if (node.body) changedKnowledgeNodes.set(node.id, node.body);
         }
-        return n;
-      });
-      results.push({
-        source: 'spec',
-        nodesAdded: specResult.nodes.length,
-        nodesUpdated: 0,
-        nodesRemoved: removed,
-        edgesAdded: specResult.edges.length,
-        edgesRemoved: 0,
-        durationMs: Date.now() - startMs,
-      });
-    }
-
-    if (shouldSync('knowhow')) {
-      const startMs = Date.now();
-      const knowhowDir = resolve(workflowRoot, 'knowhow');
-      const wikiResult = extractWiki(knowhowDir, workflowRoot);
-      const removed = mg.getConnection().transaction(() => {
-        const n = queries.deleteNodesBySourceType('knowhow');
-        if (wikiResult.nodes.length > 0) {
-          mg.insertExtractionResults(wikiResult);
-        }
-        return n;
-      });
-      results.push({
-        source: 'knowhow',
-        nodesAdded: wikiResult.nodes.length,
-        nodesUpdated: 0,
-        nodesRemoved: removed,
-        edgesAdded: wikiResult.edges.length,
-        edgesRemoved: 0,
-        durationMs: Date.now() - startMs,
-      });
-    }
-
-    if (shouldSync('codebase')) {
-      const startMs = Date.now();
-      const codebaseDir = resolve(workflowRoot, 'codebase');
-      const codebaseResult = extractCodebase(codebaseDir, workflowRoot);
-      const removed = mg.getConnection().transaction(() => {
-        const n = queries.deleteNodesBySourceType('codebase');
-        if (codebaseResult.nodes.length > 0) {
-          mg.insertExtractionResults(codebaseResult);
-        }
-        return n;
-      });
-      results.push({
-        source: 'codebase',
-        nodesAdded: codebaseResult.nodes.length,
-        nodesUpdated: 0,
-        nodesRemoved: removed,
-        edgesAdded: codebaseResult.edges.length,
-        edgesRemoved: 0,
-        durationMs: Date.now() - startMs,
-      });
-    }
-
-    if (shouldSync('issue')) {
-      const startMs = Date.now();
-      const issuesPath = resolve(workflowRoot, 'issues', 'issues.jsonl');
-      const issueResult = extractIssues(issuesPath, workflowRoot);
-      const removed = mg.getConnection().transaction(() => {
-        const n = queries.deleteNodesBySourceType('issue');
-        if (issueResult.nodes.length > 0) {
-          mg.insertExtractionResults(issueResult);
-        }
-        return n;
-      });
-      results.push({
-        source: 'issue',
-        nodesAdded: issueResult.nodes.length,
-        nodesUpdated: 0,
-        nodesRemoved: removed,
-        edgesAdded: issueResult.edges.length,
-        edgesRemoved: 0,
-        durationMs: Date.now() - startMs,
-      });
+        const removed = mg.getConnection().transaction(() => {
+          const n = queries.deleteNodesBySourceType(entry.sourceType);
+          if (extractionResult.nodes.length > 0) {
+            queries.insertNodes(extractionResult.nodes);
+            queries.insertEdges(extractionResult.edges);
+            queries.upsertFile(extractionResult.fileRecord);
+          }
+          return n;
+        });
+        results.push({
+          source: entry.sourceType,
+          nodesAdded: extractionResult.nodes.length,
+          nodesUpdated: 0,
+          nodesRemoved: removed,
+          edgesAdded: extractionResult.edges.length,
+          edgesRemoved: 0,
+          durationMs: Date.now() - startMs,
+        });
+      } catch (err) {
+        process.stderr.write(`[MaestroGraph] Failed to sync ${entry.sourceType}: ${err instanceof Error ? err.message : String(err)}\n`);
+        results.push({
+          source: entry.sourceType,
+          nodesAdded: 0,
+          nodesUpdated: 0,
+          nodesRemoved: 0,
+          edgesAdded: 0,
+          edgesRemoved: 0,
+          durationMs: Date.now() - startMs,
+        });
+      }
     }
 
     // ── Code extraction (R3) ───────────────────────────────────────
 
     if (shouldSync('codegraph')) {
       const startMs = Date.now();
-      const hasExplicitSrcDirs = Boolean(options?.codegraph?.srcDirs?.length);
       const candidateDirs = options?.codegraph?.srcDirs?.length
         ? options.codegraph.srcDirs
-        : ['src', 'lib', 'app', 'packages', 'apps', 'dashboard/src'];
+        : [projectPath];
       const srcDirs = candidateDirs
-        .map(d => resolve(projectPath, d))
-        .filter(d => existsSync(d));
-      if (srcDirs.length === 0 && !hasExplicitSrcDirs) {
-        srcDirs.push(projectPath);
-      }
+        .map(d => resolveSourceDirectory(projectPath, d))
+        .filter((d): d is string => d !== null);
 
       let totalNodes = 0;
       let totalEdges = 0;
-      const allResults: import('../db/types.js').ExtractionResult[] = [];
-
-      for (const srcDir of srcDirs) {
-        if (!existsSync(srcDir)) continue;
-        const stats = await forEachCodeExtractionResult({
-          projectRoot: projectPath,
-          srcDir,
-          includeTests: options?.codegraph?.includeTests ?? false,
-          maxFileSize: options?.codegraph?.maxFileSize ?? 500 * 1024,
-          excludeDirs: options?.codegraph?.excludeDirs,
-          excludeFiles: options?.codegraph?.excludeFiles,
-          createMaestroIgnore: options?.codegraph?.createMaestroIgnore,
-          allowExtractorScripts: options?.codegraph?.allowExtractorScripts,
-        }, async (result) => {
-          if (result.nodes.length > 0) {
-            allResults.push(result);
-          }
-        });
-
-        totalNodes += stats.nodesCreated;
-        totalEdges += stats.edgesCreated;
-      }
-
-      const removedCode = mg.getConnection().transaction(() => {
+      let stagedEdges = 0;
+      const connection = mg.getConnection();
+      const removedCode = await connection.transactionAsync(async () => {
         const removed = queries.deleteNodesBySourceType('codegraph');
-        for (const result of allResults) {
-          try {
-            mg.insertExtractionResults(result);
-          } catch (err) {
-            try {
-              mg.getQueryBuilder().insertNodes(result.nodes);
-              mg.getQueryBuilder().upsertFile(result.fileRecord);
-              if (process.env.DEBUG) {
-                process.stderr.write(`[MaestroGraph] Partial write for ${result.fileRecord.path}: edges skipped (${err instanceof Error ? err.message : String(err)})\n`);
-              }
-            } catch (innerErr) {
-              process.stderr.write(`[MaestroGraph] Failed to index ${result.fileRecord.path}: ${innerErr instanceof Error ? innerErr.message : String(innerErr)}\n`);
+        connection.raw.exec(`
+          DROP TABLE IF EXISTS temp._kg_pending_edges;
+          CREATE TEMP TABLE _kg_pending_edges (
+            source TEXT NOT NULL,
+            target TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            metadata TEXT,
+            line INTEGER,
+            col INTEGER,
+            provenance TEXT
+          );
+        `);
+        const stageEdge = connection.raw.prepare(`
+          INSERT INTO _kg_pending_edges (source, target, kind, metadata, line, col, provenance)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        for (const srcDir of srcDirs) {
+          await forEachCodeExtractionResult({
+            projectRoot: projectPath,
+            srcDir,
+            includeTests: options?.codegraph?.includeTests ?? false,
+            maxFileSize: options?.codegraph?.maxFileSize ?? 1024 * 1024,
+            excludeDirs: options?.codegraph?.excludeDirs,
+            excludeFiles: options?.codegraph?.excludeFiles,
+            createMaestroIgnore: options?.codegraph?.createMaestroIgnore,
+            allowExtractorScripts: options?.codegraph?.allowExtractorScripts,
+          }, (result) => {
+            if (result.nodes.length === 0) return;
+            totalNodes += queries.insertNodes(result.nodes);
+            queries.upsertFile(result.fileRecord);
+            for (const edge of result.edges) {
+              stageEdge.run(
+                edge.source,
+                edge.target,
+                edge.kind,
+                edge.metadata && Object.keys(edge.metadata).length > 0 ? JSON.stringify(edge.metadata) : null,
+                edge.line ?? null,
+                edge.column ?? null,
+                edge.provenance ?? null,
+              );
+              stagedEdges++;
             }
-          }
+          });
         }
+
+        totalEdges = Number(connection.raw.prepare(`
+          INSERT INTO edges (source, target, kind, metadata, line, col, provenance)
+          SELECT p.source, p.target, p.kind, p.metadata, p.line, p.col, p.provenance
+          FROM _kg_pending_edges p
+          JOIN nodes source_node ON source_node.id = p.source
+          JOIN nodes target_node ON target_node.id = p.target
+        `).run().changes);
+        connection.raw.exec('DROP TABLE _kg_pending_edges');
         return removed;
       });
+      if (totalEdges !== stagedEdges) {
+        process.stderr.write(`[MaestroGraph] Skipped ${stagedEdges - totalEdges} unresolved code edge(s) during atomic replacement.\n`);
+      }
 
       results.push({
         source: 'codegraph',
@@ -230,6 +193,9 @@ export async function syncKnowledgeGraph(
         edgesRemoved: 0,
         durationMs: Date.now() - startMs,
       });
+
+      // 记录同步水位 — kg-sync hook 据此发现"已提交但未同步"的变更
+      writeSyncState(projectPath, getGitHead(projectPath));
     }
 
     // ── Cross-source edge resolution ────────────────────────────────
@@ -251,23 +217,29 @@ export async function syncKnowledgeGraph(
       const { CredibilityStore, contentHash } = await import('../credibility.js');
       const store = new CredibilityStore(mg.getConnection().raw);
       const knowledgeSources: SourceType[] = ['domain', 'spec', 'knowhow', 'codebase', 'issue'];
-      const knowledgeNodes = mg.getConnection().raw.prepare(
-        `SELECT id, body FROM nodes WHERE source_type IN (${knowledgeSources.map(() => '?').join(',')}) AND body IS NOT NULL AND body != ''`
-      ).all(...knowledgeSources) as Array<{ id: string; body: string }>;
       const nowMs = Date.now();
       mg.getConnection().transaction(() => {
-        for (const node of knowledgeNodes) {
-          store.upsert(node.id, contentHash(node.body), nowMs);
+        for (const [nodeId, body] of changedKnowledgeNodes) {
+          store.upsert(nodeId, contentHash(body), nowMs);
         }
+        store.cleanOrphans();
       });
     } catch (err) {
-      if (process.env.DEBUG) {
-        process.stderr.write(`[MaestroGraph] Credibility sync skipped: ${err instanceof Error ? err.message : String(err)}\n`);
-      }
+      process.stderr.write(`[MaestroGraph] Credibility sync skipped: ${err instanceof Error ? err.message : String(err)}\n`);
     }
 
     return results;
   } finally {
-    mg.close();
+    if (ownsGraph) mg.close();
   }
+}
+
+function resolveSourceDirectory(projectPath: string, inputPath: string): string | null {
+  const candidate = resolve(projectPath, inputPath);
+  if (!existsSync(candidate)) return null;
+  const root = realpathSync(projectPath);
+  const actual = realpathSync(candidate);
+  const rel = relative(root, actual);
+  if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) return actual;
+  throw new Error(`Code source directory must be inside project root: ${inputPath}`);
 }

@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach } from 'vitest';
 import assert from 'node:assert';
 import { GraphWalker } from '../graph-walker.js';
 import { DefaultExprEvaluator } from '../expr-evaluator.js';

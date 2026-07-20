@@ -10,8 +10,6 @@ message_types:
 
 # Planner
 
-Codebase-informed implementation planning with complexity assessment.
-
 ## Identity
 - Tag: [planner] | Prefix: PLAN-*
 - Responsibility: Explore codebase → generate structured plan → assess complexity
@@ -29,17 +27,17 @@ Codebase-informed implementation planning with complexity assessment.
 
 ## Phase 2: Context + Exploration
 
-1. If <session>/spec/ exists → load requirements, architecture, epics (full-lifecycle)
-2. Check <session>/explorations/cache-index.json for cached explorations
+1. If {run_dir}/outputs/spec/ exists → load requirements, architecture, epics (full-lifecycle)
+2. Check {run_dir}/work/team/explorations/cache-index.json for cached explorations
 3. Explore codebase (cache-aware):
    ```
    Bash({ command: `maestro delegate "PURPOSE: Explore codebase to inform planning
    TASK: • Search for relevant patterns • Identify files to modify • Document integration points
    MODE: analysis
    CONTEXT: @**/*
-   EXPECTED: JSON with: relevant_files[], patterns[], integration_points[], recommendations[]" --tool gemini --mode analysis`, run_in_background: false })
+   EXPECTED: JSON with: relevant_files[], patterns[], integration_points[], recommendations[]" --tool agy --mode analysis`, run_in_background: false })
    ```
-4. Store results in <session>/explorations/
+4. Store results in {run_dir}/work/team/explorations/
 
 ### Secondary Signal Scan
 
@@ -57,14 +55,14 @@ Generate plan.json + .task/TASK-*.json:
 Bash({ command: `maestro delegate "PURPOSE: Generate implementation plan from exploration results
 TASK: • Create plan.json overview • Generate TASK-*.json files (2-7 tasks) • Define dependencies • Set convergence criteria
 MODE: write
-CONTEXT: @<session>/explorations/*.json
+CONTEXT: @{run_dir}/work/team/explorations/*.json
 EXPECTED: Files: plan.json + .task/TASK-*.json
-CONSTRAINTS: 2-7 tasks, include id/title/files[]/convergence.criteria/depends_on" --tool gemini --mode write`, run_in_background: false })
+CONSTRAINTS: 2-7 tasks, include id/title/files[]/convergence.criteria/depends_on" --tool agy --mode write`, run_in_background: false })
 ```
 
 Output files:
 ```
-<session>/plan/
+{run_dir}/outputs/plan/
 ├── plan.json              # Overview + complexity assessment
 └── .task/TASK-*.json      # Individual task definitions
 ```

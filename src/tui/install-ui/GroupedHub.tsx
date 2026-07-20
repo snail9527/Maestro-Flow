@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { type HookLevel } from '../../commands/hooks.js';
+import { type HookLevel, GENERIC_HOOKS_PLATFORMS } from '../../commands/hooks.js';
+import { EXTRA_MCP_TARGETS } from '../../commands/install-backend.js';
 import { t } from '../../i18n/index.js';
 import { C, SYM, SP, wrapCursor, parseNumberKey, KeyHints } from '../shared/index.js';
 
@@ -112,7 +113,7 @@ export function GroupedHub({
       onExport();
     } else if (input === 'i' || input === 'I') {
       onImport();
-    } else if (key.escape) {
+    } else if (key.escape || key.leftArrow) {
       onExit();
     } else {
       const idx = parseNumberKey(input, flat.length);
@@ -134,18 +135,17 @@ export function GroupedHub({
   return (
     <Box flexDirection="column">
       {/* Scope selector */}
-      <Box>
-        <Text bold color={C.primary}>{t.install.hubScope} </Text>
+      <Box gap={1}>
+        <Text bold color={C.primary}>{t.install.hubScope}</Text>
         <Text color={mode === 'global' ? C.success : C.neutral} bold={mode === 'global'}>
-          {mode === 'global' ? '● ' : '○ '}{t.install.hubGlobal}
+          {mode === 'global' ? SYM.radioOn : SYM.radioOff} {t.install.hubGlobal}
         </Text>
-        <Text>  </Text>
         <Text color={mode === 'project' ? C.success : C.neutral} bold={mode === 'project'}>
-          {mode === 'project' ? '● ' : '○ '}{t.install.hubProject}
+          {mode === 'project' ? SYM.radioOn : SYM.radioOff} {t.install.hubProject}
         </Text>
-        <Text dimColor>  [g/p]</Text>
+        <Text dimColor>[g/p]</Text>
         {lastInstallDate && (
-          <Text dimColor>  {t.install.hubLastInstall.replace('{date}', lastInstallDate)}</Text>
+          <Text dimColor>{'·'} {t.install.hubLastInstall.replace('{date}', lastInstallDate)}</Text>
         )}
       </Box>
 
@@ -157,22 +157,22 @@ export function GroupedHub({
             const groupItems = flat.filter((e) => e.groupIdx === gi);
             return (
               <Box key={group.id} flexDirection="column">
-                <Text color={C.primary}>{'─'.repeat(2)} {group.title} {'─'.repeat(Math.max(0, 36 - group.title.length))}</Text>
+                <Text color={C.primary}>{'─'.repeat(2)} {group.title} {'─'.repeat(Math.max(0, 38 - group.title.length))}</Text>
                 {groupItems.map((entry) => {
                   const idx = flatIndexMap.get(`${entry.groupIdx}-${entry.itemIdx}`) ?? 0;
                   const hl = cursor === idx;
                   const item = entry.item;
                   return (
                     <Box key={item.id}>
-                      <Text color={hl ? C.primary : C.neutral}> </Text>
+                      <Text color={hl ? C.primary : C.neutral}>{hl ? SYM.cursor : ' '} </Text>
                       <Text color={item.enabled ? (hl ? C.successBright : C.success) : C.neutral}>
                         {item.enabled ? SYM.checkOn : SYM.checkOff}
                       </Text>
                       <Text> </Text>
                       <Text color={hl ? C.primary : undefined} bold={hl}>
-                        {item.label.padEnd(16)}
+                        {item.label.padEnd(18)}
                       </Text>
-                      <Text dimColor>{item.enabled ? item.summary : '—'}</Text>
+                      <Text color={item.enabled ? C.neutral : C.neutral}>{item.enabled ? item.summary : '—'}</Text>
                     </Box>
                   );
                 })}
@@ -182,9 +182,10 @@ export function GroupedHub({
           })}
 
           {/* Action rows */}
-          <Box flexDirection="column" marginTop={0}>
+          <Box flexDirection="column" marginTop={1}>
+            <Text color={C.primary}>{'─'.repeat(40)}</Text>
             <Text
-              color={cursor === flat.length ? C.successBright : C.neutral}
+              color={cursor === flat.length ? C.primary : C.neutral}
               bold={cursor === flat.length}
             >
               {cursor === flat.length ? SYM.cursor : ' '} {t.install.hubExecuteInstall}
@@ -211,11 +212,13 @@ export function GroupedHub({
             borderStyle="single"
             borderColor={C.neutral}
             paddingX={1}
-            width={30}
+            width={38}
             marginLeft={2}
           >
             <Text bold color={C.primary}>{focusedItem.label}</Text>
-            <Text dimColor wrap="wrap">{focusedItem.detail}</Text>
+            <Box marginTop={1}>
+              <Text wrap="wrap">{focusedItem.detail}</Text>
+            </Box>
           </Box>
         )}
       </Box>
@@ -240,9 +243,17 @@ export function buildGroupedHubItems(
     agyHookLevel: HookLevel;
     agyHookSelectedCount?: number; agyHookTotalCount?: number; agyHookIsCustom?: boolean;
     extraMcpTargetCount: number;
+    extraMcpTargetIds: string[];
+    genericHookLevels: Record<string, HookLevel>;
     statuslineDetected: string | null;
     statuslineTheme?: string;
     backupClaudeMd: boolean; backupAll: boolean;
+    selectedPlatforms: string[];
+    selectedAddons: string[];
+    chineseEnabled: boolean;
+    addonDefs: Array<{ id: string; label: string; description: string; platform: string }>;
+    embeddingMode?: 'local' | 'api';
+    embeddingCached?: boolean;
   },
 ): HubGroup[] {
   const hookSummary = (level: HookLevel, selCount?: number, totalCount?: number, isCustom?: boolean) => {
@@ -261,95 +272,150 @@ export function buildGroupedHubItems(
       ? t.install.backupClaudeMdLabel
       : '—';
 
-  return [
+  const platforms = new Set(summaries.selectedPlatforms);
+  const addons = new Set(summaries.selectedAddons);
+
+  const addonItems: HubItem[] = [
     {
-      id: 'core',
-      title: t.install.groupCore,
-      items: [
-        {
-          id: 'components',
-          label: t.install.hubLabelComponents,
-          enabled: enabled.components,
-          summary: `${summaries.componentCount} sel · ${summaries.fileCount}f`,
-          detail: t.install.hubDetailComponents.replace('{count}', String(summaries.componentCount)).replace('{files}', String(summaries.fileCount)),
-        },
-        {
-          id: 'backup',
-          label: t.install.hubLabelBackup,
-          enabled: enabled.backup,
-          summary: backupSummary,
-          detail: t.install.hubDetailBackup,
-        },
-      ],
+      id: 'chinese',
+      label: 'Chinese Response',
+      enabled: summaries.chineseEnabled,
+      summary: summaries.chineseEnabled ? 'all selected platforms' : '—',
     },
-    {
-      id: 'claude',
-      title: t.install.groupClaude,
-      items: [
-        {
-          id: 'hooks',
-          label: t.install.hubLabelHooks,
-          enabled: enabled.hooks,
-          summary: hookSummary(summaries.hookLevel, summaries.hookSelectedCount, summaries.hookTotalCount, summaries.hookIsCustom),
-          detail: t.install.hubDetailHooks.replace('{level}', summaries.hookLevel),
-        },
-        {
-          id: 'mcp',
-          label: t.install.hubLabelMcpServer,
-          enabled: enabled.mcp,
-          summary: summaries.mcpEnabled ? t.install.hubTools.replace('{count}', String(summaries.mcpToolCount)) : '—',
-          detail: t.install.hubDetailMcp,
-        },
-        {
-          id: 'statusline',
-          label: t.install.hubLabelStatusline,
-          enabled: enabled.statusline,
-          summary: summaries.statuslineDetected
-            ? t.install.statuslineDetected.replace('{cmd}', summaries.statuslineDetected)
-            : (summaries.statuslineTheme || 'notion'),
-          detail: t.install.hubDetailStatusline.replace('{theme}', summaries.statuslineTheme || 'notion'),
-        },
-      ],
-    },
-    {
-      id: 'codex',
-      title: t.install.groupCodex,
-      items: [
-        {
-          id: 'codexHooks',
-          label: t.install.hubLabelCodexHooks,
-          enabled: enabled.codexHooks,
-          summary: hookSummary(summaries.codexHookLevel, summaries.codexHookSelectedCount, summaries.codexHookTotalCount, summaries.codexHookIsCustom),
-          detail: t.install.hubDetailCodexHooks,
-        },
-        {
-          id: 'codexMcp',
-          label: t.install.hubLabelCodexMcp,
-          enabled: enabled.codexMcp,
-          summary: summaries.codexMcpEnabled ? t.install.hubTools.replace('{count}', String(summaries.codexMcpToolCount)) : '—',
-          detail: t.install.hubDetailCodexMcp,
-        },
-      ],
-    },
-    {
-      id: 'other',
-      title: t.install.groupOther,
-      items: [
-        {
-          id: 'agyHooks',
-          label: t.install.hubLabelAgyHooks,
-          enabled: enabled.agyHooks,
-          summary: hookSummary(summaries.agyHookLevel, summaries.agyHookSelectedCount, summaries.agyHookTotalCount, summaries.agyHookIsCustom),
-          detail: t.install.hubDetailAgyHooks,
-        },
-        {
-          id: 'extraMcp',
-          label: t.install.hubLabelExtraMcp,
-          enabled: enabled.extraMcp,
-          summary: summaries.extraMcpTargetCount > 0 ? `${summaries.extraMcpTargetCount} targets` : '0 targets',
-          detail: t.install.hubDetailExtraMcp,
-        },
-      ],
-    },
+    ...summaries.addonDefs
+      .filter(d => d.platform === 'shared' || platforms.has(d.platform))
+      .map(d => ({
+        id: d.id,
+        label: d.label,
+        enabled: addons.has(d.id),
+        summary: d.description,
+      })),
   ];
+
+  const groups: HubGroup[] = [
+    { id: 'addons', title: t.install.groupAddons ?? 'Options', items: addonItems },
+  ];
+
+  // --- Hooks (by type, conditional per platform) ---
+  const hookItems: HubItem[] = [];
+  if (platforms.has('claude')) {
+    hookItems.push({
+      id: 'hooks',
+      label: 'Claude Hooks',
+      enabled: enabled.hooks,
+      summary: hookSummary(summaries.hookLevel, summaries.hookSelectedCount, summaries.hookTotalCount, summaries.hookIsCustom),
+      detail: t.install.hubDetailHooks.replace('{level}', summaries.hookLevel),
+    });
+  }
+  if (platforms.has('codex')) {
+    hookItems.push({
+      id: 'codexHooks',
+      label: t.install.hubLabelCodexHooks,
+      enabled: enabled.codexHooks,
+      summary: hookSummary(summaries.codexHookLevel, summaries.codexHookSelectedCount, summaries.codexHookTotalCount, summaries.codexHookIsCustom),
+      detail: t.install.hubDetailCodexHooks,
+    });
+  }
+  if (platforms.has('agy')) {
+    hookItems.push({
+      id: 'agyHooks',
+      label: t.install.hubLabelAgyHooks,
+      enabled: enabled.agyHooks,
+      summary: hookSummary(summaries.agyHookLevel, summaries.agyHookSelectedCount, summaries.agyHookTotalCount, summaries.agyHookIsCustom),
+      detail: t.install.hubDetailAgyHooks,
+    });
+  }
+  for (const gp of GENERIC_HOOKS_PLATFORMS) {
+    if (!platforms.has(gp.id)) continue;
+    const level = summaries.genericHookLevels[gp.id] ?? 'none';
+    hookItems.push({
+      id: `ghooks-${gp.id}`,
+      label: `${gp.label} Hooks`,
+      enabled: level !== 'none',
+      summary: level,
+    });
+  }
+  if (hookItems.length > 0) {
+    groups.push({ id: 'hooks', title: t.install.groupHooks, items: hookItems });
+  }
+
+  // --- MCP Server (by type, conditional per platform) ---
+  const mcpItems: HubItem[] = [];
+  if (platforms.has('claude')) {
+    mcpItems.push({
+      id: 'mcp',
+      label: 'Claude MCP',
+      enabled: enabled.mcp,
+      summary: summaries.mcpEnabled ? t.install.hubTools.replace('{count}', String(summaries.mcpToolCount)) : '—',
+      detail: t.install.hubDetailMcp,
+    });
+  }
+  if (platforms.has('codex')) {
+    mcpItems.push({
+      id: 'codexMcp',
+      label: 'Codex MCP',
+      enabled: enabled.codexMcp,
+      summary: summaries.codexMcpEnabled ? t.install.hubTools.replace('{count}', String(summaries.codexMcpToolCount)) : '—',
+      detail: t.install.hubDetailCodexMcp,
+    });
+  }
+  // Per-platform MCP targets — only show for selected platforms
+  const extraTargetIds = new Set(summaries.extraMcpTargetIds);
+  const platformToMcpTarget = new Map<string, string>([
+    ['cursor', 'cursor'], ['qoder', 'qoder'], ['kiro', 'kiro'],
+    ['agy', 'gemini-cli'], ['copilot', 'vscode-copilot'],
+    ['trae', 'trae'], ['roo', 'roo'],
+  ]);
+  for (const target of EXTRA_MCP_TARGETS) {
+    let matchedPlatform: string | undefined;
+    for (const [platId, targetId] of platformToMcpTarget) {
+      if (targetId === target.id && platforms.has(platId)) {
+        matchedPlatform = platId;
+        break;
+      }
+    }
+    if (!matchedPlatform) continue;
+    const platLabel = target.label.split('(')[0].trim();
+    mcpItems.push({
+      id: `mcp-${target.id}`,
+      label: `${platLabel} MCP`,
+      enabled: extraTargetIds.has(target.id),
+      summary: extraTargetIds.has(target.id) ? 'enabled' : '—',
+    });
+  }
+  if (mcpItems.length > 0) {
+    groups.push({ id: 'mcp', title: t.install.groupMcp, items: mcpItems });
+  }
+
+  // --- Appearance (conditional) ---
+  if (platforms.has('claude')) {
+    groups.push({
+      id: 'appearance',
+      title: t.install.groupAppearance,
+      items: [{
+        id: 'statusline',
+        label: t.install.hubLabelStatusline,
+        enabled: enabled.statusline,
+        summary: summaries.statuslineDetected
+          ? t.install.statuslineDetected.replace('{cmd}', summaries.statuslineDetected)
+          : (summaries.statuslineTheme || 'notion'),
+        detail: t.install.hubDetailStatusline.replace('{theme}', summaries.statuslineTheme || 'notion'),
+      }],
+    });
+  }
+
+  // --- Embedding (always visible) ---
+  groups.push({
+    id: 'embedding',
+    title: t.install.groupEmbedding,
+    items: [{
+      id: 'embedding',
+      label: 'Embedding Model',
+      enabled: true,
+      summary: summaries.embeddingMode === 'api' ? 'API mode' : (summaries.embeddingCached ? 'Local (ready)' : 'Local (no model)'),
+      detail: 'Manage local ONNX model for semantic search. Download, configure, rebuild index.',
+    }],
+  });
+
+  return groups;
 }

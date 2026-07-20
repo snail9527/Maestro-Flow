@@ -21,7 +21,7 @@ const MAESTRO_BIN = join(process.cwd(), 'bin', 'maestro.js');
 
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'maestro-cli-spec-e2e-'));
-  // Create .workflow to simulate maestro-managed project
+  // Create .workflow to simulate managed project
   mkdirSync(join(testDir, '.workflow'), { recursive: true });
 });
 
@@ -241,6 +241,20 @@ describe('maestro spec list', () => {
     expect(output).toContain('architecture-constraints.md');
     expect(output).toContain('learnings.md');
     expect(output).toContain('8 files');
+  });
+
+  it('lists spec files as JSON', () => {
+    runMaestro('spec init');
+    runMaestro('spec add coding "JSON Test Rule" "This is a JSON test spec." --keywords json-test');
+    const output = runMaestro('spec list --json');
+    const parsed = JSON.parse(output);
+    expect(parsed.entries).toBeDefined();
+    expect(Array.isArray(parsed.entries)).toBe(true);
+    expect(parsed.entries.length).toBeGreaterThan(0);
+    const entry = parsed.entries.find((e: any) => e.title === 'JSON Test Rule');
+    expect(entry).toBeDefined();
+    expect(entry.category).toBe('coding');
+    expect(entry.content).toContain('This is a JSON test spec.');
   });
 
   it('shows message when no specs directory exists', () => {

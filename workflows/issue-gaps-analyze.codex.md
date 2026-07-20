@@ -1,10 +1,9 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Workflow: Issue Gaps Analysis (Codex — CSV Wave)
-
-Root cause analysis for issues via `spawn_agents_on_csv` wave execution.
-Supports single issue (ISS-ID) or batch with classification and parallel analysis.
-Produces analysis records in issues.jsonl and context.md for downstream `plan --gaps`.
-
-**Invoked by**: `maestro-analyze --gaps [ISS-ID]` (codex SKILL.md)
 
 ## Pipeline
 
@@ -64,7 +63,7 @@ id,title,description,iss_id,group_id,group_label,deps,context_from,wave,status,f
 **Wave 1 rows** — one per issue:
 
 ```csv
-"1","Explore: ISS-xxx {title}","Root cause exploration for ISS-xxx: {description}. Location: {location}. Severity: {severity}. Fix hint: {fix_direction}. Search keywords: {keywords from title+description+components}. TASK: grep keywords → read top matches → trace call chain → identify root cause (file:line) → assess impact → list related files → rate confidence → suggest fix. EXPECTED: JSON { root_cause, impact, related_files[], confidence, suggested_approach }. CONSTRAINTS: Evidence-only, use file reads to verify.","ISS-xxx","G1","src/auth","","","1","","","",""
+"1","Explore: ISS-xxx {title}","Root cause exploration for ISS-xxx: {description}. Location: {location}. Severity: {severity}. Fix hint: {fix_direction}. Search keywords: {keywords from title+description+components}. TASK: maestro explore keywords (preferred) or grep keywords → read top matches → trace call chain → identify root cause (file:line) → assess impact → list related files → rate confidence → suggest fix. EXPECTED: JSON { root_cause, impact, related_files[], confidence, suggested_approach }. CONSTRAINTS: Evidence-only, use file reads to verify.","ISS-xxx","G1","src/auth","","","1","","","",""
 ```
 
 **Wave 2 rows** — one per group:
@@ -100,6 +99,7 @@ Write `tasks.csv` to session folder.
 Filter `wave == 1 && status == pending`. Write `wave-1.csv`.
 
 ```javascript
+MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep:
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-1.csv`,
   id_column: "id",
@@ -127,6 +127,7 @@ Merge results into master `tasks.csv`, delete `wave-1.csv`.
 Filter `wave == 2 && status == pending`. Build `prev_context` from wave 1 findings of issues in same group. Write `wave-2.csv` with `prev_context` column.
 
 ```javascript
+MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep:
 spawn_agents_on_csv({
   csv_path: `${sessionFolder}/wave-2.csv`,
   id_column: "id",
@@ -170,7 +171,7 @@ For each issue in the analysis array:
 
   Read-modify-write issues.jsonl (single pass):
     Set issue.analysis = ANALYSIS, updated_at = NOW_ISO
-    Append issue.history: { action: "analyzed", at: NOW_ISO, by: "maestro-analyze --gaps" }
+    Append issue.history: { action: "analyzed", at: NOW_ISO, by: "analyze --gaps" }
     Status unchanged (non-destructive enrichment).
 
 Verify: re-read, confirm analysis field present for all updated issues.
@@ -225,9 +226,9 @@ Register artifact in state.json.
 Display: group breakdown, per-issue root cause, confidence, cross-refs.
 
 Next steps:
-  - maestro-plan --gaps (plan fix tasks linked to analyzed issues)
-  - maestro-analyze --gaps {ISS-ID} (re-analyze specific issue)
-  - manage-issue list (review all issues)
+  - plan --gaps (plan fix tasks linked to analyzed issues)
+  - analyze --gaps {ISS-ID} (re-analyze specific issue)
+  - $maestro-manage issue list (review all issues)
 ```
 
 ---

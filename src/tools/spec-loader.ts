@@ -6,9 +6,9 @@
  * discovers knowhow tools with matching category, returns concatenated content.
  */
 
-import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync, appendFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseSpecEntries, formatSpecEntries, type SpecEntryParsed } from './spec-entry-parser.js';
+import { parseSpecEntries, formatSpecEntries, VALID_CATEGORIES, type SpecEntryParsed } from './spec-entry-parser.js';
 import { paths } from '../config/paths.js';
 import {
   SPEC_SEED_DOCS,
@@ -16,6 +16,7 @@ import {
   hasFrontmatter,
   renderSeedContent,
 } from './spec-seeds.js';
+import { stripFrontmatter, parseFrontmatter, knowhowFileToWikiId } from '../utils/frontmatter.js';
 
 // ============================================================================
 // Types
@@ -114,6 +115,8 @@ export interface LoadSpecsOptions {
   extraSpecFiles?: string[];
   /** Linked workspace specs directories (read-only, inserted between global and baseline layers) */
   linkedWorkspaces?: Array<{ name: string; specsDir: string }>;
+  /** Include deprecated entries for explicit audit/history loading. */
+  includeDeprecated?: boolean;
 }
 
 export function loadSpecs(projectPath: string, category?: SpecCategory, uid?: string, keyword?: string, scope?: SpecScope, options?: LoadSpecsOptions): SpecLoadResult {
@@ -246,9 +249,10 @@ function loadFromDir(
   const matched: string[] = [];
 
   for (const file of files) {
-    if (!shouldInclude(file, category, options?.extraSpecFiles)) continue;
-
     const filePath = join(specsDir, file);
+    const resolvedCat = resolveFileCategory(file, filePath);
+    if (!shouldInclude(file, category, resolvedCat, options?.extraSpecFiles)) continue;
+
     let raw: string;
     try {
       raw = readFileSync(filePath, 'utf-8');
@@ -259,9 +263,7 @@ function loadFromDir(
     const body = stripFrontmatter(raw).trim();
     if (!body) continue;
 
-    // Primary category doc → full load; other files → keyword-filtered only
-    const fileCategory = CATEGORY_MAP[file];
-    const isPrimaryDoc = category && (fileCategory === category || options?.extraSpecFiles?.includes(file));
+    const isPrimaryDoc = category && (resolvedCat === category || options?.extraSpecFiles?.includes(file));
 
     const workflowRoot = join(specsDir, '..');
     const formatted = formatFileContent(body, keyword, isPrimaryDoc ? undefined : category, workflowRoot, options);
@@ -278,23 +280,37 @@ function loadFromDir(
 // Internal
 // ============================================================================
 
-function shouldInclude(filename: string, category?: SpecCategory, extraSpecFiles?: string[]): boolean {
-  if (!category) return true; // No filter → load all
+/** Resolve category for a file: static CATEGORY_MAP → frontmatter → filename stem. */
+function resolveFileCategory(filename: string, filePath: string): SpecCategory | undefined {
+  const mapped = CATEGORY_MAP[filename];
+  if (mapped) return mapped;
 
-  // Extra spec files for this category → always include as primary
-  if (extraSpecFiles?.includes(filename)) return true;
-
-  // Category filter: include primary doc + all other files (for keyword cross-matching)
-  const cat = CATEGORY_MAP[filename];
-  if (!cat) {
-    console.warn(`[spec] file not in category map, skipped: ${filename}`);
-    return false;
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const { data } = parseFrontmatter(raw);
+    const cat = data.category;
+    if (cat && (VALID_CATEGORIES as readonly string[]).includes(cat)) {
+      return cat as SpecCategory;
+    }
+  } catch {
+    // fall through
   }
 
-  // Primary category doc → always include (full load)
-  if (cat === category) return true;
+  // Filename stem inference: arch.md → 'arch', coding.md → 'coding', etc.
+  const stem = filename.replace(/\.md$/, '');
+  if ((VALID_CATEGORIES as readonly string[]).includes(stem as SpecCategory)) {
+    return stem as SpecCategory;
+  }
 
-  // Other category files → include for keyword-based cross-category matching
+  return undefined;
+}
+
+function shouldInclude(filename: string, category?: SpecCategory, resolvedCat?: SpecCategory, extraSpecFiles?: string[]): boolean {
+  if (!category) return true;
+
+  if (extraSpecFiles?.includes(filename)) return true;
+
+  // No resolved category → still include as cross-category (general)
   return true;
 }
 
@@ -306,10 +322,16 @@ function shouldInclude(filename: string, category?: SpecCategory, extraSpecFiles
  * Falls back to raw body for files with no structured entries.
  */
 function formatFileContent(body: string, keyword?: string, crossCategory?: SpecCategory, workflowRoot?: string, options?: LoadSpecsOptions): string | null {
-  const { entries, legacy } = parseSpecEntries(body);
+  const { entries: allEntries, legacy } = parseSpecEntries(body);
+  // Deprecated (superseded) entries are never injected into agent context —
+  // the current version lives elsewhere in the chain. `maestro spec history`
+  // still surfaces them for audit.
+  const entries = options?.includeDeprecated
+    ? allEntries
+    : allEntries.filter(e => e.status !== 'deprecated');
 
-  // No structured entries → pass through raw body (or keyword-grep it)
-  if (entries.length === 0 && legacy.length === 0) {
+  // No structured entries at all → pass through raw body (or keyword-grep it)
+  if (allEntries.length === 0 && legacy.length === 0) {
     // Cross-category mode: non-primary docs with no structured entries are skipped
     if (crossCategory) return null;
 
@@ -322,6 +344,9 @@ function formatFileContent(body: string, keyword?: string, crossCategory?: SpecC
     }
     return body;
   }
+
+  // Had structured entries but all were deprecated → nothing active to inject.
+  if (entries.length === 0 && legacy.length === 0) return null;
 
   // In cross-category mode: only show entries that have keyword overlap
   let filteredEntries = entries;
@@ -384,9 +409,7 @@ function formatFileContent(body: string, keyword?: string, crossCategory?: SpecC
  *   2. Spec-entry content body (first 200 chars after heading)
  */
 function formatRefEntry(e: SpecEntryParsed, workflowRoot?: string): string {
-  const refStem = (e.ref ?? '').replace(/^knowhow\//, '').replace(/\.md$/, '');
-  const refSlug = refStem.replace(/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const refId = `knowhow-${refSlug}`;
+  const refId = knowhowFileToWikiId((e.ref ?? '').replace(/^knowhow\//, ''));
 
   // Try to read YAML summary from the referenced knowhow document
   let summary = resolveRefSummary(e.ref, workflowRoot);
@@ -401,7 +424,7 @@ function formatRefEntry(e: SpecEntryParsed, workflowRoot?: string): string {
     summary = summary.slice(0, 200).replace(/\s+/g, ' ').trim();
   }
 
-  return `### ${e.title}\n\n${summary}\n\n\u2192 Detail: maestro wiki load ${refId}`;
+  return `### ${e.title}\n\n${summary}\n\n\u2192 Detail: maestro load --type knowhow --id ${refId}`;
 }
 
 /**
@@ -463,10 +486,7 @@ function discoverKnowhowTools(workflowRoot: string, category: SpecCategory): { c
         summary = body.split('\n\n')[0].slice(0, 200).replace(/\s+/g, ' ');
       }
 
-      const stem = file.replace(/\.md$/, '');
-      const slug = stem.replace(/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-      tools.push({ title, summary, id: `knowhow-${slug}` });
+      tools.push({ title, summary, id: knowhowFileToWikiId(file) });
     } catch {
       continue;
     }
@@ -475,17 +495,9 @@ function discoverKnowhowTools(workflowRoot: string, category: SpecCategory): { c
   if (tools.length === 0) return null;
 
   const content = `## Available Tools (${category})\n\n` +
-    tools.map(t => `### ${t.title} (tool)\n\n${t.summary}\n\n→ Load: maestro wiki load ${t.id}`).join('\n\n---\n\n');
+    tools.map(t => `### ${t.title} (tool)\n\n${t.summary}\n\n→ Load: maestro load --type knowhow --id ${t.id}`).join('\n\n---\n\n');
 
   return { content, count: tools.length };
-}
-
-function stripFrontmatter(raw: string): string {
-  const trimmed = raw.trimStart();
-  if (!trimmed.startsWith('---')) return raw;
-  const endIdx = trimmed.indexOf('\n---', 3);
-  if (endIdx === -1) return raw;
-  return trimmed.substring(endIdx + 4).trim();
 }
 
 // ============================================================================
@@ -501,14 +513,13 @@ const autoInitChecked = new Set<string>();
  * Applies to every layer (global, baseline, team, personal).
  *
  * For project-local dirs: only runs when `.workflow/` already exists
- * (i.e. the project is maestro-managed).
+ * (i.e. the project is managed).
  * For global (`~/.maestro/specs/`): always creates — the home dir exists by definition.
  *
  * Synchronous, per-directory dedup, best-effort — never throws.
  */
 function autoInitSeeds(specsDir: string): void {
   if (autoInitChecked.has(specsDir)) return;
-  autoInitChecked.add(specsDir);
 
   // For project-local paths, only auto-init when .workflow/ already exists.
   // Global path (under ~/.maestro/) always qualifies.
@@ -540,8 +551,9 @@ function autoInitSeeds(specsDir: string): void {
         writeFileSync(filePath, merged, 'utf-8');
       }
     }
+    autoInitChecked.add(specsDir);
   } catch {
-    // Best-effort — don't block loading
+    // Best-effort — don't block loading; don't mark as checked so retry is possible
   }
 }
 
@@ -592,8 +604,11 @@ export function loadExtraDocs(projectPath: string, docPaths?: string[]): ExtraDo
 }
 
 // ============================================================================
-// Hit tracking — append-only JSONL log for decay analysis
+// Hit tracking — size-bounded JSONL log for decay analysis
 // ============================================================================
+
+/** Once the hit log passes this size, keep only the newest half (G-A12). */
+const HIT_LOG_MAX_BYTES = 1024 * 1024; // 1MB
 
 function recordHit(
   projectPath: string,
@@ -603,6 +618,10 @@ function recordHit(
 ): void {
   try {
     const hitLog = join(projectPath, SPECS_DIR, '.hit-log.jsonl');
+    if (existsSync(hitLog) && statSync(hitLog).size > HIT_LOG_MAX_BYTES) {
+      const lines = readFileSync(hitLog, 'utf-8').split('\n');
+      writeFileSync(hitLog, lines.slice(Math.floor(lines.length / 2)).join('\n'), 'utf-8');
+    }
     const entry = JSON.stringify({
       ts: new Date().toISOString(),
       cat: category ?? null,

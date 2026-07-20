@@ -1,10 +1,9 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Workflow: fork
-
-Create a git worktree for an entire milestone, enabling inter-milestone parallel development. Copies `.workflow/` context into the worktree since `.workflow/` is gitignored.
-
-Worktrees operate at the **milestone level** — all phases within a milestone are owned by one worktree and executed sequentially inside it. Per-phase parallelism within a milestone is not supported.
-
----
 
 ## Step 1: Parse Arguments and Flags
 
@@ -46,7 +45,7 @@ milestoneSlug = kebab-case of milestoneName, max 40 chars.
 
 ## Step 4: Sync Mode (--sync)
 
-If `syncMode` is true, this is a sync operation on an existing worktree, not a fork.
+If `syncMode` is true, treat as sync operation on existing worktree, not a fork.
 
 ```
 IF syncMode:
@@ -81,7 +80,7 @@ wtPath = {worktreeRoot}/m{milestoneNum}-{milestoneSlug}
 
 6a: Clean up stale worktree/branch at wtPath if exists (ignore errors).
 6b: git worktree add -b {branch} {wtPath} {baseBranch}
-6c: mkdir -p {wtPath}/.workflow/scratch
+6c: mkdir -p {wtPath}/{run_dir}/outputs
 
 6d: Copy shared context → wtPath/.workflow/:
     project.md, roadmap.md, config.json (if exists), specs/ (if exists)
@@ -149,16 +148,16 @@ Display:
     cd {wtPath}
 
     # Sequential lifecycle for each phase:
-    /maestro-analyze {firstPending.phase}
-    /maestro-plan {firstPending.phase}
-    /maestro-execute {firstPending.phase}
-    /quality-review {firstPending.phase}
+    analyze {firstPending.phase}
+    plan {firstPending.phase}
+    execute {firstPending.phase}
+    review {firstPending.phase}
     # ... repeat for next phases in milestone
 
   Or delegate (automated):
     maestro delegate "run full lifecycle for milestone" --cd {wtPath} --mode write
 
-  Sync worktree with main (if needed later):
+  Sync worktree with main (REQUIRED before merge):
     /maestro-fork -m {milestoneNum} --sync
 
   When all phases in milestone complete:

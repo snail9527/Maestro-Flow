@@ -1,7 +1,5 @@
 # Monitor Pipeline
 
-Event-driven pipeline coordination. Beat model: coordinator wake -> process -> spawn -> STOP.
-
 ## Constants
 
 - SPAWN_MODE: background
@@ -64,8 +62,8 @@ Worker completed. Process and advance.
      - Parse verification feedback for specific regressions
      - Apply targeted fixes for regression issues only
    CONTEXT:
-     - Session: <session-folder>
-     - Upstream artifacts: verification/verify-report.md" })
+     - Session: {run_dir}/work/team
+     - Upstream artifacts: {run_dir}/outputs/verification/verify-report.md" })
    TaskUpdate({ taskId: "OPT-fix-<round>", owner: "optimizer" })
    ```
    Then create new VERIFY task blocked by OPT-fix. Increment gc_state.round.
@@ -116,7 +114,7 @@ Pipeline Status (<pipeline-mode>):
 
 GC Rounds: 0/2
 Score: <before-score>/32 -> pending
-Session: <session-id>
+Session: <run-id>
 Commands: 'resume' to advance | 'check' to refresh
 ```
 
@@ -152,14 +150,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <project>/.claude/skills/team-ui-polish/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: ui-polish
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -192,7 +190,12 @@ Pipeline done. Generate report and completion action.
 | full | All 4 tasks (+ any fix tasks) completed |
 
 1. If any tasks not completed -> handleSpawnNext
-2. If all completed -> transition to coordinator Phase 5
+2. Run lifecycle completion (before transitioning to Phase 5):
+   - Read run_id from `team-session.json.run.run_id`
+   - Write `{run_dir}/report.md` with frontmatter (verdict/summary/concerns)
+   - Run `maestro run complete <run_id>`
+   - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
+3. If all completed -> transition to coordinator Phase 5
 
 ## handleAdapt
 

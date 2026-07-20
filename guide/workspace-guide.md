@@ -75,6 +75,8 @@ maestro workspace unlink shared
 
 ## CLI 命令参考
 
+> **别名**：`workspace` 可简写为 `ws`，`list` 可简写为 `ls`。例如 `maestro ws ls` 等价于 `maestro workspace list`。
+
 ### `maestro workspace link <path>`
 
 关联一个 Maestro 工作空间。
@@ -183,10 +185,9 @@ Search: "error handling" (3 results)
 ```bash
 # 列出所有 domain 条目（含关联工作空间）
 maestro wiki list --type domain
-
-# 搜索关联知识
-maestro wiki search "auth pattern"
 ```
+
+> **注意**：`--workspace` 选项仅适用于 `maestro search`，不适用于 `maestro wiki list`。如需按工作空间过滤搜索结果，请使用 `maestro search "<query>" --workspace <name>`。
 
 ### Spec 注入
 

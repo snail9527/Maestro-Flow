@@ -77,7 +77,7 @@ export function BackupConfig({
               <Text color={hl ? C.primary : C.neutral}>[{i + 1}]</Text>
               <Text color={opt.value ? C.success : C.neutral}> {opt.value ? SYM.checkOn : SYM.checkOff} </Text>
               <Text color={hl ? C.primary : undefined} bold={hl}>{opt.label}</Text>
-              <Text dimColor> — {opt.desc}</Text>
+              <Text color={C.neutral}> — {opt.desc}</Text>
             </Box>
           );
         })}

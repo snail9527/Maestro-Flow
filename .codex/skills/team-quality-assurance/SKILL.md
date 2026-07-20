@@ -1,243 +1,181 @@
 ---
 name: team-quality-assurance
-description: Team QA combining issue discovery and testing
-argument-hint: "[scope] [-y|--yes] [-c|--concurrency N] [--continue] [--mode discovery|testing|full]"
-allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, request_user_input
+disable-model-invocation: true
+description: Unified team skill for quality assurance. Full closed-loop QA
+  combining issue discovery and software testing. Triggers on "team
+  quality-assurance", "team qa".
+allowed-tools:
+  - Bash
+  - Edit
+  - Glob
+  - Grep
+  - Read
+  - Write
+  - followup_task
+  - interrupt_agent
+  - list_agents
+  - mcp__maestro__team_msg
+  - request_user_input
+  - send_message
+  - spawn_agent
+  - spawn_agents_on_csv
+  - update_plan
+  - wait_agent
+session-mode: run
+version: 0.5.53
+contract:
+  discovery: self-described
+  consumes: []
+  produces: []
+  gates:
+    entry: []
+    exit: []
 ---
 
-<purpose>
-Wave-based QA pipeline via `spawn_agents_on_csv`. Progressive test coverage through scout → strategy → generate → execute → analyze cycle with GC loops for coverage convergence.
+> **Agent timeout**: `spawn_agent` 异步执行且无内置超时 — 除明确短任务外一律 `spawn_agent` 后立即 `wait_agent({ timeout_ms: 3600000 })`（上限 1 小时）阻塞等待，绝不依赖 30000 默认值；`timed_out: true` 且 Agent 未完成时再次 `wait_agent` 续等，不丢弃。批量场景使用 `spawn_agents_on_csv({ max_runtime_seconds: 3600, ... })`。
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
+
+# Team Quality Assurance
+
+Orchestrate multi-agent QA: scout -> strategist -> generator -> executor -> analyst. Supports discovery, testing, and full closed-loop modes with parallel generation and GC loops.
+
+## Architecture
 
 ```
-+-------------------------------------------------------------------+
-|                   QA CSV WAVE WORKFLOW                              |
-+-------------------------------------------------------------------+
-|  Phase 1: Mode Selection + CSV Generation                          |
-|     +-- Detect mode (discovery/testing/full)                       |
-|     +-- Build tasks.csv from pipeline definition                   |
-|                                                                     |
-|  Phase 2: Wave Execution Engine                                    |
-|     +-- Sequential waves, parallel tasks within wave               |
-|     +-- GC Loop: after QARUN wave, check coverage targets          |
-|     |   +-- Coverage < target → add QAGEN+QARUN waves (max 3)     |
-|     +-- discoveries.ndjson shared across waves                     |
-|                                                                     |
-|  Phase 3: Results Aggregation                                      |
-+-------------------------------------------------------------------+
-```
-</purpose>
-
-<context>
-```bash
-$team-quality-assurance "src/auth module"
-$team-quality-assurance -y --mode testing "src/payments"
-$team-quality-assurance --continue "20260518-qa-auth"
+spawn_agent({ task_name: "team_quality_assurance", message: "Execute skill team-quality-assurance, args: task description" })
+                    |
+         SKILL.md (this file) = Router
+                    |
+     +--------------+--------------+
+     |                             |
+  no --role flag              --role <name>
+     |                             |
+  Coordinator                  Worker
+  roles/coordinator/role.md    roles/<name>/role.md
+     |
+     +-- analyze -> dispatch -> spawn workers -> STOP
+                                    |
+                    +-------+-------+-------+-------+-------+
+                    v       v       v       v       v
+                 [scout] [strat] [gen] [exec] [analyst]
+                 team-worker agents, each loads roles/<role>/role.md
 ```
 
-**Flags**: `-y` (auto), `-c N` (concurrency, default 3), `--continue` (resume), `--mode discovery|testing|full`
+## Role Registry
 
-### Role Registry (Fixed)
+| Role | Path | Prefix | Inner Loop |
+|------|------|--------|------------|
+| coordinator | [roles/coordinator/role.md](roles/coordinator/role.md) | — | — |
+| scout | [roles/scout/role.md](roles/scout/role.md) | SCOUT-* | false |
+| strategist | [roles/strategist/role.md](roles/strategist/role.md) | QASTRAT-* | false |
+| generator | [roles/generator/role.md](roles/generator/role.md) | QAGEN-* | false |
+| executor | [roles/executor/role.md](roles/executor/role.md) | QARUN-* | true |
+| analyst | [roles/analyst/role.md](roles/analyst/role.md) | QAANA-* | false |
 
-| Role | Path | Prefix |
-|------|------|--------|
-| scout | [roles/scout/role.md](roles/scout/role.md) | SCOUT-* |
-| strategist | [roles/strategist/role.md](roles/strategist/role.md) | QASTRAT-* |
-| generator | [roles/generator/role.md](roles/generator/role.md) | QAGEN-* |
-| executor | [roles/executor/role.md](roles/executor/role.md) | QARUN-* |
-| analyst | [roles/analyst/role.md](roles/analyst/role.md) | QAANA-* |
+## Role Router
 
-**Session**: `.workflow/.csv-wave/{YYYYMMDD}-qa-{slug}/`
-**Output**: tasks.csv, results.csv, discoveries.ndjson, context.md
+Parse `$ARGUMENTS`:
+- Has `--role <name>` -> Read `roles/<name>/role.md`, execute Phase 2-4
+- No `--role` -> `@roles/coordinator/role.md`, execute entry router
 
-### Scan Perspectives (scout)
-bug, security, test-coverage, code-quality, ux
-</context>
+## Shared Constants
 
-<csv_schema>
+- **Session prefix**: `QA`
+- **Session path**: `{run_dir}/work/team/`
+- **Team name**: `quality-assurance`
+- **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 
-### tasks.csv (Input columns)
+## Worker Spawn Template
 
-```csv
-id,title,description,role,test_layer,deps,context_from,wave
-```
-
-| Column | Description |
-|--------|-------------|
-| `id` | Task ID: `{PREFIX}-{NNN}` or `{PREFIX}-L{layer}-{NNN}` |
-| `title` | Short task title |
-| `description` | PURPOSE/TASK/EXPECTED/CONSTRAINTS |
-| `role` | Fixed role name |
-| `test_layer` | L1/L2/L3 or empty |
-| `deps` | Semicolon-separated dependency IDs |
-| `context_from` | Semicolon-separated context source IDs |
-| `wave` | Wave number |
-
-**Output columns** (via `output_schema` only):
-
-| Column | Description |
-|--------|-------------|
-| `result_status` | completed / failed / blocked |
-| `findings` | Key findings (max 500 chars) |
-| `files_modified` | Semicolon-separated paths |
-| `coverage_score` | Test coverage % (0-100, for QARUN tasks) |
-| `error` | Error message |
-
-**Column separation rule**: Input and Output MUST NOT share names.
-
-### Pipeline Wave Assignments
-
-#### discovery (5 waves, serial)
-
-| Wave | Task | Role |
-|------|------|------|
-| 1 | SCOUT-001 | scout |
-| 2 | QASTRAT-001 | strategist |
-| 3 | QAGEN-001 | generator |
-| 4 | QARUN-001 | executor |
-| 5 | QAANA-001 | analyst |
-
-#### testing (6+ waves, GC loops)
-
-| Wave | Task | Role |
-|------|------|------|
-| 1 | QASTRAT-001 | strategist |
-| 2 | QAGEN-L1-001 | generator |
-| 3 | QARUN-L1-001 | executor |
-| 4+ | GC: QAGEN-L2 + QARUN-L2 if coverage < target | generator, executor |
-| N | QAANA-001 | analyst |
-
-#### full (8+ waves, parallel + GC)
-
-| Wave | Task | Role |
-|------|------|------|
-| 1 | SCOUT-001 | scout |
-| 2 | QASTRAT-001 | strategist |
-| 3 | QAGEN-L1-001; QAGEN-L2-001 | generator (parallel) |
-| 4 | QARUN-L1-001; QARUN-L2-001 | executor (parallel) |
-| 5+ | GC loops if coverage < target | generator, executor |
-| N-1 | QAANA-001 | analyst |
-| N | SCOUT-002 | scout (regression) |
-
-**Coverage Targets**: L1≥80%, L2≥60%, L3≥40%. **Max GC Rounds**: 3 per layer.
-</csv_schema>
-
-<invariants>
-1. **Wave Order Sacred**: Sequential wave execution
-2. **CSV Source of Truth**: Master tasks.csv
-3. **Column Separation Rule**: Input ≠ Output column names
-4. **GC Loop Max 3**: Per-layer generator-executor rounds
-5. **Coverage Targets**: L1≥80%, L2≥60%, L3≥40%
-6. **Discovery Board Append-Only**
-7. **Cleanup Temp Files**: Both wave-N.csv and wave-N-results.csv
-8. **DO NOT STOP**: Continuous until complete
-9. **Role Files Authoritative**: Agents read roles/{role}/role.md
-</invariants>
-
-<state_machine>
-
-<states>
-S_PARSE      — Parse arguments, detect mode
-S_CSV_GEN    — Generate tasks.csv
-S_WAVE_{N}   — Execute wave N
-S_GC_CHECK   — Coverage check after QARUN wave
-S_AGGREGATE  — Generate report
-</states>
-
-<transitions>
-S_PARSE → S_CSV_GEN
-S_CSV_GEN → S_WAVE_1
-S_WAVE_{N} → S_GC_CHECK      WHEN: wave was QARUN
-S_WAVE_{N} → S_WAVE_{N+1}    WHEN: not GC-eligible
-S_GC_CHECK → S_WAVE_{N+1}    WHEN: coverage >= target (converged)
-S_GC_CHECK → S_WAVE_{N+1}    WHEN: coverage < target, gc_rounds < 3 (add QAGEN+QARUN rows)
-S_GC_CHECK → S_WAVE_{N+1}    WHEN: gc_rounds >= 3 (proceed with warning)
-S_WAVE_{N} → S_AGGREGATE     WHEN: last wave
-</transitions>
-
-<actions>
-
-### GC Loop
-
-After each QARUN wave:
-1. Read `coverage_score` from results
-2. coverage >= target → continue
-3. coverage < target AND gc_rounds < 3 → add QAGEN+QARUN rows, increment wave, continue
-4. gc_rounds >= 3 → proceed with warning
-
-### Instruction Builder
+Coordinator spawns workers using this template:
 
 ```
-You are a team-quality-assurance agent.
-Role: read 'role' column. Task: read 'description' column.
+spawn_agent({
+  subagent_type: "team-worker",
+  description: "Spawn <role> worker",
+  team_name: "quality-assurance",
+  name: "<role>",
+  run_in_background: true,
+  prompt: `## Role Assignment
+role: <role>
+role_spec: <skill_root>/roles/<role>/role.md
+session: {run_dir}/work/team
+session_id: <run-id>
+team_name: quality-assurance
+requirement: <task-description>
+inner_loop: <true|false>
 
-## Role Definition
-Read: {skillRoot}/roles/{role}/role.md
+## Progress Milestones
+session_id: <run-id>
+Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
+Report blockers immediately via team_msg type="blocker".
+Report completion via team_msg type="task_complete" after final send_message.
 
-## Context
-Session: {sessionFolder}
-Discovery board: {sessionFolder}/discoveries.ndjson
-Previous context: 'prev_context' column
-
-## Termination Contract (MANDATORY)
-You MUST call report_agent_job_result EXACTLY ONCE before exiting. NO exceptions.
-- Success → result_status=completed
-- Failure → result_status=failed with error message
-- Blocked → result_status=blocked when upstream missing
-- Timeout → near max_runtime_seconds → result_status=blocked, error="timeout"
-- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
-
-## Output (must match output_schema)
-{
-  "id": "<your CSV row id>",
-  "result_status": "completed" | "failed" | "blocked",
-  "findings": "<key findings, max 500 chars>",
-  "files_modified": "<semicolon-separated paths or empty>",
-  "coverage_score": "<0-100 or empty>" (QARUN only),
-  "error": "<message if not completed>"
-}
-
-## Hard Constraints
-- Do NOT write to tasks.csv, wave-*.csv, results.csv (orchestrator owns those).
-- Do NOT call spawn_agents_on_csv (no recursion).
+Read role_spec file (@<skill_root>/roles/<role>/role.md) to load Phase 2-4 domain instructions.
+Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 (report).`
+})
 ```
 
-### Spawn output_schema
+## User Commands
 
-```json
-{
-  "type": "object",
-  "properties": {
-    "id":             { "type": "string" },
-    "result_status":  { "type": "string", "enum": ["completed", "failed", "blocked"] },
-    "findings":       { "type": "string", "maxLength": 500 },
-    "files_modified": { "type": "string" },
-    "coverage_score": { "type": "string" },
-    "error":          { "type": "string" }
-  },
-  "required": ["id", "result_status", "findings"]
-}
+| Command | Action |
+|---------|--------|
+| `check` / `status` | View pipeline status graph |
+| `resume` / `continue` | Advance to next step |
+| `--mode=discovery` | Force discovery mode |
+| `--mode=testing` | Force testing mode |
+| `--mode=full` | Force full QA mode |
+
+## Completion Action
+
+When pipeline completes, coordinator presents:
+
+```
+request_user_input({
+  questions: [{
+    question: "Quality Assurance pipeline complete. What would you like to do?",
+    header: "Completion",
+    multiSelect: false,
+    options: [
+      { label: "Archive & Clean (Recommended)", description: "Archive session, clean up team" },
+      { label: "Keep Active", description: "Keep session for follow-up work" },
+      { label: "Export Results", description: "Export deliverables to target directory" }
+    ]
+  }]
+})
 ```
 
-Merge maps `result_status` → master `status`.
+## Session Directory
 
-</actions>
-</state_machine>
+```
+{run_dir}/work/team/
+├── .msg/messages.jsonl     # Team message bus
+├── .msg/meta.json          # Session state + shared memory
+├── wisdom/                 # Cross-task knowledge
+├── {run_dir}/outputs/scan/                   # Scout output
+├── {run_dir}/outputs/strategy/               # Strategist output
+├── {run_dir}/outputs/tests/                  # Generator output (L1/, L2/, L3/)
+├── {run_dir}/outputs/results/                # Executor output
+└── {run_dir}/outputs/analysis/               # Analyst output
+```
 
-<error_codes>
+## Specs Reference
 
-| Condition | Recovery |
-|-----------|----------|
-| Scout found 0 issues | Skip to analyst, report clean |
-| Coverage never converges | After 3 GC rounds, proceed with warning |
-| Generator produces 0 tests | Mark blocked, skip executor |
-</error_codes>
+- [specs/pipelines.md](specs/pipelines.md) — Pipeline definitions and task registry
+- [specs/team-config.json](specs/team-config.json) — Team configuration and shared memory schema
 
-<success_criteria>
-- [ ] Mode selected and CSV generated
-- [ ] Waves executed via spawn_agents_on_csv
-- [ ] GC loops converge or hit max 3
-- [ ] Coverage tracked per layer
-- [ ] Column separation maintained
-- [ ] Temp files cleaned
-- [ ] results.csv and context.md generated
-</success_criteria>
+## Error Handling
+
+| Scenario | Resolution |
+|----------|------------|
+| Unknown --role value | Error with available role list |
+| Role not found | Error with expected path (roles/<name>/role.md) |
+| CLI tool fails | Worker fallback to direct implementation |
+| Scout finds no issues | Report clean scan, skip to testing mode |
+| GC loop exceeded | Accept current coverage with warning |
+| Fast-advance conflict | Coordinator reconciles on next callback |
+| Completion action fails | Default to Keep Active |

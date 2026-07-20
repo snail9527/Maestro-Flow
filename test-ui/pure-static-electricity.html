@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>静电互动 - 纯HTML/CSS/JS</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      cursor: none;
+    }
+    #instructions {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,0.5);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      pointer-events: none;
+      z-index: 10;
+      text-align: center;
+      letter-spacing: 0.5px;
+    }
+    #fps {
+      position: fixed;
+      top: 10px;
+      right: 14px;
+      color: rgba(255,255,255,0.3);
+      font-family: monospace;
+      font-size: 11px;
+      pointer-events: none;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="instructions">移动鼠标吸引带电粒子 · 接近时产生电弧放电</div>
+  <div id="fps"></div>
+
+<script>
+// ===== 配置 =====
+const CONFIG = {
+  PARTICLE_COUNT: 220,
+  MOUSE_RADIUS: 260,
+  ATTRACT_FORCE: 0.0048,
+  ORBIT_STRENGTH: 0.0008,
+  RETURN_FORCE: 0.008,
+  FRICTION: 0.982,
+  DRIFT_SPEED: 0.18,
+  PARTICLE_MIN_R: 1.8,
+  PARTICLE_MAX_R: 4.0,
+  SPARK_TRIGGER_DIST: 110,
+  SPARK_BURST_COUNT: 7,
+  SPARK_LIFETIME: 28,
+  SPARK_SPEED: 3.5,
+  CHARGE_LINE_COUNT: 8,
+  CHARGE_LINE_MAX: 14,
+  FIELD_LINE_COUNT: 10,
+  FIELD_LINE_SEGMENTS: 18,
+};
+
+// ===== 画布初始化 =====
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const fpsEl = document.getElementById('fps');
+let W, H;
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ===== 鼠标状态 =====
+const mouse = { x: W / 2, y: H / 2, active: false, vx: 0, vy: 0, prevX: W / 2, prevY: H / 2 };
+window.addEventListener('mousemove', e => {
+  mouse.prevX = mouse.x;
+  mouse.prevY = mouse.y;
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+  mouse.vx = mouse.x - mouse.prevX;
+  mouse.vy = mouse.y - mouse.prevY;
+  mouse.active = true;
+});
+window.addEventListener('mouseleave', () => { mouse.active = false; });
+window.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  mouse.prevX = mouse.x;
+  mouse.prevY = mouse.y;
+  mouse.x = t.clientX;
+  mouse.y = t.clientY;
+  mouse.vx = mouse.x - mouse.prevX;
+  mouse.vy = mouse.y - mouse.prevY;
+  mouse.active = true;
+}, { passive: false });
+window.addEventListener('touchend', () => { mouse.active = false; });
+
+// ===== 随机工具 =====
+const rand = (a, b) => a + Math.random() * (b - a);
+const randInt = (a, b) => Math.floor(rand(a, b + 1));
+const dist = (x1, y1, x2, y2) => Math.hypot(x2 - x1, y2 - y1);
+
+// ===== 粒子（带电体/阴极）=====
+class Particle {
+  constructor() {
+    this.reset();
+    // 初始随机散布
+    this.x = rand(0, W);
+    this.y = rand(0, H);
+    this.homeX = this.x;
+    this.homeY = this.y;
+  }
+
+  reset() {
+    this.homeX = rand(W * 0.08, W * 0.92);
+    this.homeY = rand(H * 0.08, H * 0.92);
+    this.x = this.homeX + rand(-60, 60);
+    this.y = this.homeY + rand(-60, 60);
+    this.vx = 0;
+    this.vy = 0;
+    this.r = rand(CONFIG.PARTICLE_MIN_R, CONFIG.PARTICLE_MAX_R);
+    this.charge = Math.random() < 0.35 ? -1 : 1; // 多数正电荷，少数负
+    this.phase = rand(0, Math.PI * 2);
+    this.brightness = rand(0.5, 1);
+    this.orbitAngle = rand(0, Math.PI * 2);
+    this.orbitRadius = rand(18, 55);
+  }
+
+  update(time) {
+    const driftX = Math.sin(time * 0.0005 + this.phase) * CONFIG.DRIFT_SPEED;
+    const driftY = Math.cos(time * 0.0004 + this.phase * 0.7) * CONFIG.DRIFT_SPEED;
+
+    if (mouse.active) {
+      const dx = mouse.x - this.x;
+      const dy = mouse.y - this.y;
+      const d = Math.hypot(dx, dy);
+
+      if (d < CONFIG.MOUSE_RADIUS) {
+        const t = 1 - d / CONFIG.MOUSE_RADIUS;
+        const falloff = t * t; // 平方衰减
+
+        // 吸引力
+        const attract = falloff * CONFIG.ATTRACT_FORCE;
+        this.vx += dx * attract;
+        this.vy += dy * attract;
+
+        // 轨道运动（垂直于连线方向）
+        const orbitFactor = falloff * CONFIG.ORBIT_STRENGTH;
+        this.vx += -dy * orbitFactor;
+        this.vy += dx * orbitFactor;
+        this.orbitAngle += 0.05;
+      }
+    }
+
+    // 回归力
+    this.vx += (this.homeX - this.x) * CONFIG.RETURN_FORCE;
+    this.vy += (this.homeY - this.y) * CONFIG.RETURN_FORCE;
+
+    // 漂移
+    this.vx += driftX * 0.08;
+    this.vy += driftY * 0.08;
+
+    // 摩擦
+    this.vx *= CONFIG.FRICTION;
+    this.vy *= CONFIG.FRICTION;
+
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
+  draw(ctx, time) {
+    const pulse = Math.sin(time * 0.003 + this.phase) * 0.2 + 0.8;
+    const alpha = this.brightness * pulse;
+
+    // 外发光
+    const glowR = this.r * 5;
+    const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, glowR);
+    grad.addColorStop(0, `rgba(120, 180, 255, ${alpha * 0.5})`);
+    grad.addColorStop(0.3, `rgba(80, 140, 255, ${alpha * 0.2})`);
+    grad.addColorStop(1, 'rgba(40, 80, 200, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, glowR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 核心
+    const coreGrad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.r);
+    coreGrad.addColorStop(0, `rgba(220, 240, 255, ${alpha})`);
+    coreGrad.addColorStop(0.5, `rgba(140, 200, 255, ${alpha * 0.9})`);
+    coreGrad.addColorStop(1, `rgba(80, 140, 255, ${alpha * 0.4})`);
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ===== 电弧/火花 =====
+class Spark {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    const angle = rand(0, Math.PI * 2);
+    const speed = rand(1, CONFIG.SPARK_SPEED);
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    this.life = CONFIG.SPARK_LIFETIME;
+    this.maxLife = this.life;
+    this.r = rand(0.8, 2.2);
+  }
+
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vx *= 0.96;
+    this.vy *= 0.96;
+    this.vy += 0.03; // 微弱重力
+    this.life--;
+    return this.life > 0;
+  }
+
+  draw(ctx) {
+    const t = this.life / this.maxLife;
+    const alpha = t * t;
+    ctx.fillStyle = `rgba(180, 220, 255, ${alpha})`;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r * t, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ===== 电弧线 =====
+class ArcLine {
+  constructor(x1, y1, x2, y2) {
+    this.points = this._generateArc(x1, y1, x2, y2);
+    this.life = randInt(4, 10);
+    this.maxLife = this.life;
+    this.width = rand(0.8, 2.0);
+  }
+
+  _generateArc(x1, y1, x2, y2) {
+    const segments = randInt(5, 10);
+    const points = [];
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    const perpX = -dy / (len || 1);
+    const perpY = dx / (len || 1);
+
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const jitter = (i > 0 && i < segments) ? rand(-1, 1) * Math.min(len * 0.15, 30) : 0;
+      points.push({
+        x: x1 + dx * t + perpX * jitter,
+        y: y1 + dy * t + perpY * jitter,
+      });
+    }
+    return points;
+  }
+
+  update() {
+    this.life--;
+    // 微弱抖动
+    for (let i = 1; i < this.points.length - 1; i++) {
+      this.points[i].x += rand(-1.5, 1.5);
+      this.points[i].y += rand(-1.5, 1.5);
+    }
+    return this.life > 0;
+  }
+
+  draw(ctx) {
+    const t = this.life / this.maxLife;
+    const alpha = t;
+
+    // 外发光
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = `rgba(60, 120, 255, ${alpha * 0.3})`;
+    ctx.lineWidth = this.width * 6;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) {
+      ctx.lineTo(this.points[i].x, this.points[i].y);
+    }
+    ctx.stroke();
+
+    // 内核
+    ctx.strokeStyle = `rgba(200, 230, 255, ${alpha * 0.9})`;
+    ctx.lineWidth = this.width;
+    ctx.beginPath();
+    ctx.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) {
+      ctx.lineTo(this.points[i].x, this.points[i].y);
+    }
+    ctx.stroke();
+
+    // 核心白线
+    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.7})`;
+    ctx.lineWidth = this.width * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) {
+      ctx.lineTo(this.points[i].x, this.points[i].y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ===== 电荷转移线（静电感应线）=====
+class ChargeLine {
+  constructor(particle) {
+    this.particle = particle;
+    this.offsetAngle = rand(0, Math.PI * 2);
+    this.length = rand(20, 50);
+    this.phase = rand(0, Math.PI * 2);
+    this.speed = rand(0.02, 0.06);
+  }
+
+  draw(ctx, time) {
+    const pulse = Math.sin(time * this.speed + this.phase) * 0.3 + 0.7;
+    const angle = this.offsetAngle + time * 0.001;
+    const x1 = this.particle.x;
+    const y1 = this.particle.y;
+    const x2 = x1 + Math.cos(angle) * this.length * pulse;
+    const y2 = y1 + Math.sin(angle) * this.length * pulse;
+
+    const alpha = 0.15 * pulse * this.particle.brightness;
+    ctx.strokeStyle = `rgba(100, 160, 255, ${alpha})`;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+}
+
+// ===== 电场线（鼠标到粒子）=====
+function drawFieldLines(ctx, time) {
+  if (!mouse.active) return;
+
+  const nearby = particles
+    .map(p => ({ p, d: dist(mouse.x, mouse.y, p.x, p.y) }))
+    .filter(o => o.d < CONFIG.MOUSE_RADIUS * 0.8)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, CONFIG.FIELD_LINE_COUNT);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+
+  for (const { p, d } of nearby) {
+    const t = 1 - d / (CONFIG.MOUSE_RADIUS * 0.8);
+    const alpha = t * t * 0.12;
+    const segments = CONFIG.FIELD_LINE_SEGMENTS;
+
+    // 曲线电场线
+    const midX = (mouse.x + p.x) / 2 + rand(-20, 20);
+    const midY = (mouse.y + p.y) / 2 + rand(-20, 20);
+
+    ctx.strokeStyle = `rgba(80, 150, 255, ${alpha})`;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(mouse.x, mouse.y);
+    ctx.quadraticCurveTo(midX, midY, p.x, p.y);
+    ctx.stroke();
+
+    // 流动粒子效果
+    const flowT = (time * 0.002 + p.phase) % 1;
+    const fx = mouse.x + (p.x - mouse.x) * flowT + (midX - (mouse.x + p.x) / 2) * 4 * flowT * (1 - flowT);
+    const fy = mouse.y + (p.y - mouse.y) * flowT + (midY - (mouse.y + p.y) / 2) * 4 * flowT * (1 - flowT);
+
+    ctx.fillStyle = `rgba(150, 200, 255, ${alpha * 2})`;
+    ctx.beginPath();
+    ctx.arc(fx, fy, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ===== 光环/电晕效果（鼠标位置）=====
+function drawCorona(ctx, time) {
+  if (!mouse.active) return;
+
+  const pulse = Math.sin(time * 0.004) * 0.15 + 0.85;
+  const speed = Math.hypot(mouse.vx || 0, mouse.vy || 0);
+  const dynamicR = 35 + Math.min(speed * 2, 30);
+
+  // 外层光晕
+  const grad1 = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, dynamicR * 2.5);
+  grad1.addColorStop(0, `rgba(100, 170, 255, ${0.12 * pulse})`);
+  grad1.addColorStop(0.4, `rgba(60, 120, 255, ${0.06 * pulse})`);
+  grad1.addColorStop(1, 'rgba(40, 80, 200, 0)');
+  ctx.fillStyle = grad1;
+  ctx.beginPath();
+  ctx.arc(mouse.x, mouse.y, dynamicR * 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 内层光晕
+  const grad2 = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, dynamicR);
+  grad2.addColorStop(0, `rgba(200, 230, 255, ${0.3 * pulse})`);
+  grad2.addColorStop(0.5, `rgba(140, 200, 255, ${0.15 * pulse})`);
+  grad2.addColorStop(1, 'rgba(80, 140, 255, 0)');
+  ctx.fillStyle = grad2;
+  ctx.beginPath();
+  ctx.arc(mouse.x, mouse.y, dynamicR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 核心光点
+  ctx.fillStyle = `rgba(255, 255, 255, ${0.7 * pulse})`;
+  ctx.beginPath();
+  ctx.arc(mouse.x, mouse.y, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ===== 背景辐射效果 =====
+function drawBackgroundGlow(ctx, time) {
+  // 暗色中心辐射
+  const grad = ctx.createRadialGradient(
+    W / 2 + Math.sin(time * 0.0003) * 50,
+    H / 2 + Math.cos(time * 0.0004) * 30,
+    0,
+    W / 2, H / 2,
+    Math.max(W, H) * 0.6
+  );
+  grad.addColorStop(0, 'rgba(15, 25, 50, 0.08)');
+  grad.addColorStop(0.5, 'rgba(8, 15, 35, 0.04)');
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ===== 初始化实例 =====
+const particles = Array.from({ length: CONFIG.PARTICLE_COUNT }, () => new Particle());
+const sparks = [];
+const arcLines = [];
+const chargeLines = [];
+
+// 为每个粒子分配静电感应线
+for (const p of particles) {
+  const count = randInt(0, 2);
+  for (let i = 0; i < count; i++) {
+    chargeLines.push(new ChargeLine(p));
+  }
+}
+
+let lastSparkTime = 0;
+let frameCount = 0;
+let lastFpsTime = performance.now();
+let currentFps = 60;
+
+// ===== 主循环 =====
+function animate(time) {
+  requestAnimationFrame(animate);
+
+  // FPS 计算
+  frameCount++;
+  if (time - lastFpsTime > 500) {
+    currentFps = Math.round(frameCount / ((time - lastFpsTime) / 1000));
+    fpsEl.textContent = `${currentFps} FPS | ${particles.length} particles`;
+    lastFpsTime = time;
+    frameCount = 0;
+  }
+
+  // 清除（带残影）
+  ctx.fillStyle = 'rgba(4, 6, 15, 0.25)';
+  ctx.fillRect(0, 0, W, H);
+
+  drawBackgroundGlow(ctx, time);
+
+  // 更新粒子
+  for (const p of particles) {
+    p.update(time);
+  }
+
+  // 电场线
+  drawFieldLines(ctx, time);
+
+  // 静电感应线
+  for (const cl of chargeLines) {
+    cl.draw(ctx, time);
+  }
+
+  // 绘制粒子
+  for (const p of particles) {
+    p.draw(ctx, time);
+  }
+
+  // 检测放电
+  if (mouse.active && time - lastSparkTime > 60) {
+    const nearby = particles
+      .map(p => ({ p, d: dist(mouse.x, mouse.y, p.x, p.y) }))
+      .filter(o => o.d < CONFIG.SPARK_TRIGGER_DIST)
+      .sort((a, b) => a.d - b.d);
+
+    if (nearby.length > 0) {
+      const target = nearby[0];
+      lastSparkTime = time;
+
+      // 电弧线
+      const arcCount = randInt(1, 3);
+      for (let i = 0; i < arcCount; i++) {
+        arcLines.push(new ArcLine(mouse.x, mouse.y, target.p.x + rand(-8, 8), target.p.y + rand(-8, 8)));
+      }
+
+      // 火花爆发
+      const burstX = (mouse.x + target.p.x) / 2;
+      const burstY = (mouse.y + target.p.y) / 2;
+      for (let i = 0; i < CONFIG.SPARK_BURST_COUNT; i++) {
+        sparks.push(new Spark(burstX, burstY));
+      }
+
+      // 给目标粒子一个冲击力
+      const angle = Math.atan2(target.p.y - mouse.y, target.p.x - mouse.x);
+      target.p.vx += Math.cos(angle) * 3;
+      target.p.vy += Math.sin(angle) * 3;
+    }
+  }
+
+  // 更新&绘制电弧
+  for (let i = arcLines.length - 1; i >= 0; i--) {
+    if (!arcLines[i].update()) {
+      arcLines.splice(i, 1);
+    } else {
+      arcLines[i].draw(ctx);
+    }
+  }
+
+  // 更新&绘制火花
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    if (!sparks[i].update()) {
+      sparks.splice(i, 1);
+    } else {
+      sparks[i].draw(ctx);
+    }
+  }
+
+  // 光标光晕
+  drawCorona(ctx, time);
+}
+
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

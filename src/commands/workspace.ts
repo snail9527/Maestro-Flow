@@ -20,7 +20,8 @@ import {
 } from '../config/index.js';
 import type { WorkspaceShareType } from '../types/index.js';
 
-const VALID_SHARE_TYPES: WorkspaceShareType[] = ['spec', 'knowhow', 'domain', 'codebase'];
+type ExplicitWorkspaceShareType = WorkspaceShareType | 'session';
+const VALID_SHARE_TYPES: ExplicitWorkspaceShareType[] = ['spec', 'knowhow', 'domain', 'codebase', 'session'];
 
 // ---------------------------------------------------------------------------
 // link
@@ -57,7 +58,7 @@ function runLink(targetPath: string, opts: { name?: string; share?: string }): v
     process.exit(1);
   }
 
-  config.linked.push({ name, path: targetPath, share: shareTypes });
+  config.linked.push({ name, path: targetPath, share: shareTypes as WorkspaceShareType[] });
   saveWorkspaceConfig(projectPath, config);
 
   console.log(`Linked workspace "${name}"`);
@@ -172,15 +173,15 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseShareTypes(input: string): WorkspaceShareType[] {
+function parseShareTypes(input: string): ExplicitWorkspaceShareType[] {
   const parts = input.split(',').map(s => s.trim()).filter(Boolean);
-  const result: WorkspaceShareType[] = [];
+  const result: ExplicitWorkspaceShareType[] = [];
   for (const p of parts) {
-    if (!VALID_SHARE_TYPES.includes(p as WorkspaceShareType)) {
+    if (!VALID_SHARE_TYPES.includes(p as ExplicitWorkspaceShareType)) {
       console.error(`Error: invalid share type "${p}". Valid: ${VALID_SHARE_TYPES.join(', ')}`);
       process.exit(1);
     }
-    result.push(p as WorkspaceShareType);
+    result.push(p as ExplicitWorkspaceShareType);
   }
   if (result.length === 0) {
     console.error('Error: at least one share type is required.');
@@ -203,14 +204,27 @@ function countEntries(workflowRoot: string, shareType: string): number {
         return countMdRecursive(dir);
       }
       case 'domain': {
-        const glossary = join(workflowRoot, 'domain', 'glossary.json');
-        if (!existsSync(glossary)) return 0;
-        const raw = JSON.parse(readFileSync(glossary, 'utf-8'));
+        const glossaryYaml = join(workflowRoot, 'domain', 'glossary.yaml');
+        const glossaryJson = join(workflowRoot, 'domain', 'glossary.json');
+        const glossary = existsSync(glossaryYaml) ? glossaryYaml : existsSync(glossaryJson) ? glossaryJson : null;
+        if (!glossary) return 0;
+        const content = readFileSync(glossary, 'utf-8');
+        const YAML = require('yaml');
+        const raw = glossary.endsWith('.yaml')
+          ? YAML.parse(content)
+          : JSON.parse(content);
         return Array.isArray(raw.terms) ? raw.terms.length : 0;
       }
       case 'codebase': {
         const docIdx = join(workflowRoot, 'codebase', 'doc-index.json');
         return existsSync(docIdx) ? 1 : 0;
+      }
+      case 'session': {
+        const dir = join(workflowRoot, 'sessions');
+        if (!existsSync(dir)) return 0;
+        return readdirSync(dir, { withFileTypes: true })
+          .filter(entry => entry.isDirectory() && existsSync(join(dir, entry.name, 'session.json')))
+          .length;
       }
       default:
         return 0;
@@ -249,7 +263,7 @@ export function registerWorkspaceCommand(program: Command): void {
   ws.command('link <path>')
     .description('Link another Maestro workspace for knowledge sharing')
     .option('--name <name>', 'Workspace name (defaults to directory basename)')
-    .option('--share <types>', 'Comma-separated share types: spec,knowhow,domain,codebase', 'spec,knowhow,domain')
+    .option('--share <types>', 'Comma-separated share types: spec,knowhow,domain,codebase,session', 'spec,knowhow,domain')
     .action((path: string, opts) => runLink(path, opts));
 
   ws.command('unlink <name>')

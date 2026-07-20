@@ -1,0 +1,209 @@
+{
+  "version": "v2",
+  "categories": [
+    {
+      "id": "maestro",
+      "name": "Maestro",
+      "description": "Intelligent coordinator and core workflow commands — init, route, execute, verify, and lifecycle management",
+      "icon": "cpu",
+      "color": "orange"
+    },
+    {
+      "id": "spec",
+      "name": "Specification",
+      "description": "Project specs and conventions — add, load, remove entries via unified /maestro-spec command",
+      "icon": "file-text",
+      "color": "blue"
+    },
+    {
+      "id": "quality",
+      "name": "Quality",
+      "description": "Tech debt reduction and security auditing",
+      "icon": "check-circle",
+      "color": "green"
+    },
+    {
+      "id": "manage",
+      "name": "Management",
+      "description": "Project status, issues, knowledge stores, drift/rebuild sync — unified /maestro-manage command",
+      "icon": "settings",
+      "color": "gray"
+    },
+    {
+      "id": "team",
+      "name": "Team Skills",
+      "description": "Multi-agent team collaboration skills for orchestrated parallel workflows",
+      "icon": "users",
+      "color": "indigo"
+    },
+    {
+      "id": "odyssey",
+      "name": "Odyssey",
+      "description": "Long-running iterative cycles — one entry, five modes (debug|improve|planex|review|ui)",
+      "icon": "mountain",
+      "color": "rose"
+    },
+    {
+      "id": "learn",
+      "name": "Learning",
+      "description": "Guided reading, investigation, pattern extraction, and second opinions — unified /maestro-learn command",
+      "icon": "book-open",
+      "color": "purple"
+    },
+    {
+      "id": "wiki",
+      "name": "Wiki",
+      "description": "Knowledge graph management, connection discovery, and digest generation",
+      "icon": "network",
+      "color": "teal"
+    },
+    {
+      "id": "scholar",
+      "name": "Scholar Skills",
+      "description": "Academic writing & research skills — paper writing, citation verification, experiment analysis, and rebuttal",
+      "icon": "graduation-cap",
+      "color": "amber"
+    },
+    {
+      "id": "meta",
+      "name": "Meta Skills",
+      "description": "Skill tooling and prompt engineering — create, simplify, tune skills, generate prompts, and check delegation contracts",
+      "icon": "wrench",
+      "color": "cyan"
+    }
+  ],
+  "commands": [
+    {
+      "name": "maestro",
+      "file": ".claude/commands/maestro.md",
+      "category": "maestro",
+      "description": "Auto-route intent to optimal command chain — default multi-step closed-loop orchestration; stepwise interactive execution via /maestro-next",
+      "argumentHint": "<intent> [-y] [-c] [--dry-run] [--super]"
+    },
+    {
+      "name": "maestro-init",
+      "file": ".claude/commands/maestro-init.md",
+      "category": "maestro",
+      "description": "Initialize project with auto state detection — creates .workflow/ directory structure",
+      "argumentHint": "[-y] [--from <source>] [--from-brainstorm SESSION-ID]"
+    },
+    {
+      "name": "maestro-ralph",
+      "file": ".claude/commands/maestro-ralph.md",
+      "category": "maestro",
+      "description": "Adaptive lifecycle orchestrator — compose, dispatch ralph-executor agent, evaluate decision, loop",
+      "argumentHint": "<intent>|status|continue [-y] [--amend] [--roadmap]"
+    },
+    {
+      "name": "maestro-next",
+      "file": ".claude/commands/maestro-next.md",
+      "category": "maestro",
+      "description": "Default interactive entry for development intents — recommend and execute one atomic step; multi-step work builds a user-confirmed manual-engine chain, walks stepwise, or hands off to /maestro",
+      "argumentHint": "<intent>|--list|--suggest [-y] [--dry-run]"
+    },
+    {
+      "name": "maestro-companion",
+      "file": ".claude/commands/maestro-companion.md",
+      "category": "maestro",
+      "description": "Quick execution for small tasks — minimal Run lifecycle with direct execution and evidence recording",
+      "argumentHint": "<intent> [--note <text>] [--promote] [-y]"
+    },
+    {
+      "name": "maestro-impeccable",
+      "file": ".claude/commands/maestro-impeccable.md",
+      "category": "maestro",
+      "description": "Frontend UI design, audit, polish, and codification — build, redesign, improve, enhance, launch, harden",
+      "argumentHint": "build|redesign|improve|enhance|launch|harden|foundation|live [target] [--codify <path>]"
+    },
+    {
+      "name": "maestro-overlay",
+      "file": ".claude/commands/maestro-overlay.md",
+      "category": "maestro",
+      "description": "Create or edit command overlays from natural language, or auto-generate from workflow deficiency signals",
+      "argumentHint": "<intent> | --amend [--scan] [--dry-run] [-y]"
+    },
+    {
+      "name": "maestro-fork",
+      "file": ".claude/commands/maestro-fork.md",
+      "category": "maestro",
+      "description": "Create or sync session worktree for parallel development",
+      "argumentHint": "--session <session_id> [--base <branch>] [--sync]"
+    },
+    {
+      "name": "maestro-merge",
+      "file": ".claude/commands/maestro-merge.md",
+      "category": "maestro",
+      "description": "Merge session worktree branch back to main",
+      "argumentHint": "--session <session_id> [--force] [--dry-run] [--no-cleanup] [--continue]"
+    },
+    {
+      "name": "maestro-guard",
+      "file": ".claude/commands/maestro-guard.md",
+      "category": "maestro",
+      "description": "Manage editing boundary restrictions — directory-level write boundaries",
+      "argumentHint": "on|off|status|allow|deny [path]"
+    },
+    {
+      "name": "maestro-session-seal",
+      "file": ".claude/commands/maestro-session-seal.md",
+      "category": "maestro",
+      "description": "Seal current session with knowledge extraction and DAG progression",
+      "argumentHint": "[--session <session_id>] [-y] [--skip-knowledge]"
+    },
+    {
+      "name": "maestro-update",
+      "file": ".claude/commands/maestro-update.md",
+      "category": "maestro",
+      "description": "Detect version, preview changes, apply workflow upgrades",
+      "argumentHint": "[--dry-run] [--force] [--setup-only]"
+    },
+    {
+      "name": "maestro-spec",
+      "file": ".claude/commands/maestro-spec.md",
+      "category": "spec",
+      "description": "Manage project specs — add, load, remove entries, or initialize the spec system. Unified command with subcommands.",
+      "argumentHint": "add|load|remove|setup [args...]",
+      "subcommands": ["add", "load", "remove", "setup"]
+    },
+    {
+      "name": "maestro-manage",
+      "file": ".claude/commands/maestro-manage.md",
+      "category": "manage",
+      "description": "Project management hub — status, issues, knowledge stores, and drift/rebuild sync. Unified command with subcommands.",
+      "argumentHint": "status|issue|knowledge|sync [args...]",
+      "subcommands": ["status", "issue", "knowledge", "sync"]
+    },
+    {
+      "name": "maestro-odyssey",
+      "file": ".claude/commands/maestro-odyssey.md",
+      "category": "odyssey",
+      "description": "Long-running iterative cycle — one entry, five modes. Shared archaeology/audit → fix → verify → generalize → discover → persist.",
+      "argumentHint": "<intent> --mode debug|improve|planex|review|ui [--auto] [-y] [-c]",
+      "subcommands": ["debug", "improve", "planex", "review", "ui"]
+    },
+    {
+      "name": "maestro-learn",
+      "file": ".claude/commands/maestro-learn.md",
+      "category": "learn",
+      "description": "User-invoked learning toolkit — guided reading, investigation, pattern extraction, or second opinions. Manual /maestro-learn only; auto code analysis routes via /maestro-next.",
+      "argumentHint": "follow|investigate|decompose|consult [args...]",
+      "subcommands": ["follow", "investigate", "decompose", "consult"]
+    },
+    {
+      "name": "quality-refactor",
+      "file": ".claude/commands/quality-refactor.md",
+      "category": "quality",
+      "description": "Tech debt reduction with reflection-driven iteration and systematic identification",
+      "argumentHint": "[<scope>]"
+    },
+    {
+      "name": "security-audit",
+      "file": ".claude/commands/security-audit.md",
+      "category": "quality",
+      "description": "OWASP Top 10 and STRIDE security auditing with supply chain analysis — three tiers: quick, standard, deep",
+      "argumentHint": "[quick|standard|deep] [--scope <path>]"
+    }
+  ],
+  "claude_skills": [],
+  "codex_skills": []
+}

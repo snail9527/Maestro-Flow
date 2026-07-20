@@ -1,0 +1,32 @@
+---
+title: "Maestro Flow"
+description: "AI 驱动的工作流编排框架，为开发者提供智能化的项目管理与自动化能力"
+template: splash
+hero:
+  title: Maestro Flow
+  tagline: AI 驱动的工作流编排框架
+  actions:
+    - text: 快速开始
+      link: /guides/quick-start-guide/
+      icon: right-arrow
+    - text: 命令参考
+      link: /commands/reference/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="智能编排" icon="setting">
+    通过 `/maestro` 命令自动分析意图、规划任务、分配执行，一键完成复杂工作流。
+  </Card>
+  <Card title="自适应引擎" icon="random">
+    Ralph 自适应生命周期引擎根据实时反馈动态调整执行策略，无需人工干预。
+  </Card>
+  <Card title="知识管理" icon="open-book">
+    Spec + Wiki 双层知识体系，自动捕获、索引、注入项目经验与最佳实践。
+  </Card>
+  <Card title="团队协作" icon="group">
+    多 Agent 并行执行，Wave 级依赖调度，跨工具委派（Claude / Codex / Gemini）。
+  </Card>
+</CardGrid>

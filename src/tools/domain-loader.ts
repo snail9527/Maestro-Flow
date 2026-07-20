@@ -1,8 +1,11 @@
 /**
- * Domain Loader — CRUD for .workflow/domain/glossary.json
+ * Domain Loader — CRUD for .workflow/domain/glossary.yaml
  *
  * Provides read/write operations with file locking, auto-backup, mtime cache,
  * and schema validation. All write operations go through GlossaryLock.
+ *
+ * Migration: reads glossary.json as fallback for backward compatibility,
+ * but always writes glossary.yaml.
  */
 
 import {
@@ -10,6 +13,7 @@ import {
   copyFileSync, readdirSync, unlinkSync, statSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import YAML from 'yaml';
 import { validateGlossary, validateRelationships, type ValidationError, type ValidationWarning } from './domain-schema.js';
 
 // ============================================================================
@@ -57,6 +61,10 @@ export interface GlossaryLoadResult {
 // ============================================================================
 
 function glossaryPath(workflowRoot: string): string {
+  return join(workflowRoot, 'domain', 'glossary.yaml');
+}
+
+function glossaryJsonPath(workflowRoot: string): string {
   return join(workflowRoot, 'domain', 'glossary.json');
 }
 
@@ -79,19 +87,24 @@ export class GlossaryLock {
   }
 
   acquire(): void {
-    if (existsSync(this.lockPath)) {
-      try {
-        const content = readFileSync(this.lockPath, 'utf-8').trim();
-        const pid = parseInt(content, 10);
-        const lockAge = Date.now() - statSync(this.lockPath).mtimeMs;
-        if (lockAge < STALE_TIMEOUT_MS && !isNaN(pid) && isProcessAlive(pid)) {
-          throw new Error(`glossary.json locked by PID ${pid}. Delete ${this.lockPath} if stale.`);
-        }
-      } catch (e) {
-        if ((e as Error).message.includes('locked by PID')) throw e;
-      }
-      try { unlinkSync(this.lockPath); } catch { /* already gone */ }
+    try {
+      writeFileSync(this.lockPath, String(process.pid), { flag: 'wx' });
+      this.held = true;
+      return;
+    } catch {
+      // EEXIST — lock file exists, check if stale
     }
+    try {
+      const content = readFileSync(this.lockPath, 'utf-8').trim();
+      const pid = parseInt(content, 10);
+      const lockAge = Date.now() - statSync(this.lockPath).mtimeMs;
+      if (lockAge < STALE_TIMEOUT_MS && !isNaN(pid) && isProcessAlive(pid)) {
+        throw new Error(`glossary.json locked by PID ${pid}. Delete ${this.lockPath} if stale.`);
+      }
+    } catch (e) {
+      if ((e as Error).message.includes('locked by PID')) throw e;
+    }
+    try { unlinkSync(this.lockPath); } catch { /* already gone */ }
     try {
       writeFileSync(this.lockPath, String(process.pid), { flag: 'wx' });
       this.held = true;
@@ -126,14 +139,17 @@ function isProcessAlive(pid: number): boolean {
 const MAX_BACKUPS = 10;
 
 function backupGlossary(workflowRoot: string): void {
-  const gPath = glossaryPath(workflowRoot);
-  if (!existsSync(gPath)) return;
+  const yamlPath = glossaryPath(workflowRoot);
+  const jsonPath = glossaryJsonPath(workflowRoot);
+  const gPath = existsSync(yamlPath) ? yamlPath : existsSync(jsonPath) ? jsonPath : null;
+  if (!gPath) return;
   const backupDir = join(workflowRoot, 'domain', '.backups');
   mkdirSync(backupDir, { recursive: true });
   const ts = new Date().toISOString().replace(/[:\-T]/g, '').replace(/\..+/, '');
-  copyFileSync(gPath, join(backupDir, `glossary-${ts}.json`));
+  const ext = gPath.endsWith('.yaml') ? 'yaml' : 'json';
+  copyFileSync(gPath, join(backupDir, `glossary-${ts}.${ext}`));
   const backups = readdirSync(backupDir)
-    .filter(f => f.startsWith('glossary-') && f.endsWith('.json'))
+    .filter(f => f.startsWith('glossary-'))
     .sort().reverse();
   for (const old of backups.slice(MAX_BACKUPS)) {
     try { unlinkSync(join(backupDir, old)); } catch { /* ignore */ }
@@ -148,24 +164,42 @@ const _glossaryCache = new Map<string, { mtime: number; size: number; data: Doma
 const CACHE_MAX_ENTRIES = 10;
 
 export function readGlossary(workflowRoot: string): DomainGlossary {
-  const gPath = glossaryPath(workflowRoot);
-  if (!existsSync(gPath)) return { $schema: 'domain/1.0', terms: [] };
-  const raw = readFileSync(gPath, 'utf-8');
+  const yamlPath = glossaryPath(workflowRoot);
+  const jsonPath = glossaryJsonPath(workflowRoot);
+
+  let raw: string;
+  let sourceFile: string;
+  let parseData: (s: string) => unknown;
+
+  if (existsSync(yamlPath)) {
+    raw = readFileSync(yamlPath, 'utf-8');
+    sourceFile = 'glossary.yaml';
+    parseData = (s) => YAML.parse(s);
+  } else if (existsSync(jsonPath)) {
+    raw = readFileSync(jsonPath, 'utf-8');
+    sourceFile = 'glossary.json';
+    parseData = (s) => JSON.parse(s);
+  } else {
+    return { $schema: 'domain/1.0', terms: [] };
+  }
+
   let data: unknown;
-  try { data = JSON.parse(raw); } catch (e) {
-    throw new Error(`glossary.json invalid JSON: ${(e as Error).message}. Check file or restore from .backups/`);
+  try { data = parseData(raw); } catch (e) {
+    throw new Error(`${sourceFile} parse error: ${(e as Error).message}. Check file or restore from .backups/`);
   }
   const errors = validateGlossary(data);
   if (errors.length > 0) {
     const msg = errors.slice(0, 5).map(e => `${e.path}: ${e.message}`).join('; ');
-    throw new Error(`glossary.json validation failed: ${msg}`);
+    throw new Error(`${sourceFile} validation failed: ${msg}`);
   }
   return data as DomainGlossary;
 }
 
 export function readGlossaryCached(workflowRoot: string): DomainGlossary {
-  const gPath = glossaryPath(workflowRoot);
-  if (!existsSync(gPath)) return { $schema: 'domain/1.0', terms: [] };
+  const yamlPath = glossaryPath(workflowRoot);
+  const jsonPath = glossaryJsonPath(workflowRoot);
+  const gPath = existsSync(yamlPath) ? yamlPath : existsSync(jsonPath) ? jsonPath : null;
+  if (!gPath) return { $schema: 'domain/1.0', terms: [] };
   const st = statSync(gPath);
   const cached = _glossaryCache.get(gPath);
   if (cached && cached.mtime === st.mtimeMs && cached.size === st.size) return cached.data;
@@ -190,7 +224,7 @@ function writeGlossary(workflowRoot: string, glossary: DomainGlossary): void {
   const gPath = glossaryPath(workflowRoot);
   mkdirSync(domainDir(workflowRoot), { recursive: true });
   backupGlossary(workflowRoot);
-  writeFileSync(gPath, JSON.stringify(glossary, null, 2) + '\n', 'utf-8');
+  writeFileSync(gPath, YAML.stringify(glossary, { lineWidth: 120 }), 'utf-8');
   clearCache();
 }
 
@@ -200,8 +234,9 @@ function writeGlossary(workflowRoot: string, glossary: DomainGlossary): void {
 
 export function loadGlossary(projectPath: string): GlossaryLoadResult {
   const wRoot = join(projectPath, '.workflow');
-  const gPath = glossaryPath(wRoot);
-  if (!existsSync(gPath))
+  const yamlPath = glossaryPath(wRoot);
+  const jsonPath = glossaryJsonPath(wRoot);
+  if (!existsSync(yamlPath) && !existsSync(jsonPath))
     return { exists: false, glossary: null, activeTerms: [], isEmpty: true };
   try {
     const glossary = readGlossaryCached(wRoot);
@@ -222,16 +257,17 @@ export function initDomain(workflowRoot: string, project?: string): string {
   const dir = domainDir(workflowRoot);
   mkdirSync(dir, { recursive: true });
   mkdirSync(join(dir, 'concepts'), { recursive: true });
-  const gPath = glossaryPath(workflowRoot);
-  if (!existsSync(gPath)) {
+  const yamlPath = glossaryPath(workflowRoot);
+  const jsonPath = glossaryJsonPath(workflowRoot);
+  if (!existsSync(yamlPath) && !existsSync(jsonPath)) {
     const glossary: DomainGlossary = {
       $schema: 'domain/1.0',
       ...(project ? { project } : {}),
       terms: [],
     };
-    writeFileSync(gPath, JSON.stringify(glossary, null, 2) + '\n', 'utf-8');
+    writeFileSync(yamlPath, YAML.stringify(glossary, { lineWidth: 120 }), 'utf-8');
   }
-  return gPath;
+  return existsSync(yamlPath) ? yamlPath : jsonPath;
 }
 
 export function addTerm(workflowRoot: string, term: DomainTerm): void {
@@ -319,11 +355,16 @@ export function validateGlossaryFile(workflowRoot: string): {
   errors: ValidationError[];
   warnings: ValidationWarning[];
 } {
-  const gPath = glossaryPath(workflowRoot);
-  if (!existsSync(gPath)) return { errors: [{ path: '$', message: 'glossary.json not found' }], warnings: [] };
+  const yamlPath = glossaryPath(workflowRoot);
+  const jsonPath = glossaryJsonPath(workflowRoot);
+  const gPath = existsSync(yamlPath) ? yamlPath : existsSync(jsonPath) ? jsonPath : null;
+  if (!gPath) return { errors: [{ path: '$', message: 'glossary.yaml not found' }], warnings: [] };
   let data: unknown;
-  try { data = JSON.parse(readFileSync(gPath, 'utf-8')); } catch (e) {
-    return { errors: [{ path: '$', message: `invalid JSON: ${(e as Error).message}` }], warnings: [] };
+  try {
+    const raw = readFileSync(gPath, 'utf-8');
+    data = gPath.endsWith('.yaml') ? YAML.parse(raw) : JSON.parse(raw);
+  } catch (e) {
+    return { errors: [{ path: '$', message: `parse error: ${(e as Error).message}` }], warnings: [] };
   }
   const errors = validateGlossary(data);
   const terms = (data as Record<string, unknown>).terms;

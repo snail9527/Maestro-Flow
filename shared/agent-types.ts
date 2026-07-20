@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 
 /** Supported agent CLI types */
-export type AgentType = 'claude-code' | 'codex' | 'codex-server' | 'gemini' | 'gemini-a2a' | 'qwen' | 'opencode' | 'agy' | 'agent-sdk';
+export type AgentType = 'claude-code' | 'codex' | 'codex-server' | 'gemini' | 'gemini-a2a' | 'qwen' | 'opencode' | 'agy' | 'api-explore' | 'agent-sdk';
 
 /** Agent process lifecycle status */
 export type AgentProcessStatus =
@@ -31,6 +31,8 @@ export interface AgentConfig {
   approvalMode?: 'suggest' | 'auto';
   baseUrl?: string;
   apiKey?: string;
+  /** API format for api-explore: 'openai' (default), 'anthropic', or 'openai-responses' */
+  format?: 'openai' | 'anthropic' | 'openai-responses';
   settingsFile?: string;
   /** Path to .env file for loading environment variables before spawn */
   envFile?: string;

@@ -1,8 +1,14 @@
 ---
 name: team-frontend
+disable-model-invocation: true
 description: Unified team skill for frontend development. Pure router — all roles read this file. Beat model is coordinator-only in monitor.md. Built-in ui-ux-pro-max design intelligence. Triggers on "team frontend".
 allowed-tools: Agent(*), TaskCreate(*), TaskList(*), TaskGet(*), TaskUpdate(*), TeamCreate(*), TeamDelete(*), SendMessage(*), AskUserQuestion(*), Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*), WebFetch(*), WebSearch(*), mcp__maestro__team_msg(*)
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team Frontend Development
 
@@ -44,8 +50,8 @@ Skill(skill="team-frontend", args="task description")
 ## Pre-load (coordinator, before dispatch)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for module boundaries
-2. **Specs (coding)**: `maestro spec load --category coding` — load coding constraints as shared context
-3. **Specs (ui)**: `maestro spec load --category ui` — load ui constraints as shared context
+2. **Specs (coding)**: `maestro load --type spec --category coding` — load coding constraints as shared context
+3. **Specs (ui)**: `maestro load --type spec --category ui` — load ui constraints as shared context
 4. **Wiki knowledge**: `maestro search "frontend component UI" --json` — top 5 entries as prior context
 5. All optional — proceed without if unavailable
 ## Role Router
@@ -57,9 +63,9 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `FE`
-- **Session path**: `.workflow/.team/FE-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 
 ## Worker Spawn Template
 
@@ -75,14 +81,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: frontend
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -102,22 +108,22 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 ## Session Directory
 
 ```
-.workflow/.team/FE-<slug>-<YYYY-MM-DD>/
+{run_dir}/work/team/
 ├── .msg/
 │   ├── messages.jsonl          # Message bus log
 │   └── meta.json               # Session state + cross-role state
 ├── task-analysis.json          # Coordinator analyze output
 ├── wisdom/                     # Cross-task knowledge
-├── analysis/                   # Analyst output
+├── {run_dir}/outputs/analysis/                   # Analyst output
 │   ├── design-intelligence.json
 │   └── requirements.md
-├── architecture/               # Architect output
+├── {run_dir}/outputs/architecture/               # Architect output
 │   ├── design-tokens.json
 │   ├── component-specs/
 │   └── project-structure.md
-├── qa/                         # QA output
+├── {run_dir}/outputs/qa/                         # QA output
 │   └── audit-<NNN>.md
-└── build/                      # Developer output
+└── {run_dir}/outputs/build/                      # Developer output
 ```
 
 ## Specs Reference

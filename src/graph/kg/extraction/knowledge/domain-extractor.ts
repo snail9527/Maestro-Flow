@@ -1,8 +1,9 @@
 // src/graph/kg/extraction/knowledge/domain-extractor.ts
-// 从 .workflow/domain/glossary.json 提取 domain_term nodes + relates_to edges + aliases edges
+// 从 .workflow/domain/glossary.yaml (或 .json 回退) 提取 domain_term nodes + relates_to edges + aliases edges
 
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+import YAML from 'yaml';
 import { makeNodeId } from '../../db/connection.js';
 import type {
   UnifiedNode, UnifiedEdge, FileRecord, ExtractionResult,
@@ -37,7 +38,8 @@ export function extractDomain(
     return { nodes, edges, fileRecord: createEmptyFileRecord(glossaryPath) };
   }
 
-  const glossary: DomainGlossary = JSON.parse(readFileSync(glossaryPath, 'utf-8'));
+  const raw = readFileSync(glossaryPath, 'utf-8');
+  const glossary: DomainGlossary = glossaryPath.endsWith('.yaml') ? YAML.parse(raw) : JSON.parse(raw);
   const now = Date.now();
 
   for (const term of glossary.terms) {
@@ -118,15 +120,18 @@ export function extractDomain(
 }
 
 // 删除级联清理 (D3.2)
-export function purgeDomainTerm(db: import('better-sqlite3').Database, termId: string): void {
+export function purgeDomainTerm(db: import('node:sqlite').DatabaseSync, termId: string): void {
   const nodeId = makeNodeId('domain', termId);
-  db.transaction(() => {
+  db.exec('BEGIN');
+  try {
     db.prepare('DELETE FROM nodes WHERE id = ?').run(nodeId);
-    // edges 的 source/target 侧由 ON DELETE CASCADE 自动清理
-    // 但也需清理 target 侧的非 CASCADE 残留
     db.prepare('DELETE FROM edges WHERE source = ?').run(nodeId);
     db.prepare('DELETE FROM edges WHERE target = ?').run(nodeId);
-  })();
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
 // 辅助函数

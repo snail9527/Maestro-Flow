@@ -1,7 +1,9 @@
 ---
 name: team-executor
+disable-model-invocation: true
 description: Lightweight session execution skill. Resumes existing team-coordinate sessions for pure execution via team-worker agents. No analysis, no role generation -- only loads and executes. Session path required. Triggers on "Team Executor".
 allowed-tools: TeamCreate(*), TeamDelete(*), SendMessage(*), TaskCreate(*), TaskUpdate(*), TaskList(*), TaskGet(*), Agent(*), AskUserQuestion(*), Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*), mcp__maestro__team_msg(*)
+session-mode: none
 ---
 
 # Team Executor
@@ -71,7 +73,9 @@ This skill is **executor-only**. Workers do NOT invoke this skill -- they are sp
 
 ### Orchestration Mode
 
-**Invocation**: `Skill(skill="team-executor", args="--session=<session-folder>")`
+**Invocation**: `Skill(skill="team-executor", args="--session=.workflow/sessions/<session-id>/runs/<run-id>/work/team")`
+
+The `--session` path is the `work/team` directory of an existing team-coordinate Run; its `run_dir` was created by that upstream Run, not by team-executor.
 
 **Lifecycle**:
 ```
@@ -96,7 +100,7 @@ Validate session
 | Role | File | Type |
 |------|------|------|
 | executor | [roles/executor/role.md](roles/executor/role.md) | built-in orchestrator |
-| (dynamic) | `<session>/role-specs/<role-name>.md` | loaded from session |
+| (dynamic) | `{run_dir}/work/team/role-specs/<role-name>.md` | loaded from session |
 
 ---
 
@@ -115,15 +119,15 @@ Agent({
   run_in_background: true,
   prompt: `## Role Assignment
 role: <role>
-role_spec: <session-folder>/role-specs/<role>.md
-session: <session-folder>
-session_id: <session-id>
+role_spec: {run_dir}/work/team/role-specs/<role>.md
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: <team-name>
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.

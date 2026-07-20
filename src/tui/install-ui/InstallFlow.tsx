@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import Gradient from 'ink-gradient';
 import BigText from 'ink-big-text';
-import { C, SYM, Breadcrumb } from '../shared/index.js';
+import { C, SYM, SP, Breadcrumb, SectionHeader, wrapCursor, KeyHints } from '../shared/index.js';
 import { GroupedHub } from './GroupedHub.js';
 import { ComponentGrid } from './ComponentGrid.js';
 import { HooksConfig } from './HooksConfig.js';
@@ -10,6 +10,7 @@ import { McpConfig } from './McpConfig.js';
 import { ExtraMcpConfig } from './ExtraMcpConfig.js';
 import { StatuslineConfig } from './StatuslineConfig.js';
 import { BackupConfig } from './BackupConfig.js';
+import { EmbeddingPanel } from './EmbeddingPanel.js';
 import { InstallConfirm } from './InstallConfirm.js';
 import { InstallExecution, type InstallFlowResult } from './InstallExecution.js';
 import { InstallResult } from './InstallResult.js';
@@ -26,30 +27,32 @@ export interface InstallFlowProps {
   initialStep?: FlowStepCompat;
   initialMode?: 'global' | 'project';
   initialStepIds?: string[];
+  initialProjectPath?: string;
 }
 
 const CONFIG_STEPS = [
   'components_config', 'hooks_config', 'mcp_config',
   'codex_hooks_config', 'codex_mcp_config',
   'agy_hooks_config', 'extra_mcp_config',
-  'statusline_config', 'backup_config',
+  'statusline_config', 'backup_config', 'embedding_config',
 ];
 
-export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initialStepIds }: InstallFlowProps) {
+export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initialStepIds, initialProjectPath }: InstallFlowProps) {
   const { exit } = useApp();
-  const s = useInstallFlowState({ pkgRoot, initialStep, initialMode, initialStepIds });
+  const s = useInstallFlowState({ pkgRoot, initialStep, initialMode, initialStepIds, initialProjectPath });
 
   // Global input for config steps
   useInput((_input, key) => {
     if (s.step === 'executing' || s.step === 'complete') return;
+    if (s.step === 'platforms') return;
 
     if (s.step === 'components_config') {
-      if (key.escape) s.setStep(s.isSubcommand ? 'confirm' : 'hub');
+      if (key.escape || key.leftArrow) s.setStep(s.isSubcommand ? 'confirm' : 'hub');
       return;
     }
     if (CONFIG_STEPS.includes(s.step)) {
       if (key.return) s.returnFromConfig();
-      else if (key.escape) s.setStep(s.isSubcommand ? 'confirm' : 'hub');
+      else if (key.escape || key.leftArrow) s.setStep(s.isSubcommand ? 'confirm' : 'hub');
       return;
     }
   });
@@ -59,14 +62,15 @@ export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initia
     const hub = t.install.stepMenu;
     switch (s.step) {
       case 'components_config': return [hub, t.install.groupCore, t.install.hubLabelComponents];
-      case 'hooks_config': return [hub, t.install.groupClaude, t.install.hubLabelHooks];
-      case 'mcp_config': return [hub, t.install.groupClaude, t.install.hubLabelMcpServer];
-      case 'statusline_config': return [hub, t.install.groupClaude, t.install.hubLabelStatusline];
-      case 'codex_hooks_config': return [hub, t.install.groupCodex, t.install.hubLabelCodexHooks];
-      case 'codex_mcp_config': return [hub, t.install.groupCodex, t.install.hubLabelCodexMcp];
-      case 'agy_hooks_config': return [hub, t.install.groupOther, t.install.hubLabelAgyHooks];
-      case 'extra_mcp_config': return [hub, t.install.groupOther, t.install.hubLabelExtraMcp];
+      case 'hooks_config': return [hub, t.install.groupHooks, 'Claude Hooks'];
+      case 'mcp_config': return [hub, t.install.groupMcp, 'Claude MCP'];
+      case 'statusline_config': return [hub, t.install.groupAppearance, t.install.hubLabelStatusline];
+      case 'codex_hooks_config': return [hub, t.install.groupHooks, t.install.hubLabelCodexHooks];
+      case 'codex_mcp_config': return [hub, t.install.groupMcp, t.install.hubLabelCodexMcp];
+      case 'agy_hooks_config': return [hub, t.install.groupHooks, t.install.hubLabelAgyHooks];
+      case 'extra_mcp_config': return [hub, t.install.groupMcp, t.install.hubLabelExtraMcp];
       case 'backup_config': return [hub, t.install.groupCore, t.install.hubLabelBackup];
+      case 'embedding_config': return [hub, t.install.groupEmbedding, 'Embedding Model'];
       default: return null;
     }
   }, [s.step]);
@@ -80,6 +84,7 @@ export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initia
         { key: 'complete', label: t.install.stepDone },
       ]
     : [
+        { key: 'platforms', label: t.install.stepPlatforms ?? 'Platforms' },
         { key: 'hub', label: t.install.stepMenu },
         { key: 'confirm', label: t.install.stepConfirm },
         { key: 'executing', label: t.install.stepInstall },
@@ -95,20 +100,17 @@ export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initia
     <Box flexDirection="column" width="100%">
       {/* Header */}
       <Box flexDirection="column" paddingX={1}>
-        <Box flexDirection="column">
+        <Box>
           <Gradient name="fruit">
             <BigText text="MAESTRO" font="slick" />
           </Gradient>
-          <Box marginTop={-2}>
-            <Text dimColor>
-              <BigText text="flow" font="slick" />
-            </Text>
-          </Box>
-          <Box marginLeft={2}>
-            <Text dimColor>{t.install.headerVersion.replace('{version}', version)}</Text>
-          </Box>
         </Box>
-        <Box gap={1}>
+        <Box marginTop={-1} marginLeft={2} gap={2}>
+          <Text dimColor>flow</Text>
+          <Text dimColor>·</Text>
+          <Text dimColor>{t.install.headerVersion.replace('{version}', version)}</Text>
+        </Box>
+        <Box marginTop={1} gap={1}>
           {progressSteps.map((ps, i) => (
             <Text
               key={ps.key}
@@ -129,6 +131,22 @@ export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initia
           </Box>
         )}
 
+        {s.step === 'platforms' && (
+          <PlatformSelector
+            selectedPlatforms={s.selectedPlatforms}
+            onToggle={s.togglePlatform}
+            mode={s.mode}
+            onModeChange={s.setMode}
+            onNext={() => s.setStep('hub')}
+            onExit={() => exit()}
+            codexDedupeAgents={s.codexDedupeAgents}
+            onDedupeChange={s.setCodexDedupeAgents}
+            pluginClaude={s.enabledSteps.pluginClaude}
+            pluginCodex={s.enabledSteps.pluginCodex}
+            onPluginToggle={(id) => s.toggleStep(id)}
+          />
+        )}
+
         {s.step === 'hub' && (
           <>
             <GroupedHub
@@ -140,7 +158,7 @@ export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initia
               onInstall={() => s.setStep('confirm')}
               onExport={s.handleExport}
               onImport={s.handleImport}
-              onExit={() => exit()}
+              onExit={() => s.isSubcommand ? exit() : s.setStep('platforms')}
               lastInstallDate={s.lastManifest?.installedAt?.split('T')[0]}
             />
             {s.profileMessage && (
@@ -217,6 +235,10 @@ export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initia
           />
         )}
 
+        {s.step === 'embedding_config' && (
+          <EmbeddingPanel onDone={s.returnFromConfig} />
+        )}
+
         {s.step === 'confirm' && (
           <InstallConfirm
             config={s.flowConfig}
@@ -236,6 +258,250 @@ export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initia
           <InstallResult result={s.result} />
         )}
       </Box>
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PlatformSelector — first step: choose which platforms to install
+// ---------------------------------------------------------------------------
+
+const PLATFORM_DEFS = [
+  { id: 'claude',          label: 'Claude Code',        desc: 'Commands, skills, agents, hooks, MCP' },
+  { id: 'codex',           label: 'Codex',              desc: 'Agents, skills, hooks, MCP' },
+  { id: 'cursor',          label: 'Cursor',             desc: 'Skills, agents → .cursor/' },
+  { id: 'agy',             label: 'Agy (Gemini CLI)',   desc: 'Skills, agents, hooks → .gemini/' },
+  { id: 'copilot',         label: 'GitHub Copilot',     desc: 'Skills, agents → .github/' },
+  { id: 'kiro',            label: 'Kiro',               desc: 'Skills, agents → .kiro/' },
+  { id: 'opencode',        label: 'OpenCode',           desc: 'Skills, agents → .opencode/' },
+  { id: 'kilo',            label: 'Kilo Code',          desc: 'Skills, agents → .kilocode/' },
+  { id: 'devin',           label: 'Devin',              desc: 'Skills, agents → .devin/' },
+  { id: 'qoder',           label: 'Qoder / Qoder CN',   desc: 'Skills, agents → .qoder/' },
+  { id: 'codebuddy',       label: 'CodeBuddy',          desc: 'Skills, agents → .codebuddy/' },
+  { id: 'droid',           label: 'Droid',              desc: 'Skills, agents → .factory/' },
+  { id: 'pi',              label: 'Pi Agent',           desc: 'Skills, agents → .pi/' },
+  { id: 'trae',            label: 'Trae / Trae CN',     desc: 'Skills, agents → .trae/' },
+  { id: 'roo',             label: 'Roo Code',           desc: 'Skills, agents → .roo/' },
+  { id: 'aider-desk',      label: 'AiderDesk',          desc: 'Skills, agents → .aider-desk/' },
+  { id: 'amp',             label: 'Amp',                desc: 'Skills, agents → .amp/' },
+  { id: 'antigravity',     label: 'Antigravity',        desc: 'Skills, agents → .antigravity/' },
+  { id: 'antigravity-cli', label: 'Antigravity CLI',    desc: 'Skills, agents → .antigravity-cli/' },
+  { id: 'astrbot',         label: 'AstrBot',            desc: 'Skills, agents → .astrbot/' },
+  { id: 'autohand-code',   label: 'Autohand Code CLI',  desc: 'Skills, agents → .autohand/' },
+  { id: 'augment',         label: 'Augment',            desc: 'Skills, agents → .augment/' },
+  { id: 'bob',             label: 'IBM Bob',            desc: 'Skills, agents → .bob/' },
+  { id: 'cline',           label: 'Cline',              desc: 'Skills, agents → .cline/' },
+  { id: 'codearts-agent',  label: 'CodeArts Agent',     desc: 'Skills, agents → .codeartsdoer/' },
+  { id: 'codemaker',       label: 'Codemaker',          desc: 'Skills, agents → .codemaker/' },
+  { id: 'codestudio',      label: 'Code Studio',        desc: 'Skills, agents → .codestudio/' },
+  { id: 'command-code',    label: 'Command Code',       desc: 'Skills, agents → .commandcode/' },
+  { id: 'continue',        label: 'Continue',           desc: 'Skills, agents → .continue/' },
+  { id: 'cortex',          label: 'Cortex Code',        desc: 'Skills, agents → .cortex/' },
+  { id: 'crush',           label: 'Crush',              desc: 'Skills, agents → .crush/' },
+  { id: 'deepagents',      label: 'Deep Agents',        desc: 'Skills, agents → .deepagents/' },
+  { id: 'dexto',           label: 'Dexto',              desc: 'Skills, agents → .dexto/' },
+  { id: 'eve',             label: 'Eve',                desc: 'Skills, agents → agent/' },
+  { id: 'firebender',      label: 'Firebender',         desc: 'Skills, agents → .firebender/' },
+  { id: 'forgecode',       label: 'ForgeCode',          desc: 'Skills, agents → .forge/' },
+  { id: 'goose',           label: 'Goose',              desc: 'Skills, agents → .goose/' },
+  { id: 'hermes-agent',    label: 'Hermes Agent',       desc: 'Skills, agents → .hermes/' },
+  { id: 'inference-sh',    label: 'inference.sh',       desc: 'Skills, agents → .inferencesh/' },
+  { id: 'jazz',            label: 'Jazz',               desc: 'Skills, agents → .jazz/' },
+  { id: 'junie',           label: 'Junie',              desc: 'Skills, agents → .junie/' },
+  { id: 'iflow-cli',       label: 'iFlow CLI',          desc: 'Skills, agents → .iflow/' },
+  { id: 'kimi-code-cli',   label: 'Kimi Code CLI',      desc: 'Skills, agents → .kimi-code-cli/' },
+  { id: 'kode',            label: 'Kode',               desc: 'Skills, agents → .kode/' },
+  { id: 'lingma',          label: 'Lingma',             desc: 'Skills, agents → .lingma/' },
+  { id: 'loaf',            label: 'Loaf',               desc: 'Skills, agents → .loaf/' },
+  { id: 'mcpjam',          label: 'MCPJam',             desc: 'Skills, agents → .mcpjam/' },
+  { id: 'mistral-vibe',    label: 'Mistral Vibe',       desc: 'Skills, agents → .vibe/' },
+  { id: 'moxby',           label: 'Moxby',              desc: 'Skills, agents → .moxby/' },
+  { id: 'mux',             label: 'Mux',                desc: 'Skills, agents → .mux/' },
+  { id: 'openhands',       label: 'OpenHands',          desc: 'Skills, agents → .openhands/' },
+  { id: 'ona',             label: 'Ona',                desc: 'Skills, agents → .ona/' },
+  { id: 'qwen-code',       label: 'Qwen Code',          desc: 'Skills, agents → .qwen/' },
+  { id: 'replit',          label: 'Replit',             desc: 'Skills, agents → .replit/' },
+  { id: 'reasonix',        label: 'Reasonix',           desc: 'Skills, agents → .reasonix/' },
+  { id: 'rovodev',         label: 'Rovo Dev',           desc: 'Skills, agents → .rovodev/' },
+  { id: 'tabnine-cli',     label: 'Tabnine CLI',        desc: 'Skills, agents → .tabnine/' },
+  { id: 'terramind',       label: 'Terramind',          desc: 'Skills, agents → .terramind/' },
+  { id: 'tinycloud',       label: 'Tinycloud',          desc: 'Skills, agents → .tinycloud/' },
+  { id: 'warp',            label: 'Warp',               desc: 'Skills, agents → .warp/' },
+  { id: 'windsurf',        label: 'Windsurf',           desc: 'Skills, agents → .windsurf/' },
+  { id: 'zed',             label: 'Zed',                desc: 'Skills, agents → .zed/' },
+  { id: 'zencoder',        label: 'Zencoder / Zenflow', desc: 'Skills, agents → .zencoder/' },
+  { id: 'neovate',         label: 'Neovate',            desc: 'Skills, agents → .neovate/' },
+  { id: 'pochi',           label: 'Pochi',              desc: 'Skills, agents → .pochi/' },
+  { id: 'promptscript',    label: 'PromptScript',       desc: 'Skills, agents → .promptscript/' },
+  { id: 'adal',            label: 'AdaL',               desc: 'Skills, agents → .adal/' },
+  { id: 'agents-standard', label: 'Open Standard',      desc: '.agents/ format (portable)' },
+] as const;
+
+interface FlatRow {
+  type: 'platform' | 'plugin' | 'dedupe';
+  id: string;
+  platIdx?: number;
+  localPlatIdx?: number;
+}
+
+function PlatformSelector({
+  selectedPlatforms, onToggle, mode, onModeChange, onNext, onExit,
+  codexDedupeAgents, onDedupeChange,
+  pluginClaude, pluginCodex, onPluginToggle,
+}: {
+  selectedPlatforms: Set<string>;
+  onToggle: (id: string) => void;
+  mode: 'global' | 'project';
+  onModeChange: (m: 'global' | 'project') => void;
+  onNext: () => void;
+  onExit: () => void;
+  codexDedupeAgents: boolean;
+  onDedupeChange: (v: boolean) => void;
+  pluginClaude: boolean;
+  pluginCodex: boolean;
+  onPluginToggle: (id: string) => void;
+}) {
+  const showDedupe = selectedPlatforms.has('codex') && selectedPlatforms.has('agents-standard');
+
+  const PAGE_SIZE = 10;
+  const [page, setPage] = React.useState(0);
+  const pageCount = Math.ceil(PLATFORM_DEFS.length / PAGE_SIZE);
+
+  const rows = React.useMemo(() => {
+    const r: FlatRow[] = [];
+    const startIdx = page * PAGE_SIZE;
+    const endIdx = Math.min(startIdx + PAGE_SIZE, PLATFORM_DEFS.length);
+    let localPlatIdx = 0;
+    for (let i = startIdx; i < endIdx; i++) {
+      const plat = PLATFORM_DEFS[i];
+      r.push({ type: 'platform', id: plat.id, platIdx: i, localPlatIdx });
+      localPlatIdx++;
+      if (plat.id === 'claude' && selectedPlatforms.has('claude')) {
+        r.push({ type: 'plugin', id: 'pluginClaude' });
+      }
+      if (plat.id === 'codex' && selectedPlatforms.has('codex')) {
+        r.push({ type: 'plugin', id: 'pluginCodex' });
+      }
+    }
+    if (showDedupe && endIdx === PLATFORM_DEFS.length) {
+      r.push({ type: 'dedupe', id: 'dedupe' });
+    }
+    return r;
+  }, [selectedPlatforms, showDedupe, page]);
+
+  const [cursor, setCursor] = React.useState(0);
+  const safeCursor = Math.min(cursor, rows.length - 1);
+
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage);
+    setCursor(0);
+  };
+
+  useInput((input, key) => {
+    if (key.upArrow) setCursor(i => wrapCursor(Math.min(i, rows.length - 1), -1, rows.length));
+    else if (key.downArrow) setCursor(i => wrapCursor(Math.min(i, rows.length - 1), 1, rows.length));
+    else if (key.leftArrow || input === 'h' || input === 'H' || input === '[') {
+      handlePageChange((page - 1 + pageCount) % pageCount);
+    } else if (key.rightArrow || input === 'l' || input === 'L' || input === ']') {
+      handlePageChange((page + 1) % pageCount);
+    } else if (input === ' ') {
+      const row = rows[safeCursor];
+      if (!row) return;
+      if (row.type === 'platform') onToggle(row.id);
+      else if (row.type === 'plugin') onPluginToggle(row.id);
+      else if (row.type === 'dedupe') onDedupeChange(!codexDedupeAgents);
+    } else if (key.return) onNext();
+    else if (key.escape) onExit();
+    else if (input === 'g' || input === 'G') onModeChange('global');
+    else if (input === 'p' || input === 'P') onModeChange('project');
+    else {
+      const n = parseInt(input, 10);
+      if (n >= 1 && n <= 9) {
+        const targetRow = rows.find(r => r.type === 'platform' && r.localPlatIdx === n - 1);
+        if (targetRow) {
+          onToggle(targetRow.id);
+        }
+      }
+    }
+  });
+
+  const isPlugin = (id: string) => id === 'pluginClaude' ? pluginClaude : pluginCodex;
+
+  return (
+    <Box flexDirection="column">
+      <Box gap={1}>
+        <Text bold color={C.primary}>{t.install.hubScope}</Text>
+        <Text color={mode === 'global' ? C.success : C.neutral} bold={mode === 'global'}>
+          {mode === 'global' ? SYM.radioOn : SYM.radioOff} {t.install.hubGlobal}
+        </Text>
+        <Text color={mode === 'project' ? C.success : C.neutral} bold={mode === 'project'}>
+          {mode === 'project' ? SYM.radioOn : SYM.radioOff} {t.install.hubProject}
+        </Text>
+        <Text dimColor>[g/p]</Text>
+      </Box>
+
+      <SectionHeader title={t.install.groupPlatforms ?? 'Platforms'} />
+      <Box flexDirection="column" marginTop={SP.sectionGap}>
+        {rows.map((row, idx) => {
+          const hl = idx === safeCursor;
+          if (row.type === 'platform') {
+            const plat = PLATFORM_DEFS[row.platIdx!];
+            const sel = selectedPlatforms.has(plat.id);
+            return (
+              <Box key={row.id}>
+                <Text color={hl ? C.primary : C.neutral}>{row.localPlatIdx! < 9 ? `[${row.localPlatIdx! + 1}] ` : '    '}</Text>
+                <Text color={sel ? (hl ? C.successBright : C.success) : C.neutral}>{sel ? SYM.checkOn : SYM.checkOff} </Text>
+                <Text color={hl ? C.primary : undefined} bold={hl}>{plat.label.padEnd(22)}</Text>
+                <Text color={C.neutral}>{plat.desc}</Text>
+              </Box>
+            );
+          }
+          if (row.type === 'plugin') {
+            const plugin = isPlugin(row.id);
+            return (
+              <Box key={row.id}>
+                <Text color={hl ? C.primary : C.neutral}>{'      '}</Text>
+                <Text color={!plugin ? (hl ? C.successBright : C.success) : C.neutral}>{!plugin ? SYM.radioOn : SYM.radioOff} </Text>
+                <Text color={hl ? C.primary : undefined}>Copy files  </Text>
+                <Text color={plugin ? (hl ? C.successBright : C.success) : C.neutral}>{plugin ? SYM.radioOn : SYM.radioOff} </Text>
+                <Text color={hl ? C.primary : undefined}>Native plugin</Text>
+              </Box>
+            );
+          }
+          // dedupe
+          return (
+            <Box key={row.id} marginTop={1}>
+              <Text color={hl ? C.primary : C.neutral}>    </Text>
+              <Text color={codexDedupeAgents ? (hl ? C.successBright : C.success) : C.neutral}>
+                {codexDedupeAgents ? SYM.checkOn : SYM.checkOff}{' '}
+              </Text>
+              <Text color={hl ? C.primary : undefined} bold={hl}>
+                {'Codex: disable .agents/ skills'.padEnd(22)}
+              </Text>
+              <Text color={C.neutral}>avoid duplicate skill discovery</Text>
+            </Box>
+          );
+        })}
+      </Box>
+
+      {/* 分页指示器 */}
+      <Box marginTop={1} gap={2}>
+        <Box>
+          <Text dimColor>Page </Text>
+          <Text bold color={C.primary}>{page + 1}</Text>
+          <Text dimColor> / {pageCount} </Text>
+          <Text dimColor>[</Text>
+          {Array.from({ length: pageCount }).map((_, i) => (
+            <Text key={i} color={i === page ? C.successBright : C.neutral} bold={i === page}>
+              {i === page ? '●' : '○'}
+            </Text>
+          ))}
+          <Text dimColor>]</Text>
+        </Box>
+        <Text dimColor>(Use Left/Right or h/l to page)</Text>
+      </Box>
+
+      <KeyHints hints={`[Space/1-9] Toggle  [Up/Down] Navigate  [Left/Right] Page  [g/p] Scope  [Enter] Next  [Esc] Exit`} />
     </Box>
   );
 }

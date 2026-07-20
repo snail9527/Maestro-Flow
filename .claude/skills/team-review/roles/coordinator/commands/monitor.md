@@ -1,7 +1,5 @@
 # Monitor Pipeline
 
-Event-driven pipeline coordination. Beat model: coordinator wake -> process -> spawn -> STOP.
-
 ## Constants
 
 - SPAWN_MODE: background
@@ -150,8 +148,8 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: ~  or <project>/.claude/skills/team-review/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: review
 requirement: <task-description>
 inner_loop: <true|false>
@@ -161,7 +159,7 @@ inner_loop: <true|false>
 - Task: <subject>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -180,9 +178,14 @@ Pipeline done. Generate report and completion action.
 
 1. All tasks completed or deleted (no pending, no in_progress)
 2. Read final session state from meta.json
-3. Generate pipeline summary: mode, target, findings_count, stages_completed, fix results (if applicable), deliverable paths
-4. Update session: pipeline_status='complete', completed_at=<timestamp>
-5. Read session.completion_action:
+3. Run lifecycle completion:
+   - Read run_id from team-session.json.run.run_id
+   - Write {run_dir}/report.md with frontmatter (verdict/summary/concerns)
+   - Run `maestro run complete <run_id>`
+   - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
+4. Generate pipeline summary: mode, target, findings_count, stages_completed, fix results (if applicable), deliverable paths
+5. Update session: pipeline_status='complete', completed_at=<timestamp>
+6. Read session.completion_action:
    - interactive -> AskUserQuestion (Archive/Keep/Export)
    - auto_archive -> Archive & Clean (status=completed, TeamDelete)
    - auto_keep -> Keep Active (status=paused)
@@ -193,7 +196,7 @@ Capability gap reported mid-pipeline.
 
 1. Parse gap description
 2. Check if existing role covers it -> redirect
-3. Role count < 4 -> generate dynamic role-spec in <session>/role-specs/
+3. Role count < 4 -> generate dynamic role-spec in {run_dir}/work/team/role-specs/
 4. Create new task, spawn worker
 5. Role count >= 4 -> merge or pause
 

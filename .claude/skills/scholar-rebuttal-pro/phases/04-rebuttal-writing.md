@@ -1,11 +1,8 @@
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Phase 4: Rebuttal Writing
-
-> **📌 COMPACT SENTINEL [Phase 4: rebuttal-writing]**
-> This phase contains 4 execution steps (Step 4.1 — 4.4).
-> If you can read this sentinel but cannot find the full Step protocol below, context has been compressed.
-> Recovery: `Read("phases/04-rebuttal-writing.md")`
-
-Generate structured rebuttal document using rebuttal-writer agent, apply conference-specific templates, integrate evidence and citations, optimize professional tone.
 
 ## Objective
 
@@ -47,8 +44,8 @@ const strategyMatrix = <from Phase 3 output>
 const evidenceMap = <from Phase 3 output>
 
 // Read strategy-matrix and evidence-references with error handling
-const matrixPath = ".workflow/.scratchpad/strategy-matrix.md"
-const evidencePath = ".workflow/.scratchpad/evidence-references.json"
+const matrixPath = "{run_dir}/outputs/strategy-matrix.md"
+const evidencePath = "{run_dir}/outputs/evidence-references.json"
 
 let strategyMatrixContent;
 try {
@@ -98,14 +95,13 @@ Rebuttal Writing Configuration:
 > 2. Full protocol (Step 4.X — 4.4) is in active memory, not just sentinel
 > If only sentinel remains → `Read("phases/04-rebuttal-writing.md")` now.
 
-Load template from claude-scholar or custom templates:
+Load template from the skill-local `templates/` directory (paths relative to the skill root, same convention as phase file reads):
 
 ```javascript
 // Template search paths
 const templatePaths = [
-  `G:/github_lib/claude-scholar/skills/review-response/references/${templateId}-template.md`,
-  `d:/ccws/.workflow/参考文档1/${templateId}-template.md`,
-  `d:/ccws/.workflow/参考文档1/discussion.md` // Fallback to generic discussion template
+  `templates/${templateId}-template.md`, // skill-local, user may add conference-specific templates
+  `templates/discussion.md`              // Fallback to generic discussion template
 ]
 
 let templateContent = null
@@ -263,19 +259,19 @@ ${rebuttalDraft}
 `
 
 // Write final rebuttal.md
-Write(".workflow/.scratchpad/rebuttal.md", rebuttalWithMetadata)
+Write("{run_dir}/outputs/rebuttal.md", rebuttalWithMetadata)
 
 // Write versioned draft
 const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-Write(`.workflow/.scratchpad/rebuttal-draft-v1-${timestamp}.md`, rebuttalWithMetadata)
+Write(`{run_dir}/outputs/rebuttal-draft-v1-${timestamp}.md`, rebuttalWithMetadata)
 
 console.log(`
 Rebuttal Generation Complete:
   Total Comments: ${evidenceData.totalStrategies}
   Missing Responses: ${missingResponses.length}
   Output Files:
-    - .workflow/.scratchpad/rebuttal.md
-    - .workflow/.scratchpad/rebuttal-draft-v1-${timestamp}.md
+    - {run_dir}/outputs/rebuttal.md
+    - {run_dir}/outputs/rebuttal-draft-v1-${timestamp}.md
 `)
 ```
 
@@ -297,7 +293,7 @@ if (!workflowPreferences.autoYes) {
   })
 
   if (confirm["Confirm"] === "Revise") {
-    console.log("Please edit .workflow/.scratchpad/rebuttal.md and re-run this phase")
+    console.log("Please edit {run_dir}/outputs/rebuttal.md and re-run this phase")
     return
   } else if (confirm["Confirm"] === "Regenerate") {
     console.log("Please adjust preferences and re-run Phase 4")
@@ -309,8 +305,8 @@ if (!workflowPreferences.autoYes) {
 ## Output
 
 - **Variable**: `rebuttalDraft` (generated rebuttal content)
-- **File**: `.workflow/.scratchpad/rebuttal.md` (final rebuttal document)
-- **File**: `.workflow/.scratchpad/rebuttal-draft-v1-{timestamp}.md` (versioned draft)
+- **File**: `{run_dir}/outputs/rebuttal.md` (final rebuttal document)
+- **File**: `{run_dir}/outputs/rebuttal-draft-v1-{timestamp}.md` (versioned draft)
 - **TodoWrite**: Mark Phase 4 completed, Phase 5 in_progress
 
 ## Next Phase

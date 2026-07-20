@@ -1,6 +1,8 @@
-# Phase 1: Requirements Discovery
 
-Collect basic skill information, configuration, and execution mode based on user input.
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
+# Phase 1: Requirements Discovery
 
 ## Objective
 
@@ -214,7 +216,7 @@ const config = {
 
   output: {
     format: outputFormat.toLowerCase(),
-    location: `.workflow/.scratchpad/${skillName}-{timestamp}`,
+    location: `{run_dir}/outputs`,
     filename_pattern: `{name}-output.${outputFormat === "HTML" ? "html" : outputFormat === "JSON" ? "json" : "md"}`
   },
 
@@ -223,7 +225,7 @@ const config = {
 };
 
 // Write configuration file
-const workDir = `.workflow/.scratchpad/skill-gen-${timestamp}`;
+const workDir = `{run_dir}/outputs/skill-gen-${timestamp}`;
 Bash(`mkdir -p "${workDir}"`);
 Write(`${workDir}/skill-config.json`, JSON.stringify(config, null, 2));
 ```

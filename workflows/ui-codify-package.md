@@ -1,6 +1,9 @@
-# UI Codify: Phase 3 — Reference Package Generation
+<!-- session-mode: inherited -->
 
-将提取结果转换为可分享的参考包，包含交互式预览页面。
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
+# UI Codify: Phase 3 — Reference Package Generation
 
 ## Prerequisites
 
@@ -52,7 +55,7 @@ echo "[Phase 3] Token files prepared"
 **Agent Task**:
 
 ```javascript
-Agent(ui-design-agent): `
+MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: Agent(ui-design-agent): `
   [PREVIEW_SHOWCASE_GENERATION]
   Generate interactive multi-component showcase panel for reference package
 

@@ -1,3 +1,8 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Impeccable Harvest Workflow
 
 > **Note**: Post-harvest hook, distinct from `/maestro-impeccable` command. This file is the harvest workflow invoked AFTER an impeccable run; it is not the impeccable command entry itself (see `chainMap['impeccable_*']` in `maestro.md`).
@@ -57,7 +62,7 @@ Map sub-command to knowhow type:
 
 ### Conversation-source commands (all others)
 
-Summarize from the conversation context that is available after Skill() returns:
+Summarize from the conversation context available after the retained command returns:
 - **What decisions were made** (color strategy, font choice, spacing system, etc.)
 - **What values were chosen** (OKLCH values, scale ratios, timing curves, etc.)
 - **Why** (rationale, constraints, user requirements)
@@ -70,7 +75,7 @@ Keep concise: 5-15 bullet points maximum. Capture decisions, not process.
 
 ### For DCS- (decision), TIP- (tip), REF- (reference)
 
-Use `store_knowhow` MCP tool:
+MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: use `store_knowhow` MCP tool:
 
 ```json
 {
@@ -146,6 +151,7 @@ Create both:
 For decision and asset entries, create a spec reference for discoverability:
 
 ```bash
+# MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep
 maestro spec add ui "<title>" "<one-line summary>" \
   --keywords impeccable,<command>,<domain keywords> \
   --ref "knowhow/<filename>"
@@ -164,4 +170,4 @@ Output one-line harvest summary:
 查看: maestro wiki load <id>
 ```
 
-If harvest fails, emit W001 and continue (command execution already succeeded).
+If harvest fails, emit W001 and continue (command execution already succeeded); flag harvest as [LOW CONFIDENCE] (harvest failed).

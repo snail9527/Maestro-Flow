@@ -1,8 +1,14 @@
 ---
 name: team-arch-opt
+disable-model-invocation: true
 description: Unified team skill for architecture optimization. Uses team-worker agent architecture with role directories for domain logic. Coordinator orchestrates pipeline, workers are team-worker agents. Triggers on "team arch-opt".
 allowed-tools: Agent, TaskCreate, TaskList, TaskGet, TaskUpdate, TeamCreate, TeamDelete, SendMessage, AskUserQuestion, Read, Write, Edit, Bash, Glob, Grep, mcp__maestro__team_msg
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team Architecture Optimization
 
@@ -44,8 +50,8 @@ Skill(skill="team-arch-opt", args="task description")
 ## Pre-load (coordinator, before dispatch)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for module boundaries
-2. **Specs (arch)**: `maestro spec load --category arch` — load arch constraints as shared context
-3. **Specs (coding)**: `maestro spec load --category coding` — load coding constraints as shared context
+2. **Specs (arch)**: `maestro load --type spec --category arch` — load arch constraints as shared context
+3. **Specs (coding)**: `maestro load --type spec --category coding` — load coding constraints as shared context
 4. **Wiki knowledge**: `maestro search "architecture optimization refactor" --json` — top 5 entries as prior context
 5. All optional — proceed without if unavailable
 ## Role Router
@@ -57,9 +63,9 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `TAO`
-- **Session path**: `.workflow/.team/TAO-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 
 ## Worker Spawn Template
 
@@ -75,14 +81,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: arch-opt
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -109,10 +115,10 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 ## Session Directory
 
 ```
-.workflow/.team/TAO-<slug>-<date>/
-├── session.json                    # Session metadata + status + parallel_mode
+{run_dir}/work/team/
+├── team-session.json                    # Session metadata + status + parallel_mode
 ├── task-analysis.json              # Coordinator analyze output
-├── artifacts/
+├── {run_dir}/outputs/              # Run deliverables (via maestro run)
 │   ├── architecture-baseline.json  # Analyzer: pre-refactoring metrics
 │   ├── architecture-report.md      # Analyzer: ranked structural issue findings
 │   ├── refactoring-plan.md         # Designer: prioritized refactoring plan
@@ -132,7 +138,7 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 │   └── <hash>.md
 ├── wisdom/
 │   └── patterns.md                 # Discovered patterns and conventions
-├── discussions/
+├── {run_dir}/evidence/discussions/
 │   ├── DISCUSS-REFACTOR.md
 │   └── DISCUSS-REVIEW.md
 └── .msg/

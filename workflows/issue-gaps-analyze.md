@@ -1,3 +1,8 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Workflow: Issue Gaps Analysis
 
 > **CLI variants**: see `issue-gaps-analyze.codex.md` for codex-specific notes (CSV-wave variant using `spawn_agents_on_csv`).
@@ -6,7 +11,7 @@ Root cause analysis for issues using CLI exploration and codebase context gather
 Supports single issue (ISS-ID) or batch (all open/registered) with classification and parallel analysis.
 Produces analysis records in issues.jsonl and context.md for downstream `plan --gaps`.
 
-**Invoked by**: `maestro-analyze --gaps [ISS-ID]`
+**Invoked by**: `analyze --gaps [ISS-ID]`
 
 ## Input
 
@@ -68,10 +73,9 @@ For each group:
   Merge keywords from all issues in group: title, description, location, affected_components.
   Deduplicate keywords.
 
-  Standard depth: grep keywords in source files → top 20 paths, read 10 lines around
-    top 5 matches.
-  Deep depth: standard grep + semantic Agent search (error handling, data flow, deps),
-    merge results.
+  Standard depth: maestro explore per group (keywords as prompt), fallback grep; flag analysis as [LOW CONFIDENCE] (grep fallback, semantic depth lost).
+  Deep depth: maestro explore multi-prompt + semantic Agent search (error handling,
+    data flow, deps), merge results.
 
   Build GROUP_CONTEXT: related files, key snippets (max 50 lines), dependency chain.
   Shared context benefits co-located issues — avoids redundant exploration.
@@ -82,7 +86,7 @@ For each group:
 ### Step 4: Run Analysis (per group, parallel across groups)
 
 ```
-Launch analysis for each group in parallel using Agent tool:
+MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: Launch analysis for each group in parallel using Agent tool:
 
   Agent({
     subagent_type: "general-purpose",
@@ -98,10 +102,10 @@ Launch analysis for each group in parallel using Agent tool:
 
 Alternatively, attempt CLI delegate first per group:
 
-  maestro delegate "<same prompt>" --role analyze --mode analysis
+  MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: maestro delegate "<same prompt>" --role analyze --mode analysis
 
   If delegate fails (timeout, unavailable, parse error):
-    Fall back to Agent tool with same prompt.
+    Fall back to Agent tool with same prompt; set analysis confidence=low and flag as [LOW CONFIDENCE] (delegate failed).
     Record fallback in analysis metadata: { tool: "agent-fallback", reason: "<error>" }
 
 Validate response per issue: all required fields present.
@@ -137,7 +141,7 @@ Construct IssueAnalysis:
 Read-modify-write issues.jsonl (single pass for all analyzed issues):
   For each issue:
     Set issue.analysis = ANALYSIS, updated_at = NOW_ISO
-    Append issue.history: { action: "analyzed", at: NOW_ISO, by: "maestro-analyze --gaps" }
+    Append issue.history: { action: "analyzed", at: NOW_ISO, by: "analyze --gaps" }
     Status unchanged (analysis is metadata enrichment).
 Verify: re-read file, confirm analysis field present for all updated issues.
 ```
@@ -189,9 +193,9 @@ Write context.md to session output directory.
 Display: group breakdown, per-issue root cause, confidence, cross-refs.
 
 Next steps:
-  - maestro-plan --gaps (plan fix tasks linked to analyzed issues)
-  - maestro-analyze --gaps {ISS-ID} (re-analyze specific issue with deeper context)
-  - manage-issue list (review all issues)
+  - plan --gaps (plan fix tasks linked to analyzed issues)
+  - analyze --gaps {ISS-ID} (re-analyze specific issue with deeper context)
+  - /maestro-manage issue list (review all issues)
 ```
 
 ---

@@ -1,8 +1,14 @@
 ---
 name: team-interactive-craft
+disable-model-invocation: true
 description: Unified team skill for interactive component crafting. Vanilla JS + CSS interactive components with zero dependencies. Research -> interaction design -> build -> a11y test. Uses team-worker agent architecture. Triggers on "team interactive craft", "interactive component".
 allowed-tools: Agent, AskUserQuestion, Read, Write, Edit, Bash, Glob, Grep, TaskList, TaskGet, TaskUpdate, TaskCreate, TeamCreate, TeamDelete, SendMessage, mcp__maestro__read_file, mcp__maestro__write_file, mcp__maestro__edit_file, mcp__maestro__team_msg
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team Interactive Craft
 
@@ -44,8 +50,8 @@ Skill(skill="team-interactive-craft", args="task description")
 ## Pre-load (coordinator, before dispatch)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for module boundaries
-2. **Specs (coding)**: `maestro spec load --category coding` — load coding constraints as shared context
-3. **Specs (ui)**: `maestro spec load --category ui` — load ui constraints as shared context
+2. **Specs (coding)**: `maestro load --type spec --category coding` — load coding constraints as shared context
+3. **Specs (ui)**: `maestro load --type spec --category ui` — load ui constraints as shared context
 4. **Wiki knowledge**: `maestro search "interactive component animation" --json` — top 5 entries as prior context
 5. All optional — proceed without if unavailable
 ## Role Router
@@ -57,9 +63,9 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `IC`
-- **Session path**: `.workflow/.team/IC-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 - **Max GC rounds**: 2
 
 ## Worker Spawn Template
@@ -76,14 +82,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: interactive-craft
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -109,22 +115,22 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 ## Session Directory
 
 ```
-.workflow/.team/IC-<slug>-<date>/
+{run_dir}/work/team/
 +-- .msg/
 |   +-- messages.jsonl         # Team message bus
 |   +-- meta.json              # Pipeline config + GC state
-+-- research/                  # Researcher output
++-- {run_dir}/outputs/research/                  # Researcher output
 |   +-- interaction-inventory.json
 |   +-- browser-api-audit.json
 |   +-- pattern-reference.json
-+-- interaction/               # Interaction designer output
++-- {run_dir}/outputs/interaction/               # Interaction designer output
 |   +-- blueprints/
 |       +-- {component-name}.md
-+-- build/                     # Builder output
++-- {run_dir}/outputs/build/                     # Builder output
 |   +-- components/
 |       +-- {name}.js
 |       +-- {name}.css
-+-- a11y/                      # A11y tester output
++-- {run_dir}/outputs/a11y/                      # A11y tester output
 |   +-- a11y-audit-{NNN}.md
 +-- wisdom/                    # Cross-task knowledge
 ```

@@ -13,13 +13,13 @@ import { loadSpecs, loadExtraDocs, type SpecCategory, type LoadSpecsOptions } fr
 import { evaluateContextBudget } from './context-budget.js';
 import { resolveSelf } from '../tools/team-members.js';
 import { evaluateKeywordInjection } from './keyword-spec-injector.js';
-import { loadWikiByCategory } from './wiki-role-loader.js';
+import { loadWikiIndex, selectWikiByCategory } from './wiki-role-loader.js';
 import type { SpecInjectionConfig } from '../types/index.js';
 import { logInjectionEvent } from './spec-analytics.js';
-import { wrapMaestroContext, type ContextSection } from './context-format.js';
+import { truncateMaestroContext, wrapMaestroContext, type ContextSection } from './context-format.js';
 import { loadGlossary, type DomainTerm } from '../tools/domain-loader.js';
 import { loadWorkspaceConfig, resolveWorkspaceLinks } from '../config/index.js';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Content → compact lines helper
@@ -118,7 +118,6 @@ const AGENT_CATEGORY_MAP: Record<string, SpecCategory[]> = {
 
   // Context / research agents
   'context-search-agent':         ['coding', 'arch'],
-  'workflow-research-agent':      ['coding'],
   'workflow-codebase-mapper':     ['arch'],
   'workflow-analyzer':            ['coding', 'arch'],
   'workflow-external-researcher': ['coding', 'arch'],
@@ -178,6 +177,9 @@ export function evaluateSpecInjection(
   const allCategories: string[] = [];
   let totalCount = 0;
 
+  // Parse wiki-index.json once for all categories (hot path — avoid per-category re-parse)
+  const wikiIndex = loadWikiIndex(projectPath);
+
   for (const category of categories) {
     // Build loader options with keyword filters and extra spec files
     const loaderOpts: LoadSpecsOptions = {};
@@ -206,7 +208,7 @@ export function evaluateSpecInjection(
     }
 
     // Wiki category knowledge injection
-    const wikiResult = loadWikiByCategory(projectPath, category);
+    const wikiResult = selectWikiByCategory(wikiIndex, category);
     if (wikiResult) {
       ctxSections.push({ label: `wiki[${category}]`, lines: markdownToLines(wikiResult.content) });
       totalCount += wikiResult.entryCount;
@@ -287,7 +289,7 @@ export function evaluateSpecInjection(
 
   // Apply maxContentLength before context budget
   if (config?.maxContentLength && rawContent.length > config.maxContentLength) {
-    rawContent = rawContent.slice(0, config.maxContentLength);
+    rawContent = truncateMaestroContext(rawContent, config.maxContentLength);
   }
 
   const budget = evaluateContextBudget(rawContent, sessionId);
@@ -316,16 +318,15 @@ export function evaluateSpecInjection(
     inject: true,
   }, config?.analytics);
 
-  // Credibility: increment consumption for injected spec category nodes (best-effort)
-  {
+  // Credibility: increment consumption for injected spec category nodes (best-effort, async)
+  (async () => {
     let mg: import('../graph/kg/engine.js').MaestroGraph | null = null;
     try {
-      const { resolve: resolvePath } = require('node:path');
-      const { MaestroGraph } = require('../graph/kg/engine.js') as typeof import('../graph/kg/engine.js');
+      const { MaestroGraph } = await import('../graph/kg/engine.js');
       if (MaestroGraph.isInitialized(projectPath)) {
-        mg = MaestroGraph.openSync(resolvePath(projectPath));
+        mg = await MaestroGraph.open(resolve(projectPath));
         if (mg) {
-          const { CredibilityStore } = require('../graph/kg/credibility.js') as typeof import('../graph/kg/credibility.js');
+          const { CredibilityStore } = await import('../graph/kg/credibility.js');
           const store = new CredibilityStore(mg.rawDb);
           const nodes = mg.rawDb.prepare(
             `SELECT id FROM nodes WHERE source_type = 'spec' AND category IN (${allCategories.map(() => '?').join(',')})`,
@@ -338,7 +339,7 @@ export function evaluateSpecInjection(
     } catch { /* best-effort */ } finally {
       mg?.close();
     }
-  }
+  })().catch(() => {});
 
   return {
     inject: true,

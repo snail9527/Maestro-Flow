@@ -1,7 +1,9 @@
 ---
 name: scholar-citation-verify
+disable-model-invocation: true
 description: Four-layer citation verification for academic papers. Scans LaTeX/BibTeX files, verifies every citation via WebSearch and Google Scholar, generates verification report with fix suggestions. Triggers on "verify citations", "check references", "citation verification", "prevent fake citations", "引用验证".
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, TodoWrite
+session-mode: none
 ---
 
 # Scholar Citation Verify
@@ -11,7 +13,7 @@ Four-layer citation verification workflow for academic papers. Scans paper files
 ## Pre-load (before execution)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for project context
-2. **Specs**: `maestro spec load --category coding` — load coding conventions
+2. **Specs**: `maestro load --type spec --category coding` — load coding conventions
 3. **Wiki knowledge**: `maestro search "academic writing research paper" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 

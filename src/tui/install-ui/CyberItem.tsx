@@ -21,17 +21,16 @@ export interface CyberItemProps {
   highlighted: boolean;
   /** Short description of the component */
   description: string;
+  /** Whether this component is mandatory (always installed, cannot be deselected) */
+  mandatory?: boolean;
 }
 
-/** Fixed width for label padding to align file counts */
-const LABEL_WIDTH = 16;
-/** Fixed width for file count display */
-const FILE_COL_WIDTH = 10;
+const LABEL_WIDTH = 18;
+const FILE_COL_WIDTH = 12;
 
 function padEnd(str: string, len: number): string {
-  // Visual padding — accounts for wide chars by truncating to len
   if (str.length >= len) return str.slice(0, len);
-  return str + '.'.repeat(len - str.length);
+  return str + ' '.repeat(len - str.length);
 }
 
 export function CyberItem({
@@ -42,21 +41,34 @@ export function CyberItem({
   available,
   highlighted,
   description,
+  mandatory,
 }: CyberItemProps) {
-  const checkbox = selected ? SYM.checkOn : SYM.checkOff;
   const paddedLabel = padEnd(label, LABEL_WIDTH);
   const filesStr = `(${fileCount} files)`.padStart(FILE_COL_WIDTH);
 
-  // Determine color state
   if (!available) {
     return (
       <Box>
         <Text dimColor color={C.neutral}>
-          [{index}] {checkbox} {paddedLabel} {filesStr} [OFFLINE]
+          [{index}] {SYM.checkOff} {paddedLabel} {filesStr} [OFFLINE]
         </Text>
       </Box>
     );
   }
+
+  if (mandatory) {
+    return (
+      <Box>
+        <Text color={C.neutral}>    </Text>
+        <Text color={highlighted ? C.successBright : C.success}>{'◆'} </Text>
+        <Text color={highlighted ? C.successBright : C.success} bold={highlighted}>{paddedLabel}</Text>
+        <Text color={C.neutral}> {filesStr} </Text>
+        <Text color={C.neutral}>{description}</Text>
+      </Box>
+    );
+  }
+
+  const checkbox = selected ? SYM.checkOn : SYM.checkOff;
 
   if (selected && highlighted) {
     return (
@@ -64,8 +76,8 @@ export function CyberItem({
         <Text color={C.neutral}>[{index}] </Text>
         <Text color={C.success}>{checkbox} </Text>
         <Text color={C.successBright} bold>{paddedLabel}</Text>
-        <Text> {filesStr} </Text>
-        <Text dimColor>{description}</Text>
+        <Text color={C.neutral}> {filesStr} </Text>
+        <Text color={C.neutral}>{description}</Text>
       </Box>
     );
   }
@@ -76,8 +88,8 @@ export function CyberItem({
         <Text color={C.neutral}>[{index}] </Text>
         <Text color={C.success}>{checkbox} </Text>
         <Text color={C.success}>{paddedLabel}</Text>
-        <Text> {filesStr} </Text>
-        <Text dimColor>{description}</Text>
+        <Text color={C.neutral}> {filesStr} </Text>
+        <Text color={C.neutral}>{description}</Text>
       </Box>
     );
   }
@@ -88,20 +100,19 @@ export function CyberItem({
         <Text color={C.neutral}>[{index}] </Text>
         <Text color={C.primary}>{checkbox} </Text>
         <Text color={C.primary} bold>{paddedLabel}</Text>
-        <Text> {filesStr} </Text>
-        <Text dimColor>{description}</Text>
+        <Text color={C.neutral}> {filesStr} </Text>
+        <Text color={C.neutral}>{description}</Text>
       </Box>
     );
   }
 
-  // Normal state
   return (
     <Box>
       <Text color={C.neutral}>[{index}] </Text>
       <Text color={C.neutral}>{checkbox} </Text>
       <Text>{paddedLabel}</Text>
-      <Text> {filesStr} </Text>
-      <Text dimColor>{description}</Text>
+      <Text color={C.neutral}> {filesStr} </Text>
+      <Text color={C.neutral}>{description}</Text>
     </Box>
   );
 }

@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';

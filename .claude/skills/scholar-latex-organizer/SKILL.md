@@ -1,7 +1,9 @@
 ---
 name: scholar-latex-organizer
+disable-model-invocation: true
 description: Organize messy conference LaTeX template .zip files into clean Overleaf-ready structure. Extracts, analyzes, cleans up, and generates README with submission requirements. Triggers on "organize LaTeX template", "clean up template", "prepare Overleaf template", "整理LaTeX模板".
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, TodoWrite
+session-mode: none
 ---
 
 # Scholar LaTeX Organizer
@@ -11,7 +13,7 @@ Transform messy conference LaTeX template .zip files into clean, Overleaf-ready 
 ## Pre-load (before execution)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for project context
-2. **Specs**: `maestro spec load --category coding` — load coding conventions
+2. **Specs**: `maestro load --type spec --category coding` — load coding conventions
 3. **Wiki knowledge**: `maestro search "academic writing research paper" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 

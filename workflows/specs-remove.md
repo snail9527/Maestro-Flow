@@ -1,3 +1,8 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Spec Remove Workflow
 
 Remove a `<spec-entry>` block from a specs container file. Symmetric with `specs-add.md`.
@@ -17,9 +22,9 @@ Uses `maestro wiki remove-entry` for atomic removal — the entry is deleted fro
 ## Argument Shape
 
 ```
-/spec-remove spec-learnings-003                → remove entry 003 from learnings.md
-/spec-remove spec-coding-conventions-001       → remove entry 001 from coding-conventions.md
-/spec-remove spec-quality-rules-005 -y         → remove without confirmation
+/maestro-spec remove spec-learnings-003                → remove entry 003 from learnings.md
+/maestro-spec remove spec-coding-conventions-001       → remove entry 001 from coding-conventions.md
+/maestro-spec remove spec-quality-rules-005 -y         → remove without confirmation
 ```
 
 | Flag | Effect |
@@ -99,6 +104,6 @@ From:      .workflow/specs/{filename}
 Remaining: {remaining entry count} entries in {filename}
 
 To verify:  maestro wiki list --type spec --category {category}
-To re-add:  /spec-add {category} {content}
+To re-add:  /maestro-spec add {category} {content}
 ```
 

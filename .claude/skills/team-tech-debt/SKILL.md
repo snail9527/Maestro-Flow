@@ -1,8 +1,14 @@
 ---
 name: team-tech-debt
+disable-model-invocation: true
 description: Unified team skill for tech debt identification and remediation. Scans codebase for tech debt, assesses severity, plans and executes fixes with validation. Uses team-worker agent architecture with roles/ for domain logic. Coordinator orchestrates pipeline, workers are team-worker agents. Triggers on "team tech debt".
 allowed-tools: Agent, AskUserQuestion, Read, Write, Edit, Bash, Glob, Grep, TaskList, TaskGet, TaskUpdate, TaskCreate, TeamCreate, TeamDelete, SendMessage, mcp__maestro__read_file, mcp__maestro__write_file, mcp__maestro__edit_file, mcp__maestro__team_msg
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team Tech Debt
 
@@ -50,9 +56,9 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `TD`
-- **Session path**: `.workflow/.team/TD-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 - **Max GC rounds**: 3
 
 ## Worker Spawn Template
@@ -69,14 +75,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: tech-debt
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -104,15 +110,15 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 ## Session Directory
 
 ```
-.workflow/.team/TD-<slug>-<date>/
+{run_dir}/work/team/
 ├── .msg/
 │   ├── messages.jsonl      # Team message bus
 │   └── meta.json           # Pipeline config + role state snapshot
-├── scan/                   # Scanner output
-├── assessment/             # Assessor output
-├── plan/                   # Planner output
-├── fixes/                  # Executor output
-├── validation/             # Validator output
+├── {run_dir}/outputs/scan/                   # Scanner output
+├── {run_dir}/outputs/assessment/             # Assessor output
+├── {run_dir}/outputs/plan/                   # Planner output
+├── {run_dir}/outputs/fixes/                  # Executor output
+├── {run_dir}/outputs/validation/             # Validator output
 └── wisdom/                 # Cross-task knowledge
 ```
 

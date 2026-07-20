@@ -7,19 +7,17 @@ message_types: [state_update]
 
 # Remediation Planner
 
-Synthesize findings from all 3 audit reports (color, typography, focus) into a prioritized remediation plan with code-level fix guidance. Map each issue to WCAG success criterion, estimate effort, and group by file/component for efficient fixing.
-
 ## Phase 2: Context & Artifact Loading
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| Color audit report | <session>/audits/color/color-audit-001.md | Yes |
-| Typography audit report | <session>/audits/typography/typo-audit-001.md | Yes |
-| Focus audit report | <session>/audits/focus/focus-audit-001.md | Yes |
+| Color audit report | {run_dir}/outputs/audits/color/color-audit-001.md | Yes |
+| Typography audit report | {run_dir}/outputs/audits/typography/typo-audit-001.md | Yes |
+| Focus audit report | {run_dir}/outputs/audits/focus/focus-audit-001.md | Yes |
 | WCAG level (AA/AAA) | From task description CONTEXT | Yes |
-| .msg/meta.json | <session>/.msg/meta.json | Yes |
+| .msg/meta.json | {run_dir}/work/team/.msg/meta.json | Yes |
 
 1. Extract session path and WCAG level from task description
 2. Read ALL 3 audit reports -- all must exist (REMED-001 is blocked by all 3 auditors)
@@ -149,7 +147,7 @@ Map every issue to specific WCAG success criterion:
 | WCAG mapping complete | Every fix maps to WCAG criterion |
 | No orphan issues | Every audit issue appears in plan |
 
-2. Write remediation plan to `<session>/remediation/remediation-plan.md`:
+2. Write remediation plan to `{run_dir}/outputs/remediation/remediation-plan.md`:
 
 ```markdown
 # Remediation Plan
@@ -202,5 +200,5 @@ Map every issue to specific WCAG success criterion:
 - [ ] Typography meets minimum sizes at all breakpoints
 ```
 
-3. Update `<session>/.msg/meta.json` under `remediation-planner` namespace:
+3. Update `{run_dir}/work/team/.msg/meta.json` under `remediation-planner` namespace:
    - Read existing -> merge `{ "remediation-planner": { total_issues, critical, high, medium, low, files_affected, estimated_effort, timestamp } }` -> write back

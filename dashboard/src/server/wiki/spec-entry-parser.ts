@@ -22,6 +22,12 @@ export interface SpecEntry {
   category: string;
   keywords: string[];
   ref?: string;
+  confidence?: string;
+  conflictNote?: string;
+  sid?: string;
+  supersedes?: string;
+  supersededBy?: string;
+  status?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,13 +139,24 @@ function parseEntryBlocks(
     const title = attrs.title || (titleMatch ? titleMatch[1].trim() : innerContent.split('\n')[0].trim());
     const type = attrs.type ?? detectEntryType(title, fileName);
     const id = `${stem}-${String(++entryIndex).padStart(3, '0')}`;
-    const kws = attrs.keywords ? attrs.keywords.split(',').map((k) => k.trim()) : [];
+    const kws = attrs.keywords ? attrs.keywords.split(',').map((k) => k.trim().toLowerCase()).filter(Boolean) : [];
     const ref = attrs.ref || undefined;
     const description = attrs.description || undefined;
     const entryCategory = attrs.category
       || (typeof frontmatter?.category === 'string' ? frontmatter.category : null)
       || FILE_CATEGORY_MAP[stem]
       || 'general';
+
+    const VALID_CONFIDENCE = ['high', 'medium', 'low', 'contested'];
+    const VALID_STATUS = ['active', 'deprecated'];
+    const rawConfidence = attrs.confidence || undefined;
+    const confidence = rawConfidence && VALID_CONFIDENCE.includes(rawConfidence) ? rawConfidence : undefined;
+    const conflictNote = attrs['conflict-note'] || undefined;
+    const sid = attrs.sid || undefined;
+    const supersedes = attrs.supersedes || undefined;
+    const supersededBy = attrs['superseded-by'] || undefined;
+    const rawStatus = attrs.status || undefined;
+    const status = rawStatus && VALID_STATUS.includes(rawStatus) ? rawStatus : undefined;
 
     entries.push({
       id,
@@ -152,6 +169,12 @@ function parseEntryBlocks(
       category: entryCategory,
       keywords: kws,
       ...(ref ? { ref } : {}),
+      ...(confidence ? { confidence } : {}),
+      ...(conflictNote ? { conflictNote } : {}),
+      ...(sid ? { sid } : {}),
+      ...(supersedes ? { supersedes } : {}),
+      ...(supersededBy ? { supersededBy } : {}),
+      ...(status ? { status } : {}),
     });
   }
 

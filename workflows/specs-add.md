@@ -1,7 +1,12 @@
+<!-- session-mode: inherited -->
 ---
 name: spec-add
 alias: spec-add
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 
 # Workflow: spec-add
 
@@ -43,7 +48,7 @@ content  -- free-text description of the entry
 ## Prerequisites
 
 - Target specs directory must exist:
-  - `project`: `.workflow/specs/` (run `/spec-setup` or `maestro spec init`)
+  - `project`: `.workflow/specs/` (run `/maestro-spec setup` or `maestro spec init`)
   - `global`: `~/.maestro/specs/` (run `maestro spec init --scope global`)
   - `team`: `.workflow/collab/specs/` (run `maestro spec init --scope team`)
   - `personal`: `.workflow/collab/specs/{uid}/` (run `maestro spec init --scope personal`)
@@ -63,7 +68,7 @@ Validate:
   - category ∈ {coding, arch, quality, debug, test, review, learning, ui}
   - content non-empty
   - personal scope requires uid (resolve from `maestro collab whoami` if --uid not given)
-On failure: show usage `/spec-add [--scope <scope>] <category> <content>`, exit
+On failure: show usage `/maestro-spec add [--scope <scope>] <category> <content>`, exit
 ```
 
 ### Step 2: Resolve Target File
@@ -97,23 +102,27 @@ Keyword quality rules:
 ```
 Entry format (closed-tag), date = YYYY-MM-DD, title = first meaningful phrase:
 
-<spec-entry category="{category}" keywords="{kw1},{kw2},{kw3}" date="{YYYY-MM-DD}" title="{title}" description="{one-line summary}">
+<spec-entry category="{category}" keywords="{kw1},{kw2},{kw3}" date="{YYYY-MM-DD}" sid="{S-YYYYMMDD-xxxx}" title="{title}" description="{one-line summary}">
 ### {title}
 {content}
 </spec-entry>
 ```
 
+`sid` (stable identity) 由 CLI 自动生成（`S-YYYYMMDD-xxxx`，base36 随机后缀），用于 supersession 演化链。
+
 ### Step 5: Append to Target File
 
 Read target file. Append the formatted `<spec-entry>` block at the end. Write file back.
 
+CLI 调用时加 `--json` 可从输出中获取生成的 `sid`（supersession 流程需要）。
+
 ### Step 6: Confirm
 
-Display: category, scope, target file path, keywords, and verify command:
+Display: category, scope, target file path, keywords, sid, and verify command:
 ```
 maestro spec load --scope <scope> --keyword <kw1>
 ```
 
 ## Output
 
-One `<spec-entry>` block appended to the target file.
+One `<spec-entry>` block appended to the target file (with auto-generated sid).

@@ -1,7 +1,5 @@
 # Dispatch Tasks
 
-Create task chains from dependency graph with proper blockedBy relationships.
-
 ## Workflow
 
 1. Read task-analysis.json -> extract dependency_graph
@@ -22,7 +20,7 @@ TASK:
   - <step 1>
   - <step 2>
 CONTEXT:
-  - Session: <session-folder>
+  - Session: {run_dir}/work/team
   - Upstream artifacts: <list>
   - Key files: <list>
 EXPECTED: <artifact path> + <quality criteria>

@@ -122,6 +122,7 @@ export function registerSpecCommand(program: Command): void {
     .description('List spec files (all scopes by default)')
     .option('--scope <scope>', 'Spec scope: project|global|team|personal (omit for all)')
     .option('--uid <uid>', 'User id for personal scope')
+    .option('--json', 'Output as JSON')
     .action(async (opts) => {
       const { logCliEndpoint } = await import('../hooks/spec-analytics.js');
       logCliEndpoint(process.cwd(), 'spec list', { scope: opts.scope });
@@ -131,6 +132,51 @@ export function registerSpecCommand(program: Command): void {
       const { parseSpecEntries: parseEntries } = await import('../tools/spec-entry-parser.js');
 
       const uid = await resolveUid(opts);
+
+      const getFileEntries = (specsDir: string, file: string, scope: string) => {
+        try {
+          const raw = readFs(pathJoin(specsDir, file), 'utf-8');
+          const { entries } = parseEntries(raw);
+          return entries.map(e => ({
+            ...e,
+            file,
+            scope,
+          }));
+        } catch {
+          return [];
+        }
+      };
+
+      if (opts.json) {
+        const allEntries: any[] = [];
+        if (opts.scope) {
+          const scope = validateScope(opts.scope);
+          if (scope === 'personal' && !uid) {
+            console.error('Error: personal scope requires --uid or team membership.');
+            process.exit(1);
+          }
+          const specsDir = resolveSpecDir(process.cwd(), scope, uid);
+          if (existsSync(specsDir)) {
+            const files = readdirSync(specsDir).filter(f => f.endsWith('.md'));
+            for (const file of files) {
+              allEntries.push(...getFileEntries(specsDir, file, scope));
+            }
+          }
+        } else {
+          const scopesToShow: Array<typeof VALID_SCOPES[number]> = ['global', 'project', 'team'];
+          for (const scope of scopesToShow) {
+            const specsDir = resolveSpecDir(process.cwd(), scope);
+            if (existsSync(specsDir)) {
+              const files = readdirSync(specsDir).filter(f => f.endsWith('.md'));
+              for (const file of files) {
+                allEntries.push(...getFileEntries(specsDir, file, scope));
+              }
+            }
+          }
+        }
+        console.log(JSON.stringify({ entries: allEntries }, null, 2));
+        return;
+      }
 
       const printFileEntries = (specsDir: string, file: string) => {
         try {
@@ -247,9 +293,10 @@ export function registerSpecCommand(program: Command): void {
     .description('Initialize spec system with seed documents')
     .option('--scope <scope>', 'Spec scope: project|global|team|personal (default: project)')
     .option('--uid <uid>', 'User id for personal scope')
+    .option('--preset <name>', 'Add preset seed docs (e.g., academic)')
     .action(async (opts) => {
       const { logCliEndpoint } = await import('../hooks/spec-analytics.js');
-      logCliEndpoint(process.cwd(), 'spec init', { scope: opts.scope });
+      logCliEndpoint(process.cwd(), 'spec init', { scope: opts.scope, preset: opts.preset });
       const { initSpecSystem } = await import('../tools/spec-init.js');
 
       const scope = validateScope(opts.scope);
@@ -260,9 +307,19 @@ export function registerSpecCommand(program: Command): void {
         process.exit(1);
       }
 
+      if (opts.preset) {
+        const { SPEC_PRESETS } = await import('../tools/spec-seeds.js');
+        if (!SPEC_PRESETS[opts.preset]) {
+          const available = Object.keys(SPEC_PRESETS).join(', ');
+          console.error(`Error: unknown preset "${opts.preset}". Available: ${available}`);
+          process.exit(1);
+        }
+      }
+
       const label = SCOPE_LABELS[scope];
-      console.log(`Initializing ${label.toLowerCase()}...`);
-      const result = initSpecSystem(process.cwd(), scope, uid);
+      const presetLabel = opts.preset ? ` with preset "${opts.preset}"` : '';
+      console.log(`Initializing ${label.toLowerCase()}${presetLabel}...`);
+      const result = initSpecSystem(process.cwd(), scope, uid, opts.preset);
 
       if (result.directories.length > 0) {
         console.log('\nDirectories created:');
@@ -421,6 +478,11 @@ export function registerSpecCommand(program: Command): void {
             }
           }
         }
+        if (results.some(r => r.ok && !r.duplicate)) {
+          const { resolve: pathResolve } = await import('node:path');
+          const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+          invalidateSearchIndex(pathResolve(process.cwd(), '.workflow')).catch(() => {});
+        }
         return;
       }
 
@@ -453,17 +515,14 @@ export function registerSpecCommand(program: Command): void {
 
         // If ref file doesn't exist AND --knowhow-type given → create knowhow doc first
         if (!fileExists(absRefPath) && knowhowType) {
-          const KNOWHOW_PREFIX_MAP: Record<string, string> = {
-            session: 'KNW', tip: 'TIP', template: 'TPL', recipe: 'RCP',
-            reference: 'REF', decision: 'DCS', asset: 'AST', blueprint: 'BLP',
-            document: 'DOC',
-          };
+          const { KNOWHOW_PREFIX_MAP } = await import('../utils/frontmatter.js');
           const prefix = KNOWHOW_PREFIX_MAP[knowhowType] ?? 'DOC';
           const dir = pathJoin(process.cwd(), '.workflow', 'knowhow');
           if (!fileExists(dir)) mkDir(dir, { recursive: true });
 
+          const { escapeYamlValue } = await import('../utils/frontmatter.js');
           const now = new Date();
-          const fmLines = ['---', `title: ${title}`, `type: ${knowhowType}`, `category: ${category}`, `created: ${now.toISOString()}`];
+          const fmLines = ['---', `title: ${escapeYamlValue(title)}`, `type: ${knowhowType}`, `category: ${category}`, `created: ${now.toISOString()}`];
           if (keywords.length > 0) {
             fmLines.push('keywords:');
             for (const t of keywords) fmLines.push(`  - ${t}`);
@@ -514,6 +573,11 @@ export function registerSpecCommand(program: Command): void {
           console.error(`Error: failed to add "${result.title}"`);
           process.exit(1);
         }
+        if (result.ok && !result.duplicate) {
+          const { resolve: pathResolve } = await import('node:path');
+          const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+          invalidateSearchIndex(pathResolve(process.cwd(), '.workflow')).catch(() => {});
+        }
         return;
       }
 
@@ -538,6 +602,11 @@ export function registerSpecCommand(program: Command): void {
       } else {
         console.error(`Error: failed to add "${result.title}"`);
         process.exit(1);
+      }
+      if (result.ok && !result.duplicate) {
+        const { resolve: pathResolve } = await import('node:path');
+        const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+        invalidateSearchIndex(pathResolve(process.cwd(), '.workflow')).catch(() => {});
       }
     });
 
@@ -864,6 +933,263 @@ export function registerSpecCommand(program: Command): void {
         if (result.content.length > 500) console.log('\n... (truncated)');
       }
     });
+  // ── conflict ─────────────────────────────────────────────────────────
+  const conflict = spec
+    .command('conflict')
+    .description('Manage confidence and conflict markers on spec entries');
+
+  conflict
+    .command('list')
+    .alias('ls')
+    .description('List all entries with conflict markers or degraded confidence')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { json?: boolean }) => {
+      const { listConflicts } = await import('../tools/spec-conflict-marker.js');
+      const conflicts = listConflicts(process.cwd());
+
+      if (opts.json) {
+        console.log(JSON.stringify(conflicts, null, 2));
+        return;
+      }
+
+      if (conflicts.length === 0) {
+        console.log('No conflicts or degraded entries found.');
+        return;
+      }
+
+      console.log(`Found ${conflicts.length} marked entries:\n`);
+      for (const c of conflicts) {
+        const badge = c.confidence === 'contested' ? '[CONTESTED]'
+          : c.confidence === 'low' ? '[LOW]'
+          : `[${c.confidence.toUpperCase()}]`;
+        console.log(`  ${badge} ${c.file}:${c.lineStart} "${c.title}" [${c.category}]`);
+        if (c.conflictNote) console.log(`    Note: ${c.conflictNote}`);
+        if (c.conflictMarker) console.log(`    Marker: ${c.conflictMarker}`);
+      }
+    });
+
+  conflict
+    .command('mark')
+    .description('Mark a spec entry as conflicted')
+    .argument('<file>', 'Spec filename (e.g. coding-conventions.md)')
+    .argument('<line>', 'Line number of the <spec-entry> tag')
+    .requiredOption('--note <text>', 'Conflict description')
+    .option('--marker <id>', 'Conflict marker ID (auto-generated if omitted)')
+    .option('--confidence <level>', 'Confidence level: high|medium|low|contested (default: contested)')
+    .action(async (file: string, line: string, opts: { note: string; marker?: string; confidence?: string }) => {
+      const { markConflict } = await import('../tools/spec-conflict-marker.js');
+      const result = markConflict(process.cwd(), file, parseInt(line, 10), {
+        note: opts.note,
+        marker: opts.marker,
+        confidence: (opts.confidence as 'contested') || 'contested',
+      });
+
+      if (result.success) {
+        console.log(`Marked ${file}:${line} as conflicted.`);
+        const { resolve: pathResolve } = await import('node:path');
+        const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+        invalidateSearchIndex(pathResolve(process.cwd(), '.workflow')).catch(() => {});
+      } else {
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+    });
+
+  conflict
+    .command('clear')
+    .description('Clear conflict markers from a spec entry')
+    .argument('<file>', 'Spec filename')
+    .argument('<line>', 'Line number of the <spec-entry> tag')
+    .option('--confidence <level>', 'Set new confidence level after clearing (default: remove)')
+    .action(async (file: string, line: string, opts: { confidence?: string }) => {
+      const { clearConflict } = await import('../tools/spec-conflict-marker.js');
+      const result = clearConflict(
+        process.cwd(),
+        file,
+        parseInt(line, 10),
+        opts.confidence as 'high' | undefined,
+      );
+
+      if (result.success) {
+        console.log(`Cleared conflict markers from ${file}:${line}.`);
+        const { resolve: pathResolve } = await import('node:path');
+        const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+        invalidateSearchIndex(pathResolve(process.cwd(), '.workflow')).catch(() => {});
+      } else {
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+    });
+
+  conflict
+    .command('set-confidence')
+    .description('Set confidence level on a spec entry')
+    .argument('<file>', 'Spec filename')
+    .argument('<line>', 'Line number of the <spec-entry> tag')
+    .argument('<level>', 'Confidence level: high|medium|low|contested')
+    .action(async (file: string, line: string, level: string) => {
+      const { setConfidence } = await import('../tools/spec-conflict-marker.js');
+      const result = setConfidence(
+        process.cwd(),
+        file,
+        parseInt(line, 10),
+        level as 'high',
+      );
+
+      if (result.success) {
+        console.log(`Set confidence=${level} on ${file}:${line}.`);
+        const { resolve: pathResolve } = await import('node:path');
+        const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+        invalidateSearchIndex(pathResolve(process.cwd(), '.workflow')).catch(() => {});
+      } else {
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+    });
+
+  conflict
+    .command('clear-all')
+    .description('Clear all conflict markers in a spec file')
+    .argument('<file>', 'Spec filename')
+    .option('--confidence <level>', 'Set new confidence level after clearing')
+    .action(async (file: string, opts: { confidence?: string }) => {
+      const { clearAllConflicts } = await import('../tools/spec-conflict-marker.js');
+      const result = clearAllConflicts(
+        process.cwd(),
+        file,
+        opts.confidence as 'high' | undefined,
+      );
+
+      console.log(`Cleared ${result.cleared} conflict markers from ${file}.`);
+      if (result.errors.length > 0) {
+        for (const err of result.errors) console.error(`  Error: ${err}`);
+      }
+      if (result.cleared > 0) {
+        const { resolve: pathResolve } = await import('node:path');
+        const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+        invalidateSearchIndex(pathResolve(process.cwd(), '.workflow')).catch(() => {});
+      }
+    });
+
+  // ── supersede ────────────────────────────────────────────────────────
+  spec
+    .command('supersede')
+    .description('Mark an entry as replaced by a newer one, preserving the evolution chain')
+    .argument('<old-sid>', 'sid of the entry being replaced')
+    .requiredOption('--by <new-sid>', 'sid of the replacement entry')
+    .action(async (oldSid: string, opts: { by: string }) => {
+      const { supersedeEntry, getEvolutionChain } = await import('../tools/spec-conflict-marker.js');
+
+      if (oldSid === opts.by) {
+        console.error(`Error: old and replacement sid are identical: ${oldSid}`);
+        process.exit(1);
+      }
+      if (getEvolutionChain(process.cwd(), opts.by).length === 0) {
+        console.error(`Error: replacement sid not found: ${opts.by}`);
+        process.exit(1);
+      }
+
+      const result = supersedeEntry(process.cwd(), oldSid, opts.by);
+      if (result.success) {
+        console.log(`Superseded ${oldSid} → ${opts.by}. Old entry marked deprecated (excluded from search/load).`);
+        const { resolve: pathResolve } = await import('node:path');
+        const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+        invalidateSearchIndex(pathResolve(process.cwd(), '.workflow')).catch(() => {});
+      } else {
+        console.error(`Error: ${result.error}`);
+        process.exit(1);
+      }
+    });
+
+  // ── history ──────────────────────────────────────────────────────────
+  spec
+    .command('history')
+    .description('Show the evolution chain for a spec entry (oldest → newest)')
+    .argument('<sid>', 'Any sid belonging to the chain')
+    .option('--json', 'Output as JSON')
+    .action(async (sid: string, opts: { json?: boolean }) => {
+      const { getEvolutionChain } = await import('../tools/spec-conflict-marker.js');
+      const chain = getEvolutionChain(process.cwd(), sid);
+
+      if (opts.json) {
+        console.log(JSON.stringify(chain, null, 2));
+        return;
+      }
+      if (chain.length === 0) {
+        console.log(`No entry found with sid ${sid}.`);
+        return;
+      }
+
+      console.log(`Evolution chain (${chain.length} version${chain.length > 1 ? 's' : ''}, oldest → newest):\n`);
+      for (let i = 0; i < chain.length; i++) {
+        const link = chain[i];
+        if (i > 0) console.log('    ↓');
+        const marker = link.current ? '● CURRENT   ' : '○ deprecated';
+        console.log(`  ${marker}  ${link.sid}  "${link.title}"  [${link.file} · ${link.date}]`);
+      }
+      const head = chain[chain.length - 1];
+      if (head.broken) {
+        console.log(`\n  ! Broken chain: ${head.sid} is deprecated but its successor no longer exists.`);
+      }
+    });
+
+  // ── health ───────────────────────────────────────────────────────────
+  spec
+    .command('health')
+    .description('Knowledge-health report: lifecycle stats, evolution chains, integrity checks')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { json?: boolean }) => {
+      const { analyzeSpecHealth } = await import('../tools/spec-conflict-marker.js');
+      const h = analyzeSpecHealth(process.cwd());
+
+      if (opts.json) {
+        console.log(JSON.stringify(h, null, 2));
+        return;
+      }
+
+      console.log('Spec knowledge health\n');
+      console.log(`  Entries:     ${h.total} total · ${h.active} active · ${h.deprecated} deprecated`);
+      console.log(`  Confidence:  ${h.contested} contested${h.contestedStale > 0 ? ` (${h.contestedStale} >30d)` : ''} · ${h.lowConfidence} low`);
+      console.log(`  Identity:    ${h.withSid} with sid · ${h.withoutSid} missing sid`);
+      console.log(`  Evolution:   ${h.chains} chain${h.chains === 1 ? '' : 's'}`);
+      console.log(`  Freshness:   avg ${h.avgFreshness.toFixed(2)} · ${h.staleActive} active entries stale (<0.5)`);
+
+      if (h.danglingSupersedes.length > 0) {
+        console.log(`\n  ! ${h.danglingSupersedes.length} dangling supersedes reference(s):`);
+        for (const d of h.danglingSupersedes) console.log(`    ${d.sid} -> ${d.target} (missing) in ${d.file}`);
+      }
+      if (h.danglingSupersededBy.length > 0) {
+        console.log(`\n  ! ${h.danglingSupersededBy.length} dangling superseded-by reference(s) — successor deleted:`);
+        for (const d of h.danglingSupersededBy) console.log(`    ${d.sid} -> ${d.target} (missing) in ${d.file}`);
+      }
+      if (h.cyclicSids.length > 0) {
+        console.log(`\n  ! supersedes cycle involving: ${h.cyclicSids.join(', ')}`);
+      }
+      if (h.danglingSupersedes.length === 0 && h.danglingSupersededBy.length === 0 && h.cyclicSids.length === 0) {
+        console.log('\n  Evolution chain integrity OK');
+      }
+      if (h.withoutSid > 0) {
+        console.log(`\n  Hint: ${h.withoutSid} legacy entries lack a sid — run 'maestro spec backfill-sid' to enable supersession.`);
+      }
+    });
+
+  // ── backfill-sid ─────────────────────────────────────────────────────
+  spec
+    .command('backfill-sid')
+    .description('Assign a stable sid to every spec entry that lacks one (idempotent)')
+    .action(async () => {
+      const { backfillSids } = await import('../tools/spec-conflict-marker.js');
+      const { updated } = backfillSids(process.cwd());
+      console.log(updated > 0
+        ? `Assigned sid to ${updated} entr${updated === 1 ? 'y' : 'ies'}.`
+        : 'All entries already have a sid.');
+      if (updated > 0) {
+        const { resolve: pathResolve } = await import('node:path');
+        const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+        invalidateSearchIndex(pathResolve(process.cwd(), '.workflow')).catch(() => {});
+      }
+    });
+
   // ── analytics ────────────────────────────────────────────────────────
   spec
     .command('analytics')
@@ -1010,15 +1336,27 @@ export function registerSpecCommand(program: Command): void {
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve) => {
+    if (process.stdin.isTTY) {
+      resolve('');
+      return;
+    }
     let data = '';
     process.stdin.setEncoding('utf8');
-    process.stdin.on('readable', () => {
+    
+    const onReadable = () => {
       let chunk;
       while ((chunk = process.stdin.read()) !== null) {
         data += chunk as string;
       }
-    });
-    process.stdin.on('end', () => resolve(data));
-    if (process.stdin.isTTY) resolve('');
+    };
+    
+    const onEnd = () => {
+      process.stdin.off('readable', onReadable);
+      process.stdin.off('end', onEnd);
+      resolve(data);
+    };
+
+    process.stdin.on('readable', onReadable);
+    process.stdin.on('end', onEnd);
   });
 }

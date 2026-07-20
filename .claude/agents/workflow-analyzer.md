@@ -40,6 +40,7 @@ You perform structured multi-dimensional analysis of technical topics, proposals
 - Comparison alternatives (if applicable)
 - **Codebase docs** (if `.workflow/codebase/` exists) — `ARCHITECTURE.md` and `CONCERNS.md` as evidence sources for feasibility/risk/dependency dimensions
 - **Wiki prior knowledge** (if `maestro wiki` available) — `maestro wiki search "<subject keywords>"` for prior decisions and analyses on related topics
+- **Codebase search** — prefer `maestro explore "FIND: <analysis target> SCOPE: src/ EXPECTED: file:line evidence"` over raw Grep for gathering multi-file evidence across dimensions
 
 ## Output
 `analysis.md`:
@@ -96,9 +97,7 @@ N/A -- produces markdown analysis document
 
 ## Output Location
 
-- **Scratch**: `.workflow/scratch/{topic-slug}/analysis.md`
-
-The caller specifies the output path. If no path is specified, default to scratch mode using the subject as the slug.
+The caller specifies the output path. Defaults when unspecified: `{run_dir}/outputs/analysis.md` in run mode; `.workflow/scratch/{topic-slug}/analysis.md` (subject as slug) for ad-hoc invocation without run context.
 
 ## Error Behavior
 - If evidence is insufficient for a dimension, score as N/A with explanation rather than guessing

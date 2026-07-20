@@ -1,7 +1,5 @@
 # Command: iterate
 
-Phase 3 execution guide. ONE iteration body. Loop is driven by callback re-entry — each iteration is spawn-and-stop.
-
 ## Two Entry Points
 
 | Entry | Trigger | Action |
@@ -22,7 +20,7 @@ If `k > session.max_iterations`: force converge to Phase 4 (safety net).
 ### Step 2: Call aco.py select
 
 ```
-Bash: python <skill_root>/scripts/aco.py --session <session> select --iter <k>
+Bash: python <skill_root>/scripts/aco.py --session {run_dir}/work/team select --iter <k>
 ```
 
 Parse stdout JSON. Expected:
@@ -74,7 +72,7 @@ Agent({
 role: ant
 role_spec: <skill_root>/roles/ant/role.md
 session: <session_path>
-session_id: <session_id>
+session_id: <run-id>
 team_name: swarm
 requirement: <config.ant_prompt.objective>
 inner_loop: false
@@ -137,15 +135,15 @@ Agent({
 role: scorer
 role_spec: <skill_root>/roles/scorer/role.md
 session: <session_path>
-session_id: <session_id>
+session_id: <run-id>
 team_name: swarm
 requirement: score iteration <k> ants
 inner_loop: false
 
 ## Context
 Iteration to score: <k>
-Output file: <session>/scores/iter-<k>-scores.json
-Read all artifacts: <session>/artifacts/ant-<k>-*.json`
+Output file: {run_dir}/work/team/scores/iter-<k>-scores.json
+Read all artifacts: {run_dir}/outputs/ant-<k>-*.json`
 })
 ```
 
@@ -156,7 +154,7 @@ If `scoring.mode == "script"` or `"fallback"` -> proceed directly to Step 3.
 ### Step 3: Call aco.py update
 
 ```
-Bash: python <skill_root>/scripts/aco.py --session <session> update --iter <k>
+Bash: python <skill_root>/scripts/aco.py --session {run_dir}/work/team --run-dir <run_dir> update --iter <k>
 ```
 
 Parse stdout JSON. Expected:
@@ -189,7 +187,7 @@ If `hallucinations_flagged.length > N/2`: append warning to wisdom/issues.md (hi
 ### Step 5: Call aco.py converged
 
 ```
-Bash: python <skill_root>/scripts/aco.py --session <session> converged
+Bash: python <skill_root>/scripts/aco.py --session {run_dir}/work/team converged
 ```
 
 Parse:

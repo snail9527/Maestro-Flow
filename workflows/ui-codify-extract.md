@@ -1,6 +1,9 @@
-# UI Codify: Phase 2 — Parallel Agent Extraction
+<!-- session-mode: inherited -->
 
-从源代码文件中提取设计系统 token，通过 3 个并行 Agent 分析。
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
+# UI Codify: Phase 2 — Parallel Agent Extraction
 
 ## Overview
 
@@ -352,6 +355,7 @@ Task(subagent_type="ui-design-agent",
 ```bash
 # Agents run in parallel and write separate output files
 # Each agent generates its own JSON directly
+Glob ${temp_dir}/style-extraction/style-1/design-tokens.json, ${temp_dir}/animation-extraction/animation-tokens.json, ${temp_dir}/layout-extraction/layout-templates.json MUST exist before Phase 2 complete; BLOCKED if missing
 echo "[Phase 2] Parallel agent analysis complete"
 ```
 

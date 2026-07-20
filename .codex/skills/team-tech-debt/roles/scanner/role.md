@@ -2,12 +2,10 @@
 role: scanner
 prefix: TDSCAN
 inner_loop: false
-message_types: [state_update]
+message_types: "[state_update]"
 ---
 
 # Tech Debt Scanner
-
-Multi-dimension tech debt scanner. Scan codebase across 5 dimensions (code, architecture, testing, dependency, documentation), produce structured debt inventory with severity rankings.
 
 ## Phase 2: Context & Environment Detection
 
@@ -15,7 +13,7 @@ Multi-dimension tech debt scanner. Scan codebase across 5 dimensions (code, arch
 |-------|--------|----------|
 | Scan scope | task description (regex: `scope:\s*(.+)`) | No (default: `**/*`) |
 | Session path | task description (regex: `session:\s*(.+)`) | Yes |
-| .msg/meta.json | <session>/.msg/meta.json | Yes |
+| .msg/meta.json | {run_dir}/work/team/.msg/meta.json | Yes |
 
 1. Extract session path and scan scope from task description
 2. Load debug specs: Run `maestro spec load --category debug` for known issues, workarounds, and root-cause notes
@@ -45,31 +43,21 @@ Multi-dimension tech debt scanner. Scan codebase across 5 dimensions (code, arch
 
 | Score | Complexity | Strategy |
 |-------|------------|----------|
-| >= 4 | High | Triple Fan-out: CLI explore + CLI 5 dimensions + multi-perspective Gemini |
+| >= 4 | High | Triple Fan-out: CLI explore + CLI 5 dimensions + multi-perspective Agy |
 | 2-3 | Medium | Dual Fan-out: CLI explore + CLI 3 dimensions |
 | 0-1 | Low | Inline: ACE search + Grep |
 
 ## Phase 3: Multi-Dimension Scan
 
 **Low Complexity** (inline):
-- Use `mcp__ace-tool__search_context` for code smells, TODO/FIXME, deprecated APIs, complex functions, dead code, missing tests
+- Use `` for code smells, TODO/FIXME, deprecated APIs, complex functions, dead code, missing tests
 - Classify findings into dimensions
 
 **Medium/High Complexity** (Fan-out):
-- Fan-out A: CLI exploration (structure, patterns, dependencies angles) via `maestro delegate --role explore --mode analysis`
+- Fan-out A: `maestro explore` multi-prompt parallel (structure, patterns, dependencies angles) — preferred over delegate for exploration
 - Fan-out B: CLI dimension analysis (parallel per dimension -- code, architecture, testing, dependency, documentation) via `--role analyze`
 - Fan-out C (High only): Multi-perspective analysis (security, performance, code-quality, architecture) via `--role analyze`
 - Fan-in: Merge results, cross-deduplicate by file:line, boost severity for multi-source findings
-
-**Delegate execution protocol** (applies to ALL fan-out CLI calls):
-```
-exec_command({
-  cmd: `maestro delegate "<prompt>" --role <role> --mode analysis`,
-  yield_time_ms: 30000, max_output_tokens: 6000
-})
-// ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
-// NEVER skip — each fan-out result is required for fan-in merge
-```
 
 **Standardize each finding**:
 
@@ -84,9 +72,17 @@ exec_command({
 | `suggestion` | Fix suggestion |
 | `estimated_effort` | small, medium, large, unknown |
 
+### Tech Profile Scan
+
+After multi-dimension scan, emit context-aware trigger signals (based on detected codebase characteristics):
+
+1. Check debt dimensions → signals (`legacy_patterns`, `test_gap`, `perf_sensitive`)
+2. Check detected patterns → risk signals (`sql_detected`, `auth_detected`, `scaling_concern`, `injection_risk`)
+3. Include `tech_profile` in Phase 5 state_update data
+
 ## Phase 4: Aggregate & Save
 
 1. Deduplicate findings across Fan-out layers (file:line key), merge cross-references
 2. Sort by severity (cross-referenced items boosted)
-3. Write `<session>/scan/debt-inventory.json` with scan_date, dimensions, total_items, by_dimension, by_severity, items
+3. Write `{run_dir}/outputs/scan/debt-inventory.json` with scan_date, dimensions, total_items, by_dimension, by_severity, items
 4. Update .msg/meta.json with `debt_inventory` array and `debt_score_before` count

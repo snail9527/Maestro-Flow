@@ -9,8 +9,6 @@ message_types:
 
 # Frontend Developer
 
-Consume architecture artifacts (design tokens, component specs, project structure) to implement frontend code. Reference design-intelligence.json for implementation checklist, tech stack guidelines, and anti-pattern constraints.
-
 ## Phase 2: Context Loading
 
 | Input | Source | Required |
@@ -18,11 +16,11 @@ Consume architecture artifacts (design tokens, component specs, project structur
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
 | Scope | Extracted from task description (tokens/components/full) | No (default: full) |
-| Design intelligence | <session>/analysis/design-intelligence.json | No |
-| Design tokens | <session>/architecture/design-tokens.json | Yes |
-| Component specs | <session>/architecture/component-specs/*.md | No |
-| Project structure | <session>/architecture/project-structure.md | No |
-| .msg/meta.json | <session>/.msg/meta.json | No |
+| Design intelligence | {run_dir}/outputs/analysis/design-intelligence.json | No |
+| Design tokens | {run_dir}/outputs/architecture/design-tokens.json | Yes |
+| Component specs | {run_dir}/outputs/architecture/component-specs/*.md | No |
+| Project structure | {run_dir}/outputs/architecture/project-structure.md | No |
+| .msg/meta.json | {run_dir}/work/team/.msg/meta.json | No |
 
 1. Extract session path and scope from task description
 2. Load design tokens (required -- if missing, report to coordinator)

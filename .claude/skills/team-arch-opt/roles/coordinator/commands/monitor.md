@@ -1,7 +1,5 @@
 # Monitor Pipeline
 
-Event-driven pipeline coordination. Beat model: coordinator wake -> process -> spawn -> STOP.
-
 ## Constants
 
 - SPAWN_MODE: background
@@ -124,14 +122,14 @@ Find ready tasks, spawn workers, STOP.
         prompt: `## Role Assignment
       role: <role>
       role_spec: ~  or <project>/.claude/skills/team-arch-opt/roles/<role>/role.md
-      session: <session-folder>
-      session_id: <session-id>
+      session: {run_dir}/work/team
+      session_id: <run-id>
       team_name: arch-opt
       requirement: <task-description>
       inner_loop: <true|false>
 
       ## Progress Milestones
-      session_id: <session-id>
+      session_id: <run-id>
       Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
       Report blockers immediately via team_msg type="blocker".
       Report completion via team_msg type="task_complete" after final SendMessage.
@@ -169,7 +167,7 @@ When both VALIDATE-* and REVIEW-* are completed for a branch/pipeline:
 | FAIL | REVISE/REJECT | Create FIX task with combined feedback |
 | Any | REJECT | Create FIX task + flag for designer re-evaluation |
 
-Fix cycle tracking per branch in session.json `fix_cycles`:
+Fix cycle tracking per branch in team-session.json `fix_cycles`:
 - < 3: Create FIX task, increment cycle count
 - >= 3: Escalate THIS branch to user. Other branches continue
 
@@ -184,7 +182,14 @@ Completion check by mode:
 | Fan-out | ALL branches have VALIDATE + REVIEW completed (or escalated), shared stages done |
 | Independent | ALL pipelines have VALIDATE + REVIEW completed (or escalated) |
 
-1. For fan-out/independent: aggregate per-branch/pipeline results to `<session>/artifacts/aggregate-results.json`
+  +- Run lifecycle completion:
+  |   - Read run_id from team-session.json.run.run_id
+  |   - Write {run_dir}/report.md with frontmatter (verdict/summary/concerns)
+  |   - Run `maestro run complete <run_id>`
+  |   - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
+  |
+
+1. For fan-out/independent: aggregate per-branch/pipeline results to `{run_dir}/outputs/aggregate-results.json`
 2. If any tasks not completed, return to handleSpawnNext
 3. If all completed -> transition to coordinator Phase 5
 
@@ -204,7 +209,7 @@ Capability gap reported mid-pipeline.
 
 1. Parse gap description
 2. Check if existing role covers it -> redirect
-3. Role count < 5 -> generate dynamic role-spec in <session>/role-specs/
+3. Role count < 5 -> generate dynamic role-spec in {run_dir}/work/team/role-specs/
 4. Create new task, spawn worker
 5. Role count >= 5 -> merge or pause
 

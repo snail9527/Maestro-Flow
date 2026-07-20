@@ -10,8 +10,6 @@ message_types:
 
 # Tester
 
-Test execution with iterative fix cycle.
-
 ## Identity
 - Tag: [tester] | Prefix: TEST-*
 - Responsibility: Detect framework → run tests → fix failures → report results

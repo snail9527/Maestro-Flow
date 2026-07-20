@@ -1,7 +1,5 @@
 # Command: dispatch
 
-> 任务链创建与依赖管理。根据 pipeline 模式创建技术债务治理任务链并分配给 worker 角色。
-
 ## When to Use
 
 - Phase 3 of Coordinator

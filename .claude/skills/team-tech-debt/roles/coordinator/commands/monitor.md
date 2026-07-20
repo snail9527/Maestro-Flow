@@ -1,7 +1,5 @@
 # Monitor Pipeline
 
-Event-driven pipeline coordination. Beat model: coordinator wake -> process -> spawn -> STOP.
-
 ## Constants
 
 - SPAWN_MODE: background
@@ -69,7 +67,7 @@ Worker completed. Process and advance.
 
      Fix-Verify Task Creation:
      ```
-     TaskCreate({ subject: "TDFIX-fix-<round>", description: "PURPOSE: Fix regressions | Session: <session>" })
+     TaskCreate({ subject: "TDFIX-fix-<round>", description: "PURPOSE: Fix regressions | Session: {run_dir}/work/team" })
      TaskCreate({ subject: "TDVAL-recheck-<round>", description: "..." })
      TaskUpdate({ taskId: "TDVAL-recheck-<round>", addBlockedBy: ["TDFIX-fix-<round>"] })
      ```
@@ -115,7 +113,7 @@ Pipeline Status (<mode>):
   [WAIT]  TDVAL-001   (validator) -> blocked by TDFIX-001
 
 GC Rounds: 0/3
-Session: <session-id>
+Session: <run-id>
 Commands: 'resume' to advance | 'check' to refresh
 ```
 
@@ -151,14 +149,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: ~  or <project>/.claude/skills/team-tech-debt/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: tech-debt
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -186,6 +184,11 @@ Pipeline done. Generate report and completion action.
 1. Verify all tasks (including fix-verify tasks) have status "completed"
 2. If any not completed -> handleSpawnNext
 3. If all completed:
+   - Run lifecycle completion:
+     - Read run_id from team-session.json.run.run_id
+     - Write {run_dir}/report.md with frontmatter (verdict/summary/concerns)
+     - Run `maestro run complete <run_id>`
+     - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
    - Read final state from .msg/meta.json
    - If worktree exists and validation passed: commit, push, gh pr create, cleanup worktree
    - Compile summary: total tasks, completed, gc_rounds, debt_score_before, debt_score_after
@@ -197,7 +200,7 @@ Capability gap reported mid-pipeline.
 
 1. Parse gap description
 2. Check if existing role covers it -> redirect
-3. Role count < 5 -> generate dynamic role spec in <session>/role-specs/
+3. Role count < 5 -> generate dynamic role spec in {run_dir}/work/team/role-specs/
 4. Create new task, spawn worker
 5. Role count >= 5 -> merge or pause
 

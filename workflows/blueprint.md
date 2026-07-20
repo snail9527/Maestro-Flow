@@ -1,6 +1,11 @@
-# Workflow: Blueprint
+---
+name: blueprint
+prepare: blueprint
+commands: [maestro-blueprint]
+session-mode: inherited
+---
 
-Blueprint specification document chain producing a complete specification package (Product Brief, PRD, Architecture, Epics) through 6 sequential phases with multi-CLI analysis and interactive refinement. Pure documentation — no code generation.
+# Workflow: Blueprint
 
 ## Pipeline Position
 
@@ -14,40 +19,35 @@ brainstorm (parallel) → blueprint → analyze → plan
 P0: Spec Study → P1: Discovery → P1.5: Req Expansion → P2: Product Brief → P3: PRD → P4: Architecture → P5: Epics → P6: Readiness Check
 
 P6 gate: Pass (>=80%) → Handoff | Review (60-79%) → Handoff w/caveats | Fail (<60%) → P6.5 Auto-Fix (max 2 iter) → re-check
-```
 
-## Arguments
-
-```
-$ARGUMENTS: "<idea or @file> [-y] [-c] [--from <source>]"
-
-<idea>              -- Idea text or @file reference
--y / --yes          -- Auto mode, skip interactive questions
--c / --continue     -- Resume from last checkpoint
---from <source>     -- Load upstream context package (brainstorm:ID, @file, or path) as enriched seed. Alias: --from-brainstorm
+GATE P2→P3: REQUIRED `product-brief.md` written with ≥5 glossary terms in `glossary.json`; BLOCKED if `product-brief.md` missing or glossary < 5 terms.
+GATE P3→P4: REQUIRED `requirements/_index.md` written with MoSCoW priority table; BLOCKED if `_index.md` missing or MoSCoW table absent.
 ```
 
 ## Output Structure
 
 ```
-.workflow/blueprint/BLP-{slug}-{YYYY-MM-DD}/
-├── blueprint-config.json             # Session configuration + phase state
-├── discovery-context.json        # Codebase exploration (optional)
-├── refined-requirements.json     # Phase 1.5: Confirmed requirements
-├── glossary.json                 # Phase 2: Terminology glossary
-├── product-brief.md              # Phase 2: Product brief
-├── requirements/                 # Phase 3: Detailed PRD
-│   ├── _index.md                 #   Summary, MoSCoW table, traceability
-│   ├── REQ-NNN-{slug}.md         #   Functional requirement
-│   └── NFR-{type}-NNN-{slug}.md  #   Non-functional requirement
-├── architecture/                 # Phase 4: Architecture decisions
-│   ├── _index.md                 #   Overview, components, tech stack
-│   └── ADR-NNN-{slug}.md         #   Architecture Decision Record
-├── epics/                        # Phase 5: Epic/Story breakdown
-│   ├── _index.md                 #   Epic table, dependency map, MVP
-│   └── EPIC-NNN-{slug}.md        #   Individual Epic with Stories
-├── readiness-report.md           # Phase 6: Quality report
-└── blueprint-summary.md          # Phase 6: Executive summary
+{run_dir}/
+├── outputs/
+│   ├── blueprint-config.json             # Session configuration + phase state
+│   ├── discovery-context.json        # Codebase exploration (optional)
+│   ├── refined-requirements.json     # Phase 1.5: Confirmed requirements
+│   ├── glossary.json                 # Phase 2: Terminology glossary
+│   ├── product-brief.md              # Phase 2: Product brief
+│   ├── requirements/                 # Phase 3: Detailed PRD
+│   │   ├── _index.md                 #   Summary, MoSCoW table, traceability
+│   │   ├── REQ-NNN-{slug}.md         #   Functional requirement
+│   │   └── NFR-{type}-NNN-{slug}.md  #   Non-functional requirement
+│   ├── architecture/                 # Phase 4: Architecture decisions
+│   │   ├── _index.md                 #   Overview, components, tech stack
+│   │   └── ADR-NNN-{slug}.md         #   Architecture Decision Record
+│   ├── epics/                        # Phase 5: Epic/Story breakdown
+│   │   ├── _index.md                 #   Epic table, dependency map, MVP
+│   │   └── EPIC-NNN-{slug}.md        #   Individual Epic with Stories
+│   ├── readiness-report.md           # Phase 6: Quality report
+│   ├── blueprint-summary.md          # Phase 6: Executive summary
+│   └── context-package.json          # Handoff context
+└── report.md
 ```
 
 ---
@@ -95,15 +95,15 @@ Parse input, analyze the seed idea, optionally explore codebase, establish sessi
   - Set `input_type: "context-package"` — skip Phase 1.5
 - If `@file`: read file content as seed
 - If text: use directly as seed
-- Missing input → error E001
+- Missing input → error
 
 **Step 2.2: Session Initialization**
 ```
-Session ID: BLP-{slug}-{YYYY-MM-DD}
-Output dir: .workflow/blueprint/{session_id}/
+Session: via maestro run create blueprint --session YYYYMMDD-blueprint-{slug}
+Output dir: {run_dir}/outputs/
 ```
 
-**Step 2.3: Seed Analysis via CLI**
+**Step 2.3: Seed Analysis via CLI** — MANDATORY, NOT SUBSTITUTABLE
 - Spawn CLI analysis to extract: problem_statement, target_users, domain, constraints, dimensions (3-5)
 - Assess complexity: simple (1-2 components) / moderate (3-5) / complex (6+)
 - For context-package input: enrich with feature decomposition data
@@ -160,7 +160,7 @@ Generate product brief through multi-perspective CLI analysis.
 - Read discovery-context.json (if codebase detected)
 - For context-package input: read context-package.json domain and requirements sections
 
-**Step 4.2: Multi-CLI Parallel Analysis (3 perspectives)**
+**Step 4.2: Multi-CLI Parallel Analysis (3 perspectives)** — MANDATORY, NOT SUBSTITUTABLE
 
 | Perspective | Role | Focus |
 |-------------|------|-------|
@@ -189,7 +189,7 @@ Generate product brief through multi-perspective CLI analysis.
 
 Generate detailed PRD with functional/non-functional requirements.
 
-**Step 5.1: Requirement Expansion via CLI**
+**Step 5.1: Requirement Expansion via CLI** — MANDATORY, NOT SUBSTITUTABLE
 - For each product brief goal, generate 3-7 functional requirements
 - Each requirement: REQ-NNN ID, title, description, user story, 2-4 acceptance criteria
 - Generate non-functional requirements: performance, security, scalability, usability
@@ -214,12 +214,12 @@ Generate detailed PRD with functional/non-functional requirements.
 
 Generate architecture decisions, component design, and technology selections.
 
-**Step 6.1: Architecture Analysis via CLI (role: review)**
+**Step 6.1: Architecture Analysis via CLI (role: review)** — MANDATORY, NOT SUBSTITUTABLE
 - System architecture style with justification
 - Core components and responsibilities
 - Component interaction diagram (Mermaid graph TD)
 - Technology stack: languages, frameworks, databases, infrastructure
-- 2-4 Architecture Decision Records (ADRs): context, decision, alternatives, consequences
+- 2-4 Architecture Decision Records (ADRs): context, decision, alternatives, consequences, evidence_source
 - Data model: entities and relationships (Mermaid erDiagram)
 - Security architecture: auth, authorization, data protection
 - **State machine**: ASCII diagram + transition table for lifecycle entities (service/platform type)
@@ -230,7 +230,7 @@ Generate architecture decisions, component design, and technology selections.
 - Glossary injection for terminology consistency
 - If `apiResearchContext` is set: inject as "External API Research" context
 
-**Step 6.2: Architecture Review via CLI (role: review)**
+**Step 6.2: Architecture Review via CLI (role: review)** — MANDATORY, NOT SUBSTITUTABLE
 - Challenge each ADR, identify scalability bottlenecks
 - Assess security gaps, evaluate technology choices
 - Rate overall quality 1-5
@@ -252,7 +252,7 @@ Generate architecture decisions, component design, and technology selections.
 
 Decompose specification into executable Epics and Stories.
 
-**Step 7.1: Epic Decomposition via CLI**
+**Step 7.1: Epic Decomposition via CLI** — MANDATORY, NOT SUBSTITUTABLE
 - Group requirements into logical Epics (EPIC-NNN IDs). Epic count is unconstrained — downstream workflows will merge Epics into minimal phases via the minimum-phase principle.
 - Tag MVP subset
 - For each Epic: 2-5 Stories in "As a...I want...So that..." format
@@ -280,14 +280,14 @@ Decompose specification into executable Epics and Stories.
 
 Validate specification package and provide execution handoff.
 
-**Step 8.1: Cross-Document Validation via CLI**
+**Step 8.1: Cross-Document Validation via CLI** — MANDATORY, NOT SUBSTITUTABLE
 Score on 4 dimensions (25% each):
 1. **Completeness**: all required sections present with substantive content
 2. **Consistency**: terminology uniform (glossary compliance), scope containment, non-goals respected
 3. **Traceability**: goals → requirements → architecture → epics (matrix generated)
 4. **Depth**: acceptance criteria testable, ADRs justified, stories estimable
 
-Gate decision: Pass (>=80) / Review (60-79) / Fail (<60)
+Gate decision: Pass (>=80) / Review (60-79) / Fail (<60) — **GATE: readiness-passed** (Pass/Review)
 
 **Step 8.2: Generate Reports**
 - `readiness-report.md` — quality scores, issue list (Error/Warning/Info), traceability matrix
@@ -300,8 +300,8 @@ Gate decision: Pass (>=80) / Review (60-79) / Fail (<60)
 
 | Gate Result | Action |
 |-------------|--------|
-| Pass (>=80%) | Proceed to Step 11 (Final Handoff) |
-| Review (60-79%) | Proceed to Step 11 with caveats logged |
+| Pass (>=80%) | Proceed to Step 10 (Final Handoff) |
+| Review (60-79%) | Proceed to Step 10 with caveats logged |
 | Fail (<60%) | Trigger Step 9 (Auto-Fix), then re-run Step 8 |
 
 ### Step 9: Auto-Fix (Phase 6.5, conditional)
@@ -325,31 +325,33 @@ Triggered when Phase 6 score < 60%.
 
 **Output**: Updated Phase 2-5 documents, updated blueprint-config.json with iteration tracking
 
-### Step 11: Final Handoff
+### Step 10: Final Handoff
 
-Blueprint specification package is complete. Suggest next workflow steps.
+Blueprint specification package is complete (all 6 phases done). Suggest next workflow steps. **GATE: phases-complete**
 
-**Step 11.1: Handoff Options (AskUserQuestion)**
+**Step 10.1: Handoff Options (AskUserQuestion)**
 
 | Option | Action |
 |--------|--------|
-| Analyze specification | Run `maestro-analyze` to deep-analyze the blueprint outputs |
-| Generate roadmap | Run `maestro-roadmap` to convert Epics into a phased execution roadmap |
-| Plan first phase | Skill({ skill: "maestro-plan", args: "1" }) |
-| Create issues | Generate issues per Epic via Skill({ skill: "manage-issue" }) |
+| Analyze specification | `analyze --from blueprint:{artifact_id}` |
+| Generate roadmap | `roadmap --from blueprint:{artifact_id}` |
+| Plan first phase | `plan 1 --from blueprint:{artifact_id}` |
+| Create issues | Recommend `/maestro-manage issue create ...` per Epic |
 | Export only | Blueprint complete, no further action |
 
-### Step 12: Final Report
+### Step 11: Final Report
 
 ```
 == blueprint complete ==
-Session: BLP-{slug}-{date} | Quality: {score}% ({gate}) | Phases: {completed_count}/6
-Output: .workflow/blueprint/{session_id}/
+Session: {session_id} | Quality: {score}% ({gate}) | Phases: {completed_count}/6
+Output: {run_dir}/outputs/
   blueprint-config.json, product-brief.md, requirements/, architecture/, epics/,
-  readiness-report.md, blueprint-summary.md
+  readiness-report.md, blueprint-summary.md, context-package.json
 
-Next: maestro-analyze (deep analysis) | maestro-roadmap (generate roadmap) | maestro-plan 1 (plan first phase)
+Next: analyze (deep analysis) | roadmap (generate roadmap) | plan 1 (plan first phase)
 ```
+
+→ Wrap-up follows ref/finish-work.md (when gate is Pass/Review; SESSION_TYPE=blueprint, SESSION_ID={session_id}). Skipped on Fail — session stays active, excluded from wiki search.
 
 ---
 
@@ -385,19 +387,49 @@ Next: maestro-analyze (deep analysis) | maestro-roadmap (generate roadmap) | mae
 
 Resume: `-c` reads blueprint-config.json, resumes from first incomplete phase.
 
-## Error Handling
+## Error Codes
 
 | Phase | Error | Blocking? | Action |
 |-------|-------|-----------|--------|
 | Phase 1 | Empty input | Yes | Error and exit |
-| Phase 1 | CLI analysis fails | No | Basic parsing fallback |
-| Phase 1.5 | Gap analysis fails | No | Skip to basic prompts |
-| Phase 2 | Single CLI fails | No | Continue with available |
-| Phase 3 | Gemini fails | No | Codex fallback |
-| Phase 4 | Review fails | No | Skip review |
-| Phase 5 | Story generation fails | No | Generate epics only |
-| Phase 6 | Validation fails | No | Partial report |
-| Phase 6.5 | Max iterations (2) | No | Force handoff |
-| Step 2.5 | External research fails | No | apiResearchContext = null, continue |
+| Phase 1 | CLI analysis fails | No | Basic parsing fallback; flag seed_analysis as [LOW CONFIDENCE] (CLI analysis unavailable) |
+| Phase 1.5 | Gap analysis fails | No | Skip to basic prompts; flag refined-requirements.json as [LOW CONFIDENCE] (no gap analysis) |
+| Phase 2 | Single CLI fails | No | Continue with available; flag product-brief.md as [LOW CONFIDENCE] (missing perspective) |
+| Phase 3 | Gemini fails | No | Codex fallback; flag affected REQ-NNN.md as [LOW CONFIDENCE] (model fallback) |
+| Phase 4 | Review fails | No | Skip review; flag ADR-NNN.md as [LOW CONFIDENCE] (no peer review) |
+| Phase 5 | Story generation fails | No | Generate epics only; flag EPIC-NNN.md stories as [LOW CONFIDENCE] (stories incomplete) |
+| Phase 6 | Validation fails | No | Partial report; flag readiness-report.md as [LOW CONFIDENCE] (validation incomplete) |
+| Phase 6.5 | Max iterations (2) | No | Force handoff; flag readiness-report.md as [LOW CONFIDENCE] (auto-fix exhausted) |
+| Step 2.5 | External research fails | No | apiResearchContext = null, continue; flag apiResearchContext as [LOW CONFIDENCE] (no external research) |
+| Init | E006: `.workflow/` not initialized | Yes | Run maestro-init first |
+| Phase 6 | E007: Readiness Fail after 2 auto-fix iterations | No | Present manual fix options |
+| Step 2.5 | W005: External research agent failed | No | Continue without apiResearchContext |
 
-CLI Fallback Chain: Role-based resolution → degraded mode (local only)
+CLI Fallback Chain: Role-based resolution → degraded mode (local only); flag affected phase artifacts as [LOW CONFIDENCE] (CLI unavailable, local-only analysis)
+
+## Success Criteria
+
+- [ ] `blueprint-config.json` created with session metadata and phase tracking
+- [ ] `product-brief.md` with vision, goals, scope, multi-perspective synthesis
+- [ ] `glossary.json` with 5+ core terms for cross-document consistency
+- [ ] `requirements/` directory with `_index.md` + individual `REQ-*.md` + `NFR-*.md` files
+- [ ] All requirements have RFC 2119 keywords and acceptance criteria
+- [ ] `architecture/` directory with `_index.md` + individual `ADR-*.md` files
+- [ ] Architecture includes state machine, config model, error handling, observability (service type)
+- [ ] `epics/` directory with `_index.md` + individual `EPIC-*.md` files
+- [ ] Cross-Epic dependency map (Mermaid) and MVP subset tagged
+- [ ] `readiness-report.md` with 4-dimension quality scores and traceability matrix
+- [ ] `blueprint-summary.md` with one-page executive summary
+- [ ] All documents have valid YAML frontmatter with session_id
+- [ ] Glossary terms used consistently across all documents
+- [ ] Readiness gate: Pass (>=80%) or Review (>=60%) with documented concerns
+- [ ] context-package.json generated for downstream consumption
+
+## Next-Step Routing
+
+| Condition | Next Step |
+|-----------|-----------|
+| Gate Pass/Review | `roadmap --from blueprint:{artifact_id}` |
+| Gate Fail | fix issues, re-run readiness check |
+| Need implementation plan | `plan --from blueprint:{artifact_id}` |
+| Need stress-testing | `grill` |

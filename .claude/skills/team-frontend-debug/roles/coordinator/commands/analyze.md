@@ -1,9 +1,5 @@
 # Analyze Input
 
-Parse user input -> detect mode (feature-test vs bug-report) -> build dependency graph -> assign roles.
-
-**CONSTRAINT**: Text-level analysis only. NO source code reading, NO codebase exploration.
-
 ## Step 1: Detect Input Mode
 
 ```

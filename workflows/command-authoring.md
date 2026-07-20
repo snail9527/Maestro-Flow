@@ -1,12 +1,5 @@
+<!-- session-mode: none -->
 # Pipeline Command Authoring Standard
-
-<purpose>
-Authoring standard for pipeline commands (.claude/commands/*.md). Complements skill-authoring.md (FSM style) — Pipeline suits linear staged pipelines; FSM suits orchestrators and decision engines.
-
-Selection criteria: control flow complexity. Use FSM when ≥3 conditions are met (non-linear branching, runtime chain reshaping, precise re-entry, multi-component handoff, 20+ persisted fields); otherwise use Pipeline. See knowhow DCS-20260531-1048.
-</purpose>
-
----
 
 ## 1. Architecture: Staged Pipeline
 
@@ -22,9 +15,10 @@ Core characteristics:
 
 ```
 ---
-frontmatter (name, description, argument-hint, allowed-tools)
+frontmatter (name, description, argument-hint, allowed-tools, session-mode)
 ---
 
+<required_reading>     <!-- session-mode: run MUST reference @~/.maestro/workflows/run-mode.md -->
 <purpose>              <!-- Required -->
 <required_reading>     <!-- Conditionally required: when command delegates to a workflow file -->
 <deferred_reading>     <!-- Conditionally required: when command has lazily loaded templates -->
@@ -46,11 +40,18 @@ frontmatter (name, description, argument-hint, allowed-tools)
 | **Required** | purpose, context, execution, completion, error_codes, success_criteria | Every pipeline command must have these |
 | **Conditionally Required** | required_reading, deferred_reading, interview_protocol | Include when the trigger condition is met; omit when not applicable |
 
+Every command MUST classify `session-mode` as one of:
+
+- `run`: creates formal Session/Run artifacts and must use `maestro run create/check/complete`;
+- `none`: stateless/project-level operation with no formal run artifacts;
+- `bootstrap`: pre-Session bootstrap such as `maestro-init`;
+- `deprecated`: retained only as an explicit migration route.
+
 **Trigger conditions for conditionally required sections:**
 
 | Section | Include when | Omit when |
 |---------|-------------|-----------|
-| `<required_reading>` | Command delegates to a workflow file (`Follow 'workflow/X.md'`) | Command is self-contained with all logic inline |
+| `<required_reading>` | `session-mode: run` or command delegates to another workflow | Only stateless self-contained commands may omit it |
 | `<deferred_reading>` | Command loads templates or references on-demand during execution | No lazy-loaded dependencies exist |
 | `<interview_protocol>` | Command has **multi-round interactive decision trees** (scope → depth → dimensions, etc.) | Command only uses AskUserQuestion for simple one-shot confirmations (proceed/cancel, yes/no) |
 
@@ -59,8 +60,8 @@ frontmatter (name, description, argument-hint, allowed-tools)
 | Usage pattern | Needs interview_protocol? | Example |
 |---------------|--------------------------|---------|
 | Multi-round decision tree with traversal order | **Yes** — full protocol with 6 strategy elements | analyze, brainstorm, grill, roadmap, blueprint, init |
-| Version/option selection (1-2 questions, no tree) | **Lightweight** — declare decision points only, no traversal rules | milestone-release |
-| Simple confirmation (proceed/cancel) | **No** — handled inline in `<execution>` | plan, execute, verify, milestone-audit, milestone-complete |
+| Version/option selection (1-2 questions, no tree) | **Lightweight** — declare decision points only, no traversal rules | maestro-update |
+| Simple confirmation (proceed/cancel) | **No** — handled inline in `<execution>` | plan, execute, verify, maestro-session-seal |
 
 Section authoring rules are defined in § 2 below.
 
@@ -83,14 +84,14 @@ Supports three modes:
 - **Revise** (`--revise`): Incrementally modify existing plan
 - **Check** (`--check`): Standalone plan verification
 
-All output goes to `.workflow/scratch/{YYYYMMDD}-plan-[P{N}-|M{N}-]{slug}/`.
+Formal output goes to the active Run returned by `maestro run create`: all typed artifacts (including evidence-role) under `{run_dir}/outputs/`, and narrative/handoff in `{run_dir}/report.md`.
 </purpose>
 ```
 
 **Rules**:
 - First paragraph: one-sentence summary + pipeline phase names
 - Mode list: one line per mode, include trigger flag
-- Output path: describe directory pattern
+- Output boundary: describe artifact kinds and their location inside the active Run; never invent a command-private Session directory
 - Pipeline position: what is upstream, what is downstream (ASCII diagram or one sentence)
 - No more than 15 lines
 
@@ -384,13 +385,13 @@ Line-by-line verifiable completion standards.
 
 ```markdown
 <success_criteria>
-- [ ] plan.json written to scratch directory with summary, approach, task_ids, waves
+- [ ] `outputs/plan.json` written in the active Run with summary, approach, task_ids, and waves
 - [ ] .task/TASK-*.json files created for each task
 - [ ] Every task has `read_first[]` with at least the file being modified
 - [ ] Every task has `convergence.criteria[]` with grep-verifiable conditions
 - [ ] Plan-checker passed (or minor issues acknowledged)
 - [ ] User confirmation captured (execute/modify/cancel)
-- [ ] Artifact registered in state.json with correct scope/milestone/phase
+- [ ] Artifact declared by contract and registered by `maestro run complete`
 </success_criteria>
 ```
 
@@ -454,7 +455,7 @@ Commands reference this standard in `<context> ### Pre-load` and annotate their 
 
 ## 4. Depth Standard
 
-Using `maestro-plan.md` (188 lines) as the depth benchmark. Every pipeline command should meet the following minimum depth:
+Using `plan.md` as the depth benchmark. Every pipeline command should meet the following minimum depth:
 
 ### Minimum Requirements
 
@@ -497,7 +498,7 @@ Using `maestro-plan.md` (188 lines) as the depth benchmark. Every pipeline comma
 | `<execution>` only says "Follow workflow X" with nothing else | Add at least Pre-flight + command-specific extensions + separate completion |
 | interview_protocol copies 50-line boilerplate | Reference this standard, write only 6 strategy elements (or lightweight variant) |
 | Adding interview_protocol for simple yes/no confirmations | Only add for multi-round decision trees; simple confirmations go inline in `<execution>` |
-| Adding required_reading when command has no external workflow | Only add when command delegates to a workflow file; self-contained commands omit it |
+| Omitting canonical Run reference | Every `session-mode: run` command includes `@~/.maestro/workflows/run-mode.md`; add other workflow refs as needed |
 | Pre-load rewritten step-by-step in every command | Reference § 3 standard, annotate tailoring |
 | Completion logic mixed into `<execution>` | Separate into `<completion>` section |
 | error_codes / success_criteria missing | Every command must have them, even at minimum |
@@ -525,9 +526,8 @@ The two styles are complementary: FSM orchestrators invoke pipeline commands; pi
 
 | Style | Commands |
 |-------|----------|
-| **Pipeline** | init, analyze, plan, execute, verify, brainstorm, grill, blueprint, roadmap, milestone-audit, milestone-complete, milestone-release |
-| **FSM** | ralph, ralph-execute, ralph-beta |
-| **Needs evaluation** | coordinate (multi-role handoff may need FSM) |
+| **Pipeline** | init, analyze, plan, execute, verify, brainstorm, grill, blueprint, roadmap, maestro-session-seal |
+| **FSM** | maestro, maestro-ralph |
 
 ---
 
@@ -536,6 +536,8 @@ The two styles are complementary: FSM orchestrators invoke pipeline commands; pi
 Workflow files (`workflows/*.md`) are the **implementation** behind pipeline commands. A command file says `Follow 'workflow/X.md' completely` — the workflow file contains the actual phase-by-phase procedure, pseudocode, agent prompts, and internal logic.
 
 ### Content Boundary: Command vs Workflow
+
+**Scope note**: this matrix applies when a dedicated command file exists for the workflow. First-tier steps (paired `prepare/<step>.md` + `workflows/<step>.md` with no dedicated command file) place error codes, success criteria, and completion content in the workflow file instead — see the prepare/workflow authoring spec.
 
 | Content | Owned by | Rationale |
 |---------|----------|-----------|
@@ -599,7 +601,7 @@ Workflow files (`workflows/*.md`) are the **implementation** behind pipeline com
 # Workflow: {Name}
 
 5-phase pipeline: Context Collection → Clarification → Planning → Plan Checking → Confirmation.
-Produces plan.json + .task/TASK-{NNN}.json in .workflow/scratch/{YYYYMMDD}-plan-{slug}/.
+Produces `outputs/plan.json` + `outputs/tasks/TASK-{NNN}.json` in the active Run.
 ```
 
 - H1 format: `# Workflow: {Name}` (standardized across all workflow files)
@@ -673,14 +675,14 @@ When the workflow produces 3+ output files, document the directory structure:
 ## Output Artifacts
 
 ```
-.workflow/scratch/{YYYYMMDD}-plan-P{N}-{slug}/
-  plan.json                    ← Plan overview with task_ids[], waves[]
-  .task/
-    TASK-001.json              ← Individual task definition
-    TASK-002.json
-  .process/
-    exploration-arch.json      ← Agent exploration results
-    context-package.json       ← Aggregated context
+{run_dir}/
+  report.md                    ← Human narrative + handoff frontmatter
+  outputs/
+    plan.json                  ← Plan overview with _meta + task_ids[], waves[]
+    tasks/
+      TASK-001.json            ← Individual task definition
+      TASK-002.json
+    exploration-arch.json      ← Agent exploration results (evidence-role)
 ```
 ```
 
@@ -762,7 +764,7 @@ When the workflow writes to index.json or state.json:
 
 | When | Field | Value |
 |------|-------|-------|
-| P5 completion | state.json.artifacts[] | New PLN artifact entry |
+| P5 completion | Run `outputs/plan.json` | Runtime registers the sealed plan artifact |
 | P5 completion | index.json.status | "confirmed" |
 | Collision detected | index.json.collisions[] | Colliding file paths |
 ```
@@ -790,7 +792,7 @@ Workflow depth correlates with interactivity, multi-agent orchestration, and mod
 | Multi-agent (parallel spawning, cross-agent synthesis) | 400-700 | execute, brainstorm |
 | Multi-mode (3+ execution paths) | 400-600 | plan (create/revise/check/tdd) |
 | Standard (single linear pipeline) | 200-400 | blueprint, roadmap |
-| Procedural/operational (archive, audit, release) | 100-200 | milestone-audit, milestone-complete |
+| Procedural/operational (archive, audit, seal) | 100-200 | maestro-session-seal |
 
 A workflow under 100 lines likely belongs inline in the command file rather than as a separate file.
 
@@ -821,3 +823,20 @@ roadmap-common.md  → shared scope routing, milestone resolution, state updates
 | No `---` separators between H2 sections | Always separate for visual parsing |
 | H1 title inconsistency ("X Workflow" vs "Workflow: X") | Standardize on `# Workflow: {Name}` |
 | Workflow under 100 lines as separate file | Inline into the command file instead |
+
+---
+
+## 8. Language Style
+
+Command 与其 Workflow 使用一种主要自然语言，并保持同一章节内一致。仓库级控制指令默认使用 English；面向用户的菜单、提示和报告模板可按目标 locale 使用简体中文或其他语言。
+
+**Voice and wording**：
+- 使用直接、命令式、结果导向的短句；一条 bullet 只承载一个动作、条件或约束。
+- `MUST`/“必须”只用于 gate、invariant、安全边界和不可破坏的 contract；`SHOULD`/“应”表示强建议；`MAY`/“可”表示真正可选。
+- 用显式条件和优先级表达路由，不用叙事段落暗示控制流。
+- 保留 command 名、flag、tool 名、代码标识符、schema 字段、路径及原始错误文本的 English 拼写。
+- 技术术语可嵌入中文句子，但不要在同一句中切换语法语言或重复双语释义。
+- 删除营销文案、人格化叙述、哲学宣言和不影响执行结果的 commentary。
+- 避免 `handle`、`ensure`、`improve`、`properly` 等不可验证动词；写出具体动作、产物与验收条件。
+- 错误信息说明“发生条件 + 恢复动作”；成功准则必须能通过文件、字段、命令输出或明确状态验证。
+- Command、Workflow 与平台镜像使用相同语义；仅转换真实存在的平台 tool 调用，不进行逐句机械翻译。

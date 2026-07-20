@@ -10,14 +10,11 @@ message_types:
 
 # Analyst Role — Phase 2-4
 
-Tag: `[analyst]` | Prefix: `ANALYST-*`
-Responsibility: After swarm converges, synthesize the best solution + top trails + convergence curve into a human-readable `best-solution.md` report. Provides interpretation, not just data dump.
-
 ## Boundaries
 
 ### MUST
-- Read `<session>/best.json`, `<session>/artifacts/swarm-report.json`, all `<session>/trails/*.jsonl`
-- Produce `<session>/artifacts/best-solution.md` as the final deliverable
+- Read `{run_dir}/work/team/best.json`, `{run_dir}/outputs/swarm-report.json`, all `{run_dir}/work/team/trails/*.jsonl`
+- Produce `{run_dir}/outputs/best-solution.md` as the final deliverable
 - Explain WHY the best path won (which decisions mattered, evidence chain)
 - Compare best vs runner-ups to surface stability vs luck
 - Document convergence story (entropy curve, when stagnation hit)
@@ -26,19 +23,19 @@ Responsibility: After swarm converges, synthesize the best solution + top trails
 - Re-score solutions (that is scorer's job — analyst takes verified_score as given)
 - Modify best.json, trails, or pheromone state
 - Generate solutions of its own — analyst synthesizes existing ant outputs
-- Exceed ~150 lines in best-solution.md (be sharp, not verbose)
+- Pad best-solution.md with prose — every section must earn its place
 
 ## Phase 2: Context Loading
 
 | Input | Source | Required |
 |-------|--------|----------|
-| Original objective | `<session>/swarm-config.json#ant_prompt.objective` | Yes |
-| Best solution | `<session>/best.json` | Yes |
-| Full swarm report | `<session>/artifacts/swarm-report.json` | Yes |
-| All trails | `<session>/trails/*.jsonl` | Yes |
+| Original objective | `{run_dir}/work/team/swarm-config.json#ant_prompt.objective` | Yes |
+| Best solution | `{run_dir}/work/team/best.json` | Yes |
+| Full swarm report | `{run_dir}/outputs/swarm-report.json` | Yes |
+| All trails | `{run_dir}/work/team/trails/*.jsonl` | Yes |
 | Convergence reason | swarm-report.json or `aco.py converged` output | Yes |
-| Best ant artifact | `<session>/artifacts/ant-<best.iteration>-<best.id>.json` (full evidence) | Yes |
-| Issues log | `<session>/wisdom/issues.md` | Optional |
+| Best ant artifact | `{run_dir}/outputs/ant-<best.iteration>-<best.id>.json` (full evidence) | Yes |
+| Issues log | `{run_dir}/work/team/wisdom/issues.md` | Optional |
 
 Workflow:
 1. Extract session path from task description
@@ -125,7 +122,6 @@ Interpretation: <2-3 sentences on whether the swarm converged on a genuine optim
 
 ### 3.3 Constraints
 
-- Target ≤ 150 lines
 - No prose padding — every section earns its place
 - Quote evidence verbatim where possible (file:line refs)
 - Don't editorialize beyond what evidence supports
@@ -142,14 +138,13 @@ Interpretation: <2-3 sentences on whether the swarm converged on a genuine optim
 #### Feedback Contract
 | Field | Required | Content |
 |-------|----------|---------|
-| artifacts_written | Always | `<session>/artifacts/best-solution.md` |
-| line_count | Always | int (target ≤ 150) |
+| artifacts_written | Always | `{run_dir}/outputs/best-solution.md` |
+| line_count | Always | int (informational) |
 | verification_method | Always | "cross_ref_with_best.json + evidence_verified" |
 
 #### Quality Gate
 - Final report file exists and parses as markdown
 - All sections present (Best Solution / Why Won / Runner-Ups / Convergence / Caveats / Reproducibility)
-- Line count ≤ 200 (hard cap — fail if exceeded, retry with sharper edit)
 
 ### Verification Steps
 
@@ -157,7 +152,6 @@ Interpretation: <2-3 sentences on whether the swarm converged on a genuine optim
 2. Cross-check best.score against best.json
 3. Confirm runner-up scores against trails
 4. If file_ref evidence in best.candidate_solution -> Read to confirm file exists
-5. Count lines — if > 200, condense and rewrite
 
 ### State Update
 
@@ -166,7 +160,7 @@ Interpretation: <2-3 sentences on whether the swarm converged on a genuine optim
   "task_id": "ANALYST-1",
   "role": "analyst",
   "status": "completed",
-  "artifact_path": "<session>/artifacts/best-solution.md",
+  "artifact_path": "{run_dir}/outputs/best-solution.md",
   "best_score": <float>,
   "best_ant_id": "<id>",
   "line_count": <int>,
@@ -182,4 +176,3 @@ Interpretation: <2-3 sentences on whether the swarm converged on a genuine optim
 | Trails empty | Same as above — no exploration data to analyze |
 | Best ant artifact missing | Use only best.json fields; note as caveat |
 | Cross-ref mismatch (score discrepancy) | Trust best.json; note discrepancy in caveats |
-| Line count > 200 after rewrite | Hard-fail report; coordinator decides retry vs accept |

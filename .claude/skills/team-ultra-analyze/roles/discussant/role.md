@@ -9,16 +9,14 @@ message_types:
 
 # Discussant
 
-Process analysis results and user feedback. Execute direction adjustments, deep-dive explorations, or targeted Q&A based on discussion type. Update discussion timeline.
-
 ## Phase 2: Context Loading
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| Analysis results | `<session>/analyses/*.json` | Yes |
-| Exploration results | `<session>/explorations/*.json` | No |
+| Analysis results | `{run_dir}/outputs/analyses/*.json` | Yes |
+| Exploration results | `{run_dir}/work/team/explorations/*.json` | No |
 
 1. Extract session path, topic, round, discussion type, user feedback:
 
@@ -52,10 +50,10 @@ Bash({
   command: `maestro delegate "PURPOSE: Investigate open questions and uncertain insights; success = evidence-based findings
 TASK: • Focus on open questions: <questions> • Find supporting evidence • Validate uncertain insights • Document findings
 MODE: analysis
-CONTEXT: @**/* | Memory: Session <session-folder>, previous analyses
-EXPECTED: JSON output with investigation results | Write to <session>/discussions/deepen-<num>.json
+CONTEXT: @**/* | Memory: Session {run_dir}/work/team, previous analyses
+EXPECTED: JSON output with investigation results | Write to {run_dir}/evidence/discussions/deepen-<num>.json
 CONSTRAINTS: Evidence-based analysis only
-" --tool gemini --mode analysis --rule analysis-trace-code-execution`,
+" --tool agy --mode analysis --rule analysis-trace-code-execution`,
   run_in_background: false
 })
 ```
@@ -63,7 +61,7 @@ CONSTRAINTS: Evidence-based analysis only
 **direction-adjusted**: CLI re-analysis from adjusted focus:
 ```javascript
 Bash({
-  command: `maestro delegate "Re-analyze '<topic>' with adjusted focus on '<userFeedback>'" --to gemini --mode analysis`,
+  command: `maestro delegate "Re-analyze '<topic>' with adjusted focus on '<userFeedback>'" --to agy --mode analysis`,
   run_in_background: false
 })
 ```
@@ -74,17 +72,17 @@ Bash({
   command: `maestro delegate "PURPOSE: Answer specific user questions about <topic>; success = clear, evidence-based answers
 TASK: • Answer: <userFeedback> • Provide code references • Explain context
 MODE: analysis
-CONTEXT: @**/* | Memory: Session <session-folder>
-EXPECTED: JSON output with answers and evidence | Write to <session>/discussions/questions-<num>.json
+CONTEXT: @**/* | Memory: Session {run_dir}/work/team
+EXPECTED: JSON output with answers and evidence | Write to {run_dir}/evidence/discussions/questions-<num>.json
 CONSTRAINTS: Direct answers with code references
-" --tool gemini --mode analysis`,
+" --tool agy --mode analysis`,
   run_in_background: false
 })
 ```
 
 ## Phase 4: Update Discussion Timeline
 
-1. Write round content to `<session>/discussions/discussion-round-<num>.json`:
+1. Write round content to `{run_dir}/evidence/discussions/discussion-round-<num>.json`:
 ```json
 {
   "round": 1, "type": "initial", "user_feedback": "...",
@@ -93,7 +91,7 @@ CONSTRAINTS: Direct answers with code references
 }
 ```
 
-2. Append round section to `<session>/discussion.md`:
+2. Append round section to `{run_dir}/evidence/discussion.md`:
 ```markdown
 ### Round <N> - Discussion (<timestamp>)
 #### Type: <discussType>
@@ -103,5 +101,5 @@ CONSTRAINTS: Direct answers with code references
 #### New Findings / Open Questions
 ```
 
-Update `<session>/wisdom/.msg/meta.json` under `discussant` namespace:
+Update `{run_dir}/work/team/wisdom/.msg/meta.json` under `discussant` namespace:
 - Read existing -> merge `{ "discussant": { round, type, new_insight_count, corrected_count } }` -> write back

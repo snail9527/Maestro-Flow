@@ -1,10 +1,5 @@
+<!-- session-mode: none -->
 # SKILL.md Authoring Standard
-
-<purpose>
-SKILL.md 的编写规范。核心原则：SKILL.md 是给 LLM agent 执行的状态机定义，不是给人读的操作手册。
-</purpose>
-
----
 
 ## 1. Architecture: Hybrid State Machine
 
@@ -14,9 +9,10 @@ SKILL.md 的编写规范。核心原则：SKILL.md 是给 LLM agent 执行的状
 
 ```
 ---
-frontmatter (name, description, argument-hint, allowed-tools)
+frontmatter (name, description, argument-hint, allowed-tools, session-mode)
 ---
 
+<required_reading>  <!-- session-mode: run MUST reference @~/.maestro/workflows/run-mode.md -->
 <purpose>           <!-- 1-5 行：目标 + 拓扑图 + 入口点 -->
 <context>           <!-- 用法示例、flag 说明 -->
 <invariants>        <!-- 全局底线规则，独立于状态转移 -->
@@ -36,6 +32,15 @@ frontmatter (name, description, argument-hint, allowed-tools)
 - **纯散文**（5/10）：LLM 需"阅读理解"提取转移条件，注意力分散，上下文寻址迷失
 - **混合**（8.5/10）：状态机路由 + 散文动作，兼顾确定性和可理解性
 
+### Session/Run 分类
+
+每个 `SKILL.md` 必须在 frontmatter 声明 `session-mode: run|none`：
+
+- `run`：技能产生正式交付物或需要恢复。入口必须调用 `maestro run create <skill>`，正式产物写入 `outputs/`，证据写入 `evidence/`，最终报告写入 `report.md`，并以 `maestro run check/complete` 收口。
+- `none`：纯路由、只读查询或无正式持久化的技能。禁止创建私有 `.workflow` 会话目录。
+
+Team skill 可以继续使用 `.workflow/.team/` 作为瞬态消息总线，但正式 artifact/wisdom 必须进入 active Run；消息总线不得作为知识索引源。
+
 ---
 
 ## 2. Section Specifications
@@ -46,9 +51,9 @@ frontmatter (name, description, argument-hint, allowed-tools)
 
 ```markdown
 <invariants>
-1. CSV is Source of Truth — 所有状态持久化在 CSV/JSON，不在内存
-2. Wave Order is Sacred — 永远不执行 wave N+1 直到 wave N 完成
-3. Coordinator Never Executes — 只组装 prompt + spawn，不直接执行 skill 逻辑
+1. Durable State is Source of Truth — 状态写入声明的 Run/session/work 文件，不依赖模型内存
+2. Dependency Order is Sacred — 依赖未完成时不得执行下游步骤
+3. Delegation Has One Owner — 委托后由 worker 执行任务，coordinator 只协调、等待和汇总
 </invariants>
 ```
 
@@ -77,7 +82,7 @@ S_FALLBACK      — 兜底：条件不匹配时请求输入    PERSIST: session.
 ```
 
 **规则**：
-- 每个 state 必须有 `PERSIST` 字段，明确写哪些 session/status/csv 字段
+- 每个 state 必须有 `PERSIST` 字段，明确写哪些 session/status/artifact/work 字段
 - `S_FALLBACK` 必须存在——当所有 WHEN 条件不满足时进入此状态，调用 `request_user_input`
 - Rationale 限 1 行，不展开
 
@@ -131,6 +136,8 @@ S_DECISION:
 
 ### A_BUILD_AND_SPAWN_WAVE
 
+以下仅是选择 CSV Wave 后的 ACTION 示例，不是 Codex Skill 的默认执行结构。
+
 1. buildNextWave: barrier → solo CSV; non-barrier → batch until decision node
 2. buildSkillCall per step: resolve placeholders, apply enrichment table, append auto flags
 3. Write wave-{N}.csv
@@ -141,9 +148,9 @@ S_DECISION:
 Enrichment table:
 | Skill | Args | Source |
 |-------|------|--------|
-| maestro-plan | --dir {analyze_artifact_path} | state.json artifacts |
-| maestro-execute | --dir {plan_artifact_path} | state.json artifacts |
-| quality-debug | "{gap_summary}" | decision verdict |
+| plan | --dir {analyze_artifact_path} | state.json artifacts |
+| execute | --dir {plan_artifact_path} | state.json artifacts |
+| debug | "{gap_summary}" | decision verdict |
 
 ### A_INSERT_FIX_LOOP
 
@@ -164,11 +171,26 @@ Enrichment table:
 
 ---
 
-## 3. Shared Primitives
+## 3. Codex Execution Surfaces and Optional Primitives
+
+### Execution Surface Selection
+
+Codex Skill 不强制使用 CSV Wave。按任务形状选择最小且清晰的执行面：
+
+| Surface | Use when | Required contract |
+|---------|----------|-------------------|
+| Direct execution | 单一、边界清晰、委托无收益 | Skill 直接执行并验证 |
+| `spawn_agent` + `wait_agent` | 少量异构任务、需要迭代交流或每个任务上下文不同 | 每个 agent 必须被等待回收；首次超时后继续等待，不遗留 orphan agent |
+| `spawn_agents_on_csv` | 大批量同构、逐行独立、输入输出 schema 稳定 | 显式 `max_runtime_seconds: 3600`；每个 worker 调用一次 `report_agent_job_result` |
+
+**规则**：
+- 不得为了符合模板而创建 `tasks.csv`、wave 状态或 results CSV。
+- 只有选用 `spawn_agents_on_csv` 时，才适用 CSV 列分离、wave 顺序、merge 和清理规则。
+- 执行面是 ACTION 的实现选择，不应改变 Skill 的领域状态机、Run contract 或正式 artifact 边界。
 
 ### MACRO: RUN_CSV_WAVE
 
-三个 skill（ralph、plan、execute）共享的 CSV 波执行逻辑，抽为标准子程序：
+当 2 个以上 Skill 都选择 CSV Wave 且流程实质相同时，可抽为标准子程序：
 
 ```markdown
 ### MACRO: RUN_CSV_WAVE(wave_rows, session_folder, instruction_builder)
@@ -186,7 +208,7 @@ Enrichment table:
 7. Return: updated master CSV rows
 ```
 
-各 skill 通过不同的 `instruction_builder` 和上下文参数调用此 MACRO，不重复描述流程。
+仅采用 CSV Wave 的 Skill 通过不同的 `instruction_builder` 和上下文参数调用此 MACRO，不重复描述流程。未采用 CSV Wave 的 Skill 不引用此 MACRO。
 
 ---
 
@@ -196,8 +218,8 @@ Enrichment table:
 
 | Section | Content |
 |---------|---------|
-| CSV Schema | 列定义、示例行 |
-| Worker Contract | 子 agent instruction 模板、output schema |
+| CSV Schema（仅 CSV Wave） | 列定义、示例行 |
+| Worker Contract（按所选执行面） | 子 agent instruction 模板、output schema |
 | Fix-Loop Templates | 各 decision type 的修复步骤链 |
 | Discovery Board Protocol | 类型定义、去重规则 |
 | Error Codes | 错误码 + 恢复策略 |
@@ -211,8 +233,9 @@ Enrichment table:
 ### Order
 
 1. **Pilot**: `maestro-ralph/SKILL.md` — 本质是 adaptive state machine，收益最大
-2. **Extract**: 抽 `MACRO: RUN_CSV_WAVE` 共享子程序
-3. **Rollout**: `maestro-plan` 和 `maestro-execute` 用 Phase Cards 轻量整理（不必完整状态机化）
+2. **Select Surface**: 每个 ACTION 按任务形状选择 direct、`spawn_agent` 或 `spawn_agents_on_csv`
+3. **Extract if Needed**: 仅为重复的 CSV Wave 流程抽 `MACRO: RUN_CSV_WAVE`
+4. **Rollout**: 线性 `plan` 和 `execute` step 用 Phase Cards 轻量整理（不必完整状态机化）
 
 ### Phase Cards（适用于 plan/execute）
 
@@ -223,16 +246,16 @@ Enrichment table:
 
 PHASE P1_RESOLVE_INPUT:
   DO: parse args, resolve phase dir, load context
-  NEXT: P2_BUILD_CSV
+  NEXT: P2_SELECT_EXECUTION
   FAIL: abort with error
 
-PHASE P2_BUILD_CSV:
-  DO: generate tasks.csv from plan/exploration angles
-  NEXT: P3_RUN_WAVES
+PHASE P2_SELECT_EXECUTION:
+  DO: choose direct, spawn_agent, or spawn_agents_on_csv from task shape
+  NEXT: P3_EXECUTE
   FAIL: abort
 
-PHASE P3_RUN_WAVES:
-  DO: MACRO:RUN_CSV_WAVE per wave (sequential)
+PHASE P3_EXECUTE:
+  DO: execute through selected surface; use MACRO:RUN_CSV_WAVE only for CSV batches
   NEXT: P4_AGGREGATE
   FAIL: mark failed, pause
 
@@ -259,7 +282,24 @@ PHASE P4_AGGREGATE:
 | 在散文中嵌入隐式状态转移 | 所有转移在 `<transitions>` 中显式声明 |
 | ACTION 内只写 2-3 个单词 | ACTION 内用编号步骤 + 表格，保留足够细节 |
 | 用 GUARD 完全替代 invariants | 全局约束留在 `<invariants>`，只有绑定到特定转移的条件用 GUARD |
-| 在主流程中内联 CSV schema | Schema 放 `<appendix>`，主流程只引用 |
-| 每个 skill 重写 wave 执行逻辑 | 引用 `MACRO: RUN_CSV_WAVE` |
+| 未选择执行面就默认创建 CSV Wave | 先按任务形状选择 direct、`spawn_agent` 或 `spawn_agents_on_csv` |
+| 在主流程中内联 CSV schema | 仅选用 CSV Wave 时把 Schema 放 `<appendix>`，主流程只引用 |
+| 多个 CSV Skill 重写相同 wave 执行逻辑 | 仅在流程重复时引用 `MACRO: RUN_CSV_WAVE` |
 | 状态没有兜底路径 | 每个 state 必须有到 `S_FALLBACK` 的出边 |
 | PERSIST 字段缺失 | 每个 state 声明写入哪些持久化字段 |
+
+---
+
+## 7. Language Style
+
+Skill prompt 使用一种主要自然语言，并保持同一章节内一致。仓库级 Skill 默认用 English 编写可执行控制语句；明确面向中文用户的交互文案和报告模板可使用简体中文。
+
+**Voice and wording**：
+- 使用直接、命令式、可执行的短句；一条 bullet 只表达一个动作或约束。
+- `MUST`/“必须”只用于 gate、invariant 和安全边界；`SHOULD`/“应”用于强建议；`MAY`/“可”用于真正可选行为。
+- 条件、动作和失败路径分别写成 `WHEN`、`DO`、`GUARD`、`FAIL`，避免藏在长段落中。
+- 保留 tool 名、代码标识符、schema 字段、路径、命令和原始错误信息的 English 拼写。
+- 技术术语可嵌入中文句子，但不要在同一句中来回切换语法语言。
+- 删除营销口号、人格化描述、哲学宣言和不产生执行约束的 commentary。
+- 避免 `handle`、`ensure`、`improve`、`properly` 等不可验证动词；改写为具体动作和验收条件。
+- 示例必须使用目标平台真实存在的工具与参数，不用跨平台伪 API。

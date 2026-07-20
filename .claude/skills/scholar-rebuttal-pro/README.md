@@ -1,8 +1,10 @@
+
+
 # Scholar Rebuttal Pro - 使用指南
 
 ## 概述
 
-**scholar-rebuttal-pro** 是一个增强版的学术论文审稿意见回复 skill，整合了 Gemini/CLI 协作分析和多视角讨论机制，用于生成结构化、证据支撑的 rebuttal 文档。
+**scholar-rebuttal-pro** 是一个增强版的学术论文审稿意见回复 skill，整合了 Agy/CLI 协作分析和多视角讨论机制，用于生成结构化、证据支撑的 rebuttal 文档。
 
 ## 核心特性
 
@@ -10,7 +12,7 @@
 
 ```
 Phase 1: 审稿意见解析与分类
-   ↓ (使用 Gemini CLI 语义分析)
+   ↓ (使用 Agy CLI 语义分析)
 Phase 2: 多视角讨论
    ↓ (作者/审稿人/专家三方视角)
 Phase 3: 策略制定
@@ -23,7 +25,7 @@ Phase 5: 质量验证
 
 ### 2. CLI 协作分析
 
-- **Phase 1**: Gemini CLI 语义分析，自动分类审稿意见
+- **Phase 1**: Agy CLI 语义分析，自动分类审稿意见
 - **Phase 2**: 多视角讨论（可选 team-ultra-analyze）
 - **Phase 3**: CLI 搜索论文内容，提取支撑证据
 - **Phase 5**: CLI 质量验证，生成改进建议
@@ -113,7 +115,7 @@ Skill 启动时会询问三个配置：
 - `quality-report.md` - 质量评估报告
 - `improvement-suggestions.json` - 改进建议
 
-所有输出文件位于: `.workflow/.scratchpad/`
+所有输出文件位于: `{run_dir}/outputs/`
 
 ## 架构设计
 
@@ -162,34 +164,34 @@ scholar-rebuttal-pro/
 ### Phase 1 - 审稿意见分类
 
 ```bash
-ccw cli -p "PURPOSE: Parse and classify reviewer comments by type and severity
+maestro delegate "PURPOSE: Parse and classify reviewer comments by type and severity
 TASK: • Parse comment structure • Classify by severity • Extract key concerns
 MODE: analysis
 CONTEXT: @reviews.txt
 EXPECTED: JSON with classification results" \
---tool gemini --mode analysis --rule analysis-analyze-technical-document
+--to agy --mode analysis --rule analysis-analyze-technical-document
 ```
 
 ### Phase 3 - 证据搜索
 
 ```bash
-ccw cli -p "PURPOSE: Search paper content for evidence supporting response strategies
+maestro delegate "PURPOSE: Search paper content for evidence supporting response strategies
 TASK: • Locate relevant sections • Extract supporting data • Identify evidence gaps
 MODE: analysis
 CONTEXT: @paper.pdf
 EXPECTED: Evidence map with file:line references" \
---tool gemini --mode analysis
+--to agy --mode analysis
 ```
 
 ### Phase 5 - 质量验证
 
 ```bash
-ccw cli -p "PURPOSE: Validate rebuttal quality (completeness, professionalism, persuasiveness)
+maestro delegate "PURPOSE: Validate rebuttal quality (completeness, professionalism, persuasiveness)
 TASK: • Check all comments addressed • Assess tone • Evaluate evidence strength
 MODE: analysis
 CONTEXT: @rebuttal.md
 EXPECTED: Quality report with improvement suggestions" \
---tool gemini --mode analysis
+--to agy --mode analysis
 ```
 
 ## 会议特定策略
@@ -244,7 +246,7 @@ EXPECTED: Quality report with improvement suggestions" \
 ## 故障排除
 
 ### 问题 1: CLI 执行失败
-**解决方案**: 检查 `~/.claude/cli-tools.json` 配置，确保 gemini 工具已启用
+**解决方案**: 检查 `~/.claude/cli-tools.json` 配置，确保 agy 工具已启用
 
 ### 问题 2: 论文路径无效
 **解决方案**: 使用"仅审稿意见"模式，手动提供证据
@@ -259,9 +261,8 @@ EXPECTED: Quality report with improvement suggestions" \
 
 ### 添加新会议模板
 
-1. 在 `G:\github_lib\claude-scholar\skills\review-response\references\` 添加模板
-2. 或在 `d:\ccws\.workflow\参考文档1\` 添加自定义模板
-3. Phase 4 会自动搜索并加载
+1. 在 skill 目录的 `templates/` 下添加 `{templateId}-template.md`
+2. Phase 4 会自动搜索并加载，缺失时回退 `templates/discussion.md` 或内置通用模板
 
 ### 自定义响应策略
 
@@ -269,7 +270,7 @@ EXPECTED: Quality report with improvement suggestions" \
 
 ### 集成其他 CLI 工具
 
-修改 Phase 1/3/5 的 CLI 调用，替换 `--tool gemini` 为其他工具（qwen/codex）。
+修改 Phase 1/3/5 的 CLI 调用，替换 `--to agy` 为其他工具（qwen/codex）。
 
 ## 相关 Skills
 

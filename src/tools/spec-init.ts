@@ -15,6 +15,7 @@ import {
   hasFrontmatter,
   renderSeedContent,
   findSeedByFilename,
+  getPresetSeeds,
   type SpecSeedDoc,
 } from './spec-seeds.js';
 
@@ -40,10 +41,11 @@ export interface InitResult {
  * - Migrates existing seed files that lack a YAML frontmatter block by
  *   prepending the canonical frontmatter (body content untouched).
  *
- * @param scope  Target scope: 'project' (default), 'global', 'team', or 'personal'.
- * @param uid    Required when scope is 'personal'.
+ * @param scope   Target scope: 'project' (default), 'global', 'team', or 'personal'.
+ * @param uid     Required when scope is 'personal'.
+ * @param preset  Named preset for additional seed docs (e.g. 'academic').
  */
-export function initSpecSystem(projectPath: string, scope: SpecScope = 'project', uid?: string): InitResult {
+export function initSpecSystem(projectPath: string, scope: SpecScope = 'project', uid?: string, preset?: string): InitResult {
   const result: InitResult = { created: [], migrated: [], skipped: [], directories: [] };
 
   const specsDir = resolveSpecDir(projectPath, scope, uid);
@@ -53,7 +55,11 @@ export function initSpecSystem(projectPath: string, scope: SpecScope = 'project'
     result.directories.push(specsDir);
   }
 
-  for (const doc of SPEC_SEED_DOCS) {
+  const allDocs = preset
+    ? [...SPEC_SEED_DOCS, ...getPresetSeeds(preset)]
+    : SPEC_SEED_DOCS;
+
+  for (const doc of allDocs) {
     const filePath = join(specsDir, doc.filename);
 
     if (existsSync(filePath)) {

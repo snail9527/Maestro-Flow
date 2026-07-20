@@ -1,6 +1,8 @@
-# Phase 1: Requirements Analysis
 
-Analyze workflow requirements from various sources (commands, descriptions, requirements docs) to build a structured workflow configuration.
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
+# Phase 1: Requirements Analysis
 
 ## Objective
 

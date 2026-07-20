@@ -2,14 +2,10 @@
 role: analyst
 prefix: TESTANA
 inner_loop: false
-message_types:
-  success: analysis_ready
-  error: error
+message_types: 
 ---
 
 # Test Quality Analyst
-
-Analyze defect patterns, identify coverage gaps, assess GC loop effectiveness, and generate a quality report with actionable recommendations.
 
 ## Phase 2: Context Loading
 
@@ -17,29 +13,29 @@ Analyze defect patterns, identify coverage gaps, assess GC loop effectiveness, a
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| Execution results | <session>/results/run-*.json | Yes |
-| Test strategy | <session>/strategy/test-strategy.md | Yes |
-| .msg/meta.json | <session>/wisdom/.msg/meta.json | Yes |
+| Execution results | {run_dir}/outputs/results/run-*.json | Yes |
+| Test strategy | {run_dir}/outputs/strategy/test-strategy.md | Yes |
+| .msg/meta.json | {run_dir}/work/team/wisdom/.msg/meta.json | Yes |
 
 1. Extract session path from task description
 2. Read .msg/meta.json for execution context (executor, generator namespaces)
 3. Read all execution results:
 
 ```
-Glob("<session>/results/run-*.json")
-Read("<session>/results/run-001.json")
+Glob("{run_dir}/outputs/results/run-*.json")
+Read("{run_dir}/outputs/results/run-001.json")
 ```
 
 4. Read test strategy:
 
 ```
-Read("<session>/strategy/test-strategy.md")
+Read("{run_dir}/outputs/strategy/test-strategy.md")
 ```
 
 5. Read test files for pattern analysis:
 
 ```
-Glob("<session>/tests/**/*")
+Glob("{run_dir}/outputs/tests/**/*")
 ```
 
 ## Phase 3: Quality Analysis
@@ -77,19 +73,27 @@ Glob("<session>/tests/**/*")
 | Defect Detection | score | 25% |
 | GC Loop Efficiency | score | 20% |
 
-Write report to `<session>/analysis/quality-report.md`
+Write report to `{run_dir}/outputs/analysis/quality-report.md`
+
+### Tech Profile Scan
+
+After test analysis, emit context-aware trigger signals (based on detected codebase characteristics):
+
+1. Check test findings → signals (`test_gap`, `perf_sensitive`)
+2. Check tested code → risk signals (`sql_detected`, `auth_detected`, `injection_risk`)
+3. Include `tech_profile` in Phase 5 state_update data
 
 ## Phase 4: Trend Analysis & State Update
 
 **Historical comparison** (if multiple sessions exist):
 
 ```
-Glob(".workflow/.team/TST-*/.msg/meta.json")
+Glob("{run_dir}/work/team/.msg/meta.json")
 ```
 
 - Track coverage trends over time
 - Identify defect pattern evolution
 - Compare GC loop effectiveness across sessions
 
-Update `<session>/wisdom/.msg/meta.json` under `analyst` namespace:
+Update `{run_dir}/work/team/wisdom/.msg/meta.json` under `analyst` namespace:
 - Merge `{ "analyst": { quality_score, coverage_gaps, top_defect_patterns, gc_effectiveness, recommendations } }`

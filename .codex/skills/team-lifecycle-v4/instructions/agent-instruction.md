@@ -1,7 +1,5 @@
 # Team Lifecycle v4 — Agent Instruction
 
-This instruction is loaded by team-worker agents when spawned with roles: `analyst`, `writer`, `planner`, `executor`, `tester`, `reviewer`.
-
 ---
 
 ## Role-Based Execution
@@ -27,15 +25,12 @@ This instruction is loaded by team-worker agents when spawned with roles: `analy
 
 2. **Explore domain** (use CLI analysis tools):
    ```
-   exec_command({
-     cmd: `maestro delegate "PURPOSE: Research domain for {requirement}
+   shell_exec(`maestro delegate "PURPOSE: Research domain for {requirement}
    TASK: • Identify problem statement • Define target users • Extract constraints • Map integration points
    CONTEXT: @**/* | Memory: {requirement}
    EXPECTED: Structured research context with problem/users/domain/constraints
-   CONSTRAINTS: Read-only analysis" --role analyze --mode analysis --rule analysis-trace-code-execution`,
-     yield_time_ms: 30000, max_output_tokens: 6000
-   })
-   // ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
+   CONSTRAINTS: Read-only analysis" --role analyze --mode analysis --rule analysis-trace-code-execution`, { timeout: 30000 })
+   // Execution mapping: @~/.maestro/workflows/shell-exec-protocol.md
    ```
 
 3. **Extract structured context**:
@@ -47,7 +42,7 @@ This instruction is loaded by team-worker agents when spawned with roles: `analy
 
 4. **Write discovery context**:
    ```javascript
-   Write(`{session}/spec/discovery-context.json`, JSON.stringify({
+   Write(`{session}/maestro-spec/discovery-context.json`, JSON.stringify({
      problem_statement: "Users need OAuth2 authentication with SSO support",
      target_users: ["Enterprise customers", "Internal teams"],
      domain: "Authentication & Authorization",
@@ -100,8 +95,8 @@ This instruction is loaded by team-worker agents when spawned with roles: `analy
 
 1. **Read upstream artifacts**:
    ```javascript
-   const discoveryContext = JSON.parse(Read(`{session}/spec/discovery-context.json`))
-   const productBrief = Read(`{session}/spec/product-brief.md`)  // if exists
+   const discoveryContext = JSON.parse(Read(`{session}/maestro-spec/discovery-context.json`))
+   const productBrief = Read(`{session}/maestro-spec/product-brief.md`)  // if exists
    ```
 
 2. **Generate document based on pipeline_phase**:
@@ -245,7 +240,7 @@ This instruction is loaded by team-worker agents when spawned with roles: `analy
 
 3. **Write document to spec/ directory**:
    ```javascript
-   Write(`{session}/spec/{doc-type}.md`, documentContent)
+   Write(`{session}/maestro-spec/{doc-type}.md`, documentContent)
    ```
 
 4. **Share discoveries**:
@@ -291,22 +286,19 @@ This instruction is loaded by team-worker agents when spawned with roles: `analy
 
 1. **Read spec artifacts**:
    ```javascript
-   const requirements = Read(`{session}/spec/requirements.md`)
-   const architecture = Read(`{session}/spec/architecture.md`)
-   const epics = Read(`{session}/spec/epics.md`)
+   const requirements = Read(`{session}/maestro-spec/requirements.md`)
+   const architecture = Read(`{session}/maestro-spec/architecture.md`)
+   const epics = Read(`{session}/maestro-spec/epics.md`)
    ```
 
 2. **Explore codebase** (use CLI analysis tools):
    ```
-   exec_command({
-     cmd: `maestro delegate "PURPOSE: Explore codebase for {requirement}
+   shell_exec(`maestro delegate "PURPOSE: Explore codebase for {requirement}
    TASK: • Identify relevant files • Find existing patterns • Locate integration points
    CONTEXT: @**/* | Memory: {requirement}
    EXPECTED: Exploration findings with file paths and patterns
-   CONSTRAINTS: Read-only analysis" --role explore --mode analysis --rule analysis-trace-code-execution`,
-     yield_time_ms: 30000, max_output_tokens: 6000
-   })
-   // ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
+   CONSTRAINTS: Read-only analysis" --role explore --mode analysis --rule analysis-trace-code-execution`, { timeout: 30000 })
+   // Execution mapping: @~/.maestro/workflows/shell-exec-protocol.md
    ```
 
 3. **Generate implementation plan**:
@@ -597,10 +589,10 @@ This instruction is loaded by team-worker agents when spawned with roles: `analy
 
 1. **Read all spec artifacts**:
    ```javascript
-   const productBrief = Read(`{session}/spec/product-brief.md`)
-   const requirements = Read(`{session}/spec/requirements.md`)
-   const architecture = Read(`{session}/spec/architecture.md`)
-   const epics = Read(`{session}/spec/epics.md`)
+   const productBrief = Read(`{session}/maestro-spec/product-brief.md`)
+   const requirements = Read(`{session}/maestro-spec/requirements.md`)
+   const architecture = Read(`{session}/maestro-spec/architecture.md`)
+   const epics = Read(`{session}/maestro-spec/epics.md`)
    ```
 
 2. **Score 4 dimensions** (25% each):
@@ -713,7 +705,7 @@ If you hit a blocker (build fails 3x, missing dependency, ambiguous requirement)
 ```javascript
 mcp__maestro-tools__team_msg({
   operation: "log",
-  session_id: "<session_id>",
+  session_id: "<run-id>",
   from: "<task_id>",
   to: "coordinator",
   type: "blocker",
@@ -738,7 +730,7 @@ After calling `report_agent_job_result`, also log to team_msg for coordinator tr
 ```javascript
 mcp__maestro-tools__team_msg({
   operation: "log",
-  session_id: "<session_id>",
+  session_id: "<run-id>",
   from: "<task_id>",
   to: "coordinator",
   type: "task_complete",

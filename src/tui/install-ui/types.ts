@@ -25,6 +25,7 @@ export interface InstallFlowConfig {
   agyHookLevel: HookLevel;
   installExtraMcp: boolean;
   extraMcpTargetIds: ExtraMcpTargetId[];
+  genericHookLevels: Record<string, HookLevel>;
   installStatusline: boolean;
   statuslineTheme: string;
   hookLevel: HookLevel;
@@ -39,6 +40,23 @@ export interface InstallFlowConfig {
   claudeHooksSelection?: HooksSelection;
   codexHooksSelection?: HooksSelection;
   agyHooksSelection?: HooksSelection;
+  codexDedupeAgents?: boolean;
+  installPluginClaude?: boolean;
+  installPluginCodex?: boolean;
+  configureCodexMultiAgentV2?: boolean;
+  /** Subsystems explicitly disabled by a non-interactive/profile install. */
+  explicitlyDisabled?: {
+    claudeHooks?: boolean;
+    claudeMcp?: boolean;
+    codexHooks?: boolean;
+    codexMcp?: boolean;
+    agyHooks?: boolean;
+    genericHooks?: string[];
+    extraMcp?: boolean;
+    statusline?: boolean;
+    pluginClaude?: boolean;
+    pluginCodex?: boolean;
+  };
 }
 
 // ---------------------------------------------------------------------------

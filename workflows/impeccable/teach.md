@@ -1,3 +1,8 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Teach Flow
 
 Gathers design context for a project and writes two complementary files under `.workflow/impeccable/`:
@@ -140,7 +145,7 @@ Product Context: {project_name}. Register: {register}. Users: {users_summary}. B
 </spec-entry>
 ```
 
-If `ui-conventions.md` doesn't exist, create it. Other maestro commands load this via `spec load --category ui`.
+If `ui-conventions.md` doesn't exist, create it. Other maestro commands load this via `maestro-spec load --category ui`.
 
 ## Step 5: Decide on DESIGN.md
 

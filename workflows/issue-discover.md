@@ -1,3 +1,8 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Workflow: Issue Discovery
 
 Automated issue discovery via multi-perspective analysis or prompt-driven exploration.
@@ -146,9 +151,9 @@ Finalize discovery-state.json: status = "completed", completed_at = NOW_ISO
 Display summary: session ID, mode, raw/unique counts, per-perspective breakdown, severity breakdown.
 
 Next steps:
-  - manage-issue list --severity critical
-  - manage-issue list
-  - see also: /manage-issue-discover usage docs (by-prompt mode for focused scans)
+  - /maestro-manage issue list --severity critical
+  - /maestro-manage issue list
+  - see also: /maestro-manage issue discover usage docs (by-prompt mode for focused scans)
 ```
 
 ---
@@ -178,9 +183,9 @@ Store → .workflow/issues/discoveries/{SESSION_ID}/exploration-plan.json
 ### Step 9: Gather Codebase Context
 
 ```
-Per dimension:
-  1. Semantic search via {search_tool}(query="{dimension.description}")
-  2. Pattern search via rg for each dimension.search_patterns
+Per dimension (prefer maestro explore over rg):
+  1. maestro explore "{dimension.description}" per dimension, parallel
+  2. Fallback: Semantic search via {search_tool} + rg for dimension.search_patterns
   3. Collect matching files/snippets → {SESSION_ID}/{dimension.name}-context.md
 ```
 
@@ -189,7 +194,7 @@ Per dimension:
 ```
 Up to 3 rounds (exit early if no new gaps/findings):
   Round 1: Analyze context → identify issues + coverage gaps
-  Round 2: Refine patterns for gaps → search adjacent files → merge findings
+  Round 2: maestro explore for gap patterns → search adjacent files → merge findings
   Round 3: Final sweep on uncovered high-severity patterns + cross-module interactions
 
 Log per round → {SESSION_ID}/exploration-log.md:
@@ -210,8 +215,8 @@ Finalize discovery-state.json: status = "completed"
 Display summary: session, prompt, rounds, raw/unique counts, per-dimension + severity breakdown.
 
 Next steps:
-  - manage-issue list --source discovery
-  - see also: /manage-issue-discover usage docs (full 8-perspective scan and by-prompt mode)
+  - /maestro-manage issue list --source discovery
+  - see also: /maestro-manage issue discover usage docs (full 8-perspective scan and by-prompt mode)
 ```
 
 ---

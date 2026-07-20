@@ -16,6 +16,8 @@ export function getCategoryIcon(categoryId: string): string {
     team: '👥',
     learn: '📖',
     wiki: '🗺️',
+    scholar: '🎓',
+    meta: '🔧',
   };
   return icons[categoryId] || '📁';
 }

@@ -1,6 +1,6 @@
-# QA Pipelines
 
-Pipeline definitions and task registry for team-quality-assurance.
+
+# QA Pipelines
 
 ## Pipeline Modes
 
@@ -91,7 +91,7 @@ QAGEN -> QARUN -> (if coverage < target) -> QAGEN-fix -> QARUN-gc
 ## Session Directory
 
 ```
-.workflow/.team/QA-<slug>-<YYYY-MM-DD>/
+{run_dir}/work/team/
 ├── .msg/messages.jsonl          # Message bus log
 ├── .msg/meta.json               # Session state + cross-role state
 ├── wisdom/                     # Cross-task knowledge

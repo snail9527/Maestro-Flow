@@ -26,9 +26,11 @@ Maestro 知识沉淀分两种：**约束**和**积累**。约束是编码规范�
 │   ├── AST-*.md                    # 代码资产（API 契约、数据模型）
 │   ├── BLP-*.md                    # 架构蓝图
 │   └── DOC-*.md                    # 长文档（通用兜底）
+├── domain/                         # 领域知识：项目术语表
+│   └── glossary.yaml               # 领域术语（YAML 格式，主格式；另有 glossary.json 向后兼容）
 ├── wiki-index.json                 # 统一索引（WikiIndexer 自动生成）
 └── codebase/
-    └── knowledge-graph.db          # CodeGraph 知识图谱（SQLite，kg CLI 查询）
+    └── knowledge-graph.json        # 代码知识图谱（kg CLI 查询）
 ```
 
 </details>
@@ -82,6 +84,52 @@ summary: "Use when implementing OAuth 2.0 login for public clients."
 
 ---
 
+## 知识生命周期
+
+### 稳定标识（sid）
+
+每个 `<spec-entry>` 在创建时自动分配一个稳定 ID（格式 `S-YYYYMMDD-xxxx`），用于跨文件引用和演化链追踪。存量条目可通过 `maestro spec backfill-sid` 回填。
+
+### 演化链（Supersession）
+
+当新知识替代旧知识时，使用 supersede 建立演化链：
+
+```bash
+# 1. 添加新条目（自动生成 sid）
+maestro spec add coding "新规则" "内容" --keywords kw1,kw2 --json
+# 输出中包含 sid，如 S-20260704-a1b2
+
+# 2. 将旧条目标记为 deprecated
+maestro spec supersede <old-sid> --by <new-sid>
+
+# 3. 查看演化链
+maestro spec history <sid>
+# ○ deprecated  S-20260101-x1y2  "旧规则"
+#     ↓
+# ● CURRENT     S-20260704-a1b2  "新规则"
+```
+
+被替代的条目自动 `status="deprecated"`，从搜索和 agent 注入中排除，但仍可通过 `--include-deprecated` 查看。
+
+### 冲突双轨
+
+新知识与旧条目的关系分两种，语义不同、操作不同：
+
+| 关系 | 场景 | 操作 | 旧条目状态 |
+|------|------|------|-----------|
+| **supersede** | 新规则替代旧规则（演化） | `maestro spec supersede` | `deprecated`（排除） |
+| **conflict** | 两条规则均有道理（争议） | `maestro spec conflict mark` | `contested`（降权但保留） |
+
+### 健康检查
+
+```bash
+maestro spec health
+```
+
+输出：生命周期统计（active/deprecated/contested）、演化链数量、悬空/循环 supersedes 检测、整体新鲜度均值。
+
+---
+
 ## 相关命令
 
 ### 写入类
@@ -109,7 +157,7 @@ summary: "Use when implementing OAuth 2.0 login for public clients."
 |------|------|
 | `/wiki-digest` | 语义主题聚类 + 知识覆盖热力图 + gap 分析 |
 | `/wiki-connect` | 发现孤立节点和缺失连接，修复图联通性 |
-| `/manage-knowledge-audit` | 审计 spec/knowhow/artifact 三存储 — 矛盾检测、过期淘汰、孤立清理（keep/deprecate/delete 三态决策） |
+| `/manage-knowledge-audit` | 审计 spec/knowhow/artifact 三存储 — 矛盾检测、过期淘汰、孤立清理（keep/supersede/contest/deprecate/delete 五态决策） |
 | `/learn-decompose` | 从代码中提取设计模式，写入 spec 和 wiki |
 | `/learn-follow` | 引导式阅读代码/wiki，提取 pattern 并构建理解 |
 
@@ -143,7 +191,7 @@ summary: "Use when testing payment endpoints for retry safety."
 5. Verify webhook delivers exactly once
 ```
 
-`spec load --category test` 自动扫描 knowhow/ 中 `category=test` 且 `tool=true` 的文档，将工具摘要与 spec 一起注入 agent 上下文。
+`maestro-spec load --category test` 自动扫描 knowhow/ 中 `category=test` 且 `tool=true` 的文档，将工具摘要与 spec 一起注入 agent 上下文。
 
 ### 注册与使用
 
@@ -154,21 +202,7 @@ summary: "Use when testing payment endpoints for retry safety."
 | 测试之前 | `/maestro-tools-register generate` | 注册验证方法给 test agent |
 | 复盘时 | `/maestro-tools-register optimize` | 从产物中提取可复用流程 |
 
-使用方式：按名称执行 `/maestro-tools-execute integration-test`、按 category 发现 `/maestro-tools-execute --category test`、Agent 自动发现（`spec load` 输出包含工具摘要）。
-
----
-
-## 统一搜索
-
-`maestro search` 是唯一的用户级搜索入口，基于 BM25 全文检索跨 spec/knowhow/issue 所有知识类型。
-
-```bash
-maestro search "auth token"                       # 全文搜索
-maestro search "auth" --type spec                  # 仅搜索 spec
-maestro search "auth" --category coding            # 按分类过滤
-```
-
-**已废弃**（请勿使用）：`spec search`、`knowhow search`、`wiki search` — 已被统一搜索替代。
+使用方式：按名称执行 `/maestro-tools-execute integration-test`、按 category 发现 `/maestro-tools-execute --category test`、Agent 自动发现（`maestro-spec load` 输出包含工具摘要）。
 
 ---
 
@@ -177,62 +211,230 @@ maestro search "auth" --category coding            # 按分类过滤
 | Hook | 触发时机 | 行为 |
 |------|---------|------|
 | `spec-injector` | PreToolUse:Agent | agent 类型 → category → 加载 spec + keyword 条目 + knowhow 工具 |
-| `keyword-spec-injector` | UserPromptSubmit | prompt 关键词 → 匹配 spec-entry keywords → 注入（最多 5 条/次）+ KG 符号查找 |
-| `kg-sync` | UserPromptSubmit | 源文件变更 → CodeGraph 增量同步（30 秒冷却） |
-| `kg-context-injector` | PreToolUse:Agent | prompt 中的符号名 → CodeGraph 查询 → 注入调用关系和文件位置 |
+| `keyword-spec-injector` | UserPromptSubmit | prompt 关键词 → 匹配 spec-entry keywords → 注入（最多 5 条/次） |
 
 | Agent 类型 | 映射 Category |
 |---|---|
-| code-developer, workflow-executor, universal-executor | coding, learning, ui |
-| tdd-developer, test-fix-agent | coding, test |
-| impeccable-agent, ui-design-agent | coding, ui |
-| cli-lite-planning-agent, action-planning-agent, workflow-planner | arch, coding |
-| workflow-reviewer, workflow-verifier | review, coding |
-| team-supervisor, workflow-roadmapper | arch |
-| team-worker, general-purpose | coding, learning |
-| debug-explore-agent, workflow-debugger | debug |
+| code-developer, tdd-developer | coding, learning |
+| workflow-planner | arch |
+| workflow-reviewer | review |
+| debug-explore-agent | debug |
+| test-fix-agent | coding, test |
 
-Session 级去重：同一条目不会重复注入。所有注入使用统一 `<maestro-context>` 格式封装。
+Session 级去重：同一条目不会重复注入。
 
 ---
 
-## MaestroGraph 知识图谱集成
+## 代码知识图谱集成（KG × Wiki）
 
-Maestro 内置 MaestroGraph 引擎（基于 web-tree-sitter WASM），提供函数级调用图、符号查询、知识跨源搜索等 24 项能力。无需安装额外依赖。
+当 `maestro kg index` 生成 `knowledge-graph.json` 后，WikiIndexer 自动将 KG 数据索引为虚拟 wiki 条目：
+
+| KG 数据 | Wiki 条目 | virtualKind | 用途 |
+|---------|-----------|-------------|------|
+| GraphNode | `kg-{id}` | `kg-node` | 代码实体（函数、类、模块） |
+| Layer | `kg-layer-{id}` | `kg-layer` | 架构层（CLI、Core、Orchestration） |
+| TourStep | `kg-tour-{order}` | `kg-tour-step` | 代码导览步骤（链表串联） |
+
+**Edge 双层存储**：`related[]` 保存 top-N 关联 ID（用于 wiki 图分析），`ext.kgEdges[]` 保存完整有向异构边（用于语义遍历）。
+
+**搜索降级**：KG 节点在 BM25 中仅索引 title + tags，避免代码标识符污染常规搜索。
+
+**交叉引用**：KG 节点通过 `filePath` 自动匹配 `codebase-comp-*` 条目，建立 `ext.semanticDuplicateOf` 引用。
 
 ```bash
-# 初始化索引
-maestro kg sync
+# 查看 KG 索引
+maestro wiki list --keyword kg
 
-# 搜索
-maestro kg query "函数名或关键词"
+# 搜索代码实体
+maestro wiki search "AuthMiddleware"
+
+# 代码变更影响分析
+maestro kg diff-wiki
+
+# KG 节点详情（含关联 wiki 条目）
+maestro kg explain <node-id>
 ```
 
-KG 通过 Hook 自动保持新鲜：`kg-sync`（UserPromptSubmit 增量同步）+ `kg-context-injector`（Agent 启动注入）。仅在首次使用时需手动 `maestro kg sync`。
+---
 
-### kg CLI 子命令
+## Domain 领域知识系统
 
-| 子命令 | 功能 | 示例 |
-|--------|------|------|
-| `kg stats` | 图谱统计信息（节点数、边数、模块分布） | `maestro kg stats` |
-| `kg search <pattern>` | 搜索符号/函数 | `maestro kg search "UserService"` |
-| `kg context <node>` | 节点上下文（调用者、被调用者、依赖） | `maestro kg context "validateToken"` |
-| `kg query <pattern>` | 按名称/类型搜索节点 | `maestro kg query "UserService"` |
-| `kg explain <node>` | 节点详情（依赖、调用者、所在模块） | `maestro kg explain "validateToken"` |
-| `kg path <from> <to>` | 查找两节点间的调用路径 | `maestro kg path "loginController" "db.query"` |
-| `kg diff` | 对比图谱快照差异 | `maestro kg diff` |
+Domain 系统管理项目领域术语表（glossary），为 spec 注入和代码理解提供领域上下文。核心模块包括 `domain-loader.ts`（术语 CRUD + 文件锁）、`domain-scanner.ts`（代码扫描发现候选术语）、`domain-matcher.ts`（CJK 感知的术语匹配）。
 
-### Wiki 虚拟节点
+### CLI 子命令
 
-WikiIndexer 除了索引文件系统中的 spec/knowhow 文档外，还将非文件数据源适配为只读虚拟 WikiEntry 节点：
+| 子命令 | 职责 |
+|--------|------|
+| `domain init` | 初始化 `.workflow/domain/` 和空 `glossary.yaml` |
+| `domain add <canonical> <definition>` | 添加领域术语（支持 aliases、keywords、relationships、tier） |
+| `domain list` | 列出所有术语，支持 `--status active\|deprecated` 过滤 |
+| `domain show <id>` | 查看术语详情（含 concept_ref 文档内容） |
+| `domain update <id>` | 更新术语（definition、aliases、relationships、keywords、tier） |
+| `domain remove <id>` | 删除术语（检查引用依赖，返回 warnings） |
+| `domain search <query>` | 搜索术语（canonical + aliases + definition + keywords） |
+| `domain discover` | 扫描代码库发现候选术语（基于 interface/type/enum/class/route/doc） |
+| `domain import` | 从外部源导入术语（`--from context-package \| @<file>`） |
+| `domain deprecate <id>` | 软删除术语（标记 deprecated，可指定 successor） |
+| `domain validate` | 校验 `glossary.yaml` schema 和关系完整性 |
 
-| 虚拟类型 | 数据源 | 虚拟 kind 前缀 |
-|---------|--------|---------------|
-| 知识图谱节点 | `knowledge-graph.json` | `uakg-node`, `uakg-layer`, `uakg-tour` |
-| Issue 条目 | `issues.jsonl` | `issue` |
-| 会话产物 | `.workflow/scratch/` | `session-artifact` |
+### 术语结构
 
-虚拟节点与普通 wiki 条目统一出现在搜索结果和 `wiki search` 中，但为只读——不能通过 `wiki edit` 修改。
+每个术语包含：`id`（kebab-case）、`canonical`（显示名）、`definition`、`aliases[]`、`keywords[]`、`relationships[]`、`tier`（core/extended/peripheral）、`status`（active/deprecated）、`source`（manual/discover/import）、可选 `concept_ref`（详细概念文档路径）。
+
+### 与 Spec 注入的集成
+
+`spec-injector` 和 `keyword-spec-injector` 在注入 spec 条目前，先通过 `domain-matcher` 匹配 prompt 中的领域术语，将匹配到的术语定义作为上下文前缀注入，帮助 agent 理解项目专有概念。
+
+---
+
+## 可信度评估系统
+
+`credibility.ts` 实现基于**指数衰减**的知识可信度评分，`spec-analytics.ts` 记录注入日志用于改进分析。
+
+### 衰减模型
+
+```
+factor = floor + (1 - floor) * e^(-λ * age_days)
+λ = ln(2) / half_life
+```
+
+| 节点类型 | 半衰期（天） | 说明 |
+|----------|-------------|------|
+| domain | 180 | 领域术语变化缓慢 |
+| spec | 60 | 约束规则中等更新频率 |
+| knowhow | 30 | 操作知识衰减较快 |
+| issue | 14 | 问题状态变化频繁 |
+| project/roadmap/note | 90 | 通用中等衰减 |
+
+- `floor = 0.3`：最低可信度保底
+- `ceiling = 1.2`：搜索命中可提升至上限
+- `warningThreshold = 0.5`：低于此值触发低可信度警告
+
+### 存储与更新
+
+`CredibilityStore` 使用 SQLite `credibility` 表，记录 `search_hits`、`consumption_count`、`last_hit_at`、`last_consumed_at`、`content_changed_at`。内容变更时通过 `content_hash` 比对重置衰减起点。支持 `incrementSearchHits`（批量）和 `incrementConsumption`（单条）追踪使用情况。
+
+### Spec Analytics
+
+`spec-analytics.ts` 记录三种日志类型到 `.workflow/spec-analytics.jsonl`：
+
+| 类型 | 来源 | 记录内容 |
+|------|------|---------|
+| `injection` | spec-injector / keyword-spec-injector / spec-injection-plugin | agent 类型、匹配 category、注入条目数、budget 动作、命中关键词 |
+| `cli` | CLI 端点 | 命令名、参数 |
+| `hook` | workflow hook | hook 名称、持续时间、结果 |
+
+统计聚合提供：按来源/agent 类型/分类的注入命中率、关键词 Top-N 排名、CLI 使用频次、hook 调用统计。日志文件自动轮转（默认 5MB）。
+
+---
+
+## 跨工作空间知识共享
+
+`workspace.ts` 提供跨项目知识共享能力，通过链接其他 Maestro 工作空间实现 spec/knowhow/domain 的跨项目复用。
+
+### CLI 子命令
+
+| 子命令 | 职责 |
+|--------|------|
+| `workspace link <path>` | 链接目标工作空间，支持 `--name` 和 `--share spec,knowhow,domain,codebase` |
+| `workspace unlink <name>` | 移除已链接的工作空间 |
+| `workspace list` | 列出所有已链接工作空间（路径、共享类型、有效性） |
+| `workspace status` | 显示详细状态（各共享类型的条目计数） |
+
+### 共享类型
+
+| 类型 | 共享内容 | 来源目录 |
+|------|---------|---------|
+| `spec` | 约束规则条目 | `specs/*.md` |
+| `knowhow` | 知识文档 | `knowhow/**/*.md` |
+| `domain` | 领域术语表 | `domain/glossary.yaml` |
+| `codebase` | 代码文档索引 | `codebase/doc-index.json` |
+
+链接信息持久化在 `.workflow/config.json` 的 `workspace.linked[]` 中。加载时自动解析路径并校验目标 `.workflow/` 目录是否存在。
+
+---
+
+## KG 自定义提取器插件机制
+
+`plugin-engine.ts` 支持两种插件模式扩展知识图谱的代码提取能力，配置文件为 `.workflow/kg/extractors.yaml`。
+
+### 两种插件模式
+
+| 模式 | 配置方式 | 运行方式 | 适用场景 |
+|------|---------|---------|---------|
+| **declarative** | YAML 中定义 `rules[]` | 正则/call/assignment 模式匹配 | 简单的符号提取（常量、路由、装饰器） |
+| **script** | `.workflow/kg/extractors/*.mjs` | 动态 import + `extract(ctx)` 调用 | 复杂逻辑（AST 遍历、跨文件分析） |
+
+### Declarative 规则类型
+
+- `regex`：正则匹配，支持 `$1`-`$9` 模板提取名称
+- `call`：函数调用模式（如 `builder.define_constant($NAME, $_)`）
+- `assignment`：赋值模式，支持 `module`/`class`/`any` 作用域过滤
+
+### Script 插件 API
+
+Script 插件导出 `extract(ctx)` 函数，`PluginContext` 提供：
+
+- `ctx.filePath` / `ctx.sourceCode` / `ctx.language`：文件信息
+- `ctx.findAll(nodeType)`：遍历 tree-sitter AST 查找指定类型节点
+- `ctx.text(startLine, endLine)`：提取源码行
+- `ctx.makeSymbol(input)`：构建标准化符号对象
+
+### 合并策略
+
+插件提取结果与核心 tree-sitter 结果合并，冲突策略由 `defaults.conflictPolicy` 控制：`merge-metadata`（默认，保留核心符号）、`plugin-wins`（插件覆盖）、`core-wins`（核心保留）。
+
+---
+
+## CooldownGuard 抽象
+
+`cooldown-guard.ts` 提供跨进程的冷却时间守卫，通过 tmpdir 桥接文件实现子进程间的节流控制。
+
+### 核心 API
+
+```typescript
+class CooldownGuard {
+  shouldRun(sessionId): boolean   // 是否在冷却期内
+  markDone(sessionId, extra?)     // 标记完成，写入时间戳
+  timeSinceLastMs(sessionId)      // 距上次触发的毫秒数
+}
+```
+
+### 预配置实例
+
+| 实例 | 冷却时间 | 用途 |
+|------|---------|------|
+| `kgSyncGuard` | 30 秒 | KG 同步节流，避免频繁重建索引 |
+| `kgInitGuard` | 5 分钟 | KG 初始化节流，避免重复全量扫描 |
+
+桥接文件存储在系统 tmpdir（`maestro-kg-sync-{sessionId}.json` / `maestro-kg-init-{sessionId}.json`），包含 `last_trigger` 时间戳。`shouldRun()` 比对当前时间与上次触发时间，超过冷却窗口返回 `true`。
+
+---
+
+## Script Plugins 安全策略
+
+Script 插件（`.mjs` 文件）默认**禁用**，需显式开启以防止不受信任的代码执行。
+
+### 启用方式
+
+```bash
+# CLI 显式启用
+maestro kg sync --allow-extractor-scripts
+
+# 在 code-extractor 调用链中传递
+codeExtractor.extract({ allowScripts: true })
+```
+
+### 安全行为
+
+| 场景 | 行为 |
+|------|------|
+| 存在 `.mjs` 文件但未启用 | 输出 stderr 警告，跳过所有 script 插件 |
+| 已启用 | 动态 `import()` 加载，`extract()` 失败时根据 `onError` 策略处理 |
+| 插件无 `export function extract` | 静默跳过 |
+| 声明式插件 | 始终加载，不受此安全策略限制 |
+
+`warn`（默认）：插件失败时输出警告继续执行；`fail`：插件失败时抛出错误终止提取。
 
 ---
 
@@ -245,14 +447,6 @@ WikiIndexer 除了索引文件系统中的 spec/knowhow 文档外，还将非文
 调试记录 ─────┼──→ /manage-harvest ──────────┼─→ knowhow/   ─→ wiki load → 按需
 规划文档 ─────┤    /quality-retrospective    ├─→ issues/    ─→ manage-issue → 追踪
 代码变更 ─────┘    /learn-decompose          └─→ learnings  ─→ keyword-injector → 上下文
-
-                    淘汰清理                    审计                    CodeGraph
-                    ─────                      ─────                  ─────
-specs/     ──┐                              ┌─→ kg search   ─→ 符号搜索
-knowhow/   ──┼──→ /manage-knowledge-audit ──┼─→ kg context  ─→ 调用关系
-artifacts/ ──┘    (三态: keep/deprecate/delete) └─→ kg path    ─→ 调用链追踪
-                                                             ↑ Hook 自动同步
-                                                             kg-sync (UserPromptSubmit)
 ```
 
 Progressive Fill——各阶段自动沉淀：

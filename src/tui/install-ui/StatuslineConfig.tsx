@@ -76,7 +76,7 @@ export function StatuslineConfig({
 
       {enabled && (
         <Box flexDirection="column" marginTop={1}>
-          <Text bold>Color Theme:</Text>
+          <Text bold color={C.primary}>Color Theme:</Text>
           {THEME_NAMES.map((name, i) => {
             const info = THEME_LABELS[name] ?? { label: name, desc: '' };
             const selected = theme === name;
@@ -88,7 +88,7 @@ export function StatuslineConfig({
                 <Text color={selected ? C.success : undefined} bold={selected}>
                   [{i + 1}] {info.label}
                 </Text>
-                <Text dimColor>  {info.desc}</Text>
+                <Text color={C.neutral}>  {info.desc}</Text>
               </Box>
             );
           })}

@@ -1,3 +1,7 @@
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # SKILL.md Template
 
 Template for generating new Skill entry files.
@@ -34,6 +38,7 @@ The following is a complete SKILL.md template. When generating, **directly copy 
 name: {{skill_name}}
 description: {{description}}. Triggers on {{triggers}}.
 allowed-tools: {{allowed_tools}}
+session-mode: {{session_mode}}
 ---
 
 # {{display_name}}
@@ -67,10 +72,9 @@ allowed-tools: {{allowed_tools}}
 ## Directory Setup
 
 \`\`\`javascript
-const timestamp = new Date().toISOString().slice(0,19).replace(/[-:T]/g, '');
-const workDir = \`{{output_location}}\`;
-
-Bash(\`mkdir -p "\${workDir}"\`);
+// run_dir comes from the birth packet (orchestrator-injected) or the
+// maestro run create return value when self-starting. See run-mode.md.
+const workDir = \`${runStart.run_dir}/outputs\`;
 {{additional_dirs}}
 \`\`\`
 
@@ -228,6 +232,7 @@ function filterDocsByPhase(specs, phase, phaseIndex) {
 name: api-docs-generator
 description: Generate API documentation from source code. Triggers on "generate api docs", "api documentation".
 allowed-tools: Agent, Read, Write, Glob, Grep, Bash
+session-mode: run
 ---
 
 # API Docs Generator
@@ -270,6 +275,7 @@ Phase 3: Generation      → api-docs.md
 name: task-manager
 description: Interactive task management with CRUD operations. Triggers on "manage tasks", "task list".
 allowed-tools: Agent, AskUserQuestion, Read, Write
+session-mode: run
 ---
 
 # Task Manager

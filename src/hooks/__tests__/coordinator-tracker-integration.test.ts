@@ -9,7 +9,7 @@
  * Fixtures at: ./fixtures/coordinate-cli-output.json   — simulated Bash CLI output
  */
 
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';

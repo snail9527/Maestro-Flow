@@ -73,7 +73,94 @@ export function extractSearchTerms(query: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// 4. 多信号评分
+// 4. 代码查询扩展 (缩写 ↔ 全称同义词)
+// ---------------------------------------------------------------------------
+
+const CODE_SYNONYMS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['auth', ['authentication', 'authorization']],
+  ['authentication', ['auth']],
+  ['authorization', ['auth']],
+  ['db', ['database']],
+  ['database', ['db']],
+  ['config', ['configuration', 'settings']],
+  ['configuration', ['config']],
+  ['settings', ['config', 'options']],
+  ['btn', ['button']],
+  ['button', ['btn']],
+  ['msg', ['message']],
+  ['message', ['msg']],
+  ['req', ['request']],
+  ['request', ['req']],
+  ['res', ['response']],
+  ['response', ['res']],
+  ['err', ['error', 'exception']],
+  ['error', ['err', 'exception']],
+  ['exception', ['err', 'error']],
+  ['fn', ['function']],
+  ['cb', ['callback']],
+  ['callback', ['cb']],
+  ['ctx', ['context']],
+  ['context', ['ctx']],
+  ['env', ['environment']],
+  ['environment', ['env']],
+  ['param', ['parameter', 'arg', 'argument']],
+  ['parameter', ['param']],
+  ['arg', ['argument', 'param']],
+  ['argument', ['arg', 'param']],
+  ['init', ['initialize', 'initialization', 'setup']],
+  ['initialize', ['init']],
+  ['setup', ['init', 'configure']],
+  ['util', ['utility', 'helper']],
+  ['utility', ['util', 'helper']],
+  ['helper', ['util', 'utility']],
+  ['repo', ['repository']],
+  ['repository', ['repo']],
+  ['info', ['information']],
+  ['information', ['info']],
+  ['mgr', ['manager']],
+  ['manager', ['mgr']],
+  ['svc', ['service']],
+  ['service', ['svc']],
+  ['cmd', ['command']],
+  ['command', ['cmd']],
+  ['nav', ['navigation']],
+  ['navigation', ['nav']],
+  ['idx', ['index']],
+  ['val', ['validate', 'validation']],
+  ['validate', ['val', 'validation']],
+  ['validation', ['val', 'validate']],
+  ['sync', ['synchronize']],
+  ['synchronize', ['sync']],
+  ['async', ['asynchronous']],
+  ['middleware', ['mw']],
+  ['mw', ['middleware']],
+]);
+
+/**
+ * 代码查询扩展 — 基于 extractSearchTerms 分词 + 缩写同义词 + 词干变体
+ * 返回包含原始 term、同义词和词干变体的扩展查询字符串
+ */
+export function expandCodeQuery(query: string): string {
+  const terms = extractSearchTerms(query);
+  const expanded = new Set(terms);
+
+  for (const term of terms) {
+    const lower = term.toLowerCase();
+    const synonyms = CODE_SYNONYMS.get(lower);
+    if (synonyms) {
+      for (const syn of synonyms) expanded.add(syn);
+    }
+    const stems = getStemVariants(lower);
+    for (const stem of stems) {
+      if (stem.length >= 3) expanded.add(stem);
+    }
+  }
+
+  return [...expanded].join(' ');
+}
+
+// ---------------------------------------------------------------------------
+// 5. 多信号评分
 // ---------------------------------------------------------------------------
 
 export function kindBonus(kind: UnifiedNodeKind): number {
@@ -156,7 +243,7 @@ export function nameMatchBonus(name: string, query: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// 5. 综合评分
+// 6. 综合评分
 // ---------------------------------------------------------------------------
 
 export interface ScoredResult {

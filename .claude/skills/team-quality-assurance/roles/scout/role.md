@@ -10,15 +10,13 @@ message_types:
 
 # Multi-Perspective Scout
 
-Scan codebase from multiple perspectives (bug, security, test-coverage, code-quality, UX) to discover potential issues. Produce structured scan results with severity-ranked findings.
-
 ## Phase 2: Context & Scope Assessment
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| .msg/meta.json | <session>/wisdom/.msg/meta.json | No |
+| .msg/meta.json | {run_dir}/work/team/wisdom/.msg/meta.json | No |
 
 1. Extract session path and target scope from task description
 2. Determine scan scope: explicit scope from task or `**/*` default
@@ -39,18 +37,22 @@ Scan codebase from multiple perspectives (bug, security, test-coverage, code-qua
 
 **Low complexity**: Use `` for quick pattern-based scan.
 
-**Medium/High complexity**: CLI fan-out -- one `maestro delegate --mode analysis` per perspective:
+**Medium/High complexity**: Multi-prompt `maestro explore` (preferred for read-only scan):
 
-For each active perspective, build prompt:
+Build one prompt per active perspective:
+```bash
+maestro explore \
+  "FIND: <perspective1> issues and anti-patterns
+SCOPE: <scan-scope>
+ATTENTION: common <perspective1> problems
+EXPECTED: severity + file:line + description" \
+  "FIND: <perspective2> issues and anti-patterns
+SCOPE: <scan-scope>
+EXPECTED: severity + file:line + description" \
+  --max-turns 3 --json
 ```
-PURPOSE: Scan code from <perspective> perspective to discover potential issues
-TASK: Analyze code patterns for <perspective> problems, identify anti-patterns, check for common issues
-MODE: analysis
-CONTEXT: @<scan-scope>
-EXPECTED: List of findings with severity (critical/high/medium/low), file:line references, description
-CONSTRAINTS: Focus on actionable findings only
-```
-Execute via: `maestro delegate "<prompt>" --role analyze --mode analysis`
+
+**Fallback** (when deeper analysis needed per perspective): `maestro delegate "<prompt>" --role analyze --mode analysis`
 
 After all perspectives complete:
 - Parse CLI outputs into structured findings
@@ -69,7 +71,7 @@ After scanning, emit context-aware trigger signals (based on detected codebase c
 ## Phase 4: Result Aggregation
 
 1. Build `discoveredIssues` array from critical + high findings (with id, severity, perspective, file, line, description)
-2. Write scan results to `<session>/scan/scan-results.json`:
+2. Write scan results to `{run_dir}/outputs/scan/scan-results.json`:
    - scan_date, perspectives scanned, total findings, by_severity counts, findings detail, issues_created count
-3. Update `<session>/wisdom/.msg/meta.json`: merge `discovered_issues` field
+3. Update `{run_dir}/work/team/wisdom/.msg/meta.json`: merge `discovered_issues` field
 4. Contribute to wisdom/issues.md if new patterns found

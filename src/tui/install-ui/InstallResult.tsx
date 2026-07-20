@@ -15,7 +15,7 @@ interface InstallResultProps {
 function Row({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
   return (
     <Box>
-      <Text color={C.primary}>{label.padEnd(13)}</Text>
+      <Text color={C.primary}>{label.padEnd(16)}</Text>
       <Text color={valueColor ?? C.success}>{value}</Text>
     </Box>
   );
@@ -34,16 +34,16 @@ export function InstallResult({ result }: InstallResultProps) {
         <Text bold color={C.success}>{t.install.resultTitle}</Text>
 
         {result.filesInstalled > 0 && (
-          <Row label={t.install.resultFiles.replace('{count}', '')} value={t.install.resultFiles.replace('{count}', String(result.filesInstalled))} />
+          <Row label="Files:" value={`${result.filesInstalled} installed`} />
         )}
         {result.dirsCreated > 0 && (
-          <Row label="Dirs:" value={t.install.resultDirs.replace('{count}', String(result.dirsCreated))} />
+          <Row label="Dirs:" value={`${result.dirsCreated} created`} />
         )}
         {result.filesSkipped > 0 && (
-          <Row label="Preserved:" value={t.install.resultPreserved.replace('{count}', String(result.filesSkipped))} />
+          <Row label="Preserved:" value={`${result.filesSkipped} settings files`} />
         )}
         {result.hooksInstalled > 0 && (
-          <Row label="Hooks:" value={t.install.resultHooks.replace('{count}', String(result.hooksInstalled))} />
+          <Row label="Hooks:" value={`${result.hooksInstalled} installed`} />
         )}
         <Row
           label="Statusline:"
@@ -56,7 +56,7 @@ export function InstallResult({ result }: InstallResultProps) {
           valueColor={result.mcpRegistered ? C.success : C.neutral}
         />
         {result.codexHooksInstalled > 0 && (
-          <Row label="Codex Hooks:" value={t.install.resultHooks.replace('{count}', String(result.codexHooksInstalled))} />
+          <Row label="Codex Hooks:" value={`${result.codexHooksInstalled} installed`} />
         )}
         <Row
           label="Codex MCP:"
@@ -64,7 +64,7 @@ export function InstallResult({ result }: InstallResultProps) {
           valueColor={result.codexMcpRegistered ? C.success : C.neutral}
         />
         {result.agyHooksInstalled > 0 && (
-          <Row label="Agy Hooks:" value={t.install.resultHooks.replace('{count}', String(result.agyHooksInstalled))} />
+          <Row label="Agy Hooks:" value={`${result.agyHooksInstalled} installed`} />
         )}
         {(result.extraMcpRegistered.length > 0 || result.extraMcpFailed.length > 0) && (
           <Row
@@ -79,13 +79,13 @@ export function InstallResult({ result }: InstallResultProps) {
         )}
         {result.backupPath && (
           <Box>
-            <Text color={C.primary}>{'Backup:'.padEnd(13)}</Text>
+            <Text color={C.primary}>{'Backup:'.padEnd(16)}</Text>
             <Text dimColor>{result.backupPath}</Text>
           </Box>
         )}
         {result.manifestPath && (
           <Box>
-            <Text color={C.primary}>{t.install.resultManifest.padEnd(13)}</Text>
+            <Text color={C.primary}>{t.install.resultManifest.padEnd(16)}</Text>
             <Text dimColor>{result.manifestPath}</Text>
           </Box>
         )}

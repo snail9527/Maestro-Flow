@@ -1,3 +1,8 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 Generate a `DESIGN.md` file at `.workflow/impeccable/DESIGN.md` that captures the current visual design system, so AI agents generating new screens stay on-brand.
 
 DESIGN.md follows the [official Google Stitch DESIGN.md format](https://stitch.withgoogle.com/docs/design-md/format/): YAML frontmatter carrying machine-readable design tokens, followed by a markdown body with exactly six sections in a fixed order. **Tokens are normative; prose provides context for how to apply them.** Sections may be omitted when not relevant, but **do not reorder them and do not rename them**. Section headers must match the spec character-for-character so the file stays parseable by other DESIGN.md-aware tools (Stitch itself, awesome-design-md, skill-rest, etc.).
@@ -338,7 +343,7 @@ Design System: {project_name}. Color strategy: {color_strategy}. Typography: {ty
 </spec-entry>
 ```
 
-If `ui-conventions.md` doesn't exist, create it. Combined with the product entry from `teach`, `spec load --category ui` surfaces both.
+If `ui-conventions.md` doesn't exist, create it. Combined with the product entry from `teach`, `maestro-spec load --category ui` surfaces both.
 
 ### Step 5: Confirm, refine, and refresh session cache
 

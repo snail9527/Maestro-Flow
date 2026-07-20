@@ -2,20 +2,18 @@
 role: planner
 prefix: TDPLAN
 inner_loop: false
-message_types: [state_update]
+message_types: "[state_update]"
 ---
 
 # Tech Debt Planner
-
-Remediation plan designer. Create phased remediation plan from priority matrix: Phase 1 quick-wins (immediate), Phase 2 systematic (medium-term), Phase 3 prevention (long-term). Produce remediation-plan.md.
 
 ## Phase 2: Load Assessment Data
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Session path | task description (regex: `session:\s*(.+)`) | Yes |
-| .msg/meta.json | <session>/.msg/meta.json | Yes |
-| Priority matrix | <session>/assessment/priority-matrix.json | Yes |
+| .msg/meta.json | {run_dir}/work/team/.msg/meta.json | Yes |
+| Priority matrix | {run_dir}/outputs/assessment/priority-matrix.json | Yes |
 
 1. Extract session path from task description
 2. Read .msg/meta.json for debt_inventory
@@ -29,7 +27,7 @@ Remediation plan designer. Create phased remediation plan from priority matrix: 
 | Item Count (quick-win + strategic) | Strategy |
 |------------------------------------|----------|
 | <= 5 | Inline: generate steps from item data |
-| > 5 | CLI-assisted: gemini generates detailed remediation steps |
+| > 5 | CLI-assisted: agy generates detailed remediation steps |
 
 **3-Phase Plan Structure**:
 
@@ -59,11 +57,11 @@ Remediation plan designer. Create phased remediation plan from priority matrix: 
 | dependency | Configure automated dependency update bot (Renovate/Dependabot) |
 | documentation | Add JSDoc/docstring enforcement in linting rules |
 
-For CLI-assisted mode, prompt gemini with debt summary requesting specific fix steps per item, grouped into phases, with dependencies and estimated time.
+For CLI-assisted mode, prompt agy with debt summary requesting specific fix steps per item, grouped into phases, with dependencies and estimated time.
 
 ## Phase 4: Validate & Save
 
 1. Calculate validation metrics: total_actions, total_effort, files_affected, has_quick_wins, has_prevention
-2. Write `<session>/plan/remediation-plan.md` (markdown with per-item checklists)
-3. Write `<session>/plan/remediation-plan.json` (machine-readable)
+2. Write `{run_dir}/outputs/plan/remediation-plan.md` (markdown with per-item checklists)
+3. Write `{run_dir}/outputs/plan/remediation-plan.json` (machine-readable)
 4. Update .msg/meta.json with `remediation_plan` summary

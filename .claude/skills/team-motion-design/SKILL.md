@@ -1,8 +1,14 @@
 ---
 name: team-motion-design
+disable-model-invocation: true
 description: Unified team skill for motion design. Animation token systems, scroll choreography, GPU-accelerated transforms, reduced-motion fallback. Uses team-worker agent architecture. Triggers on "team motion design", "animation system".
 allowed-tools: Agent, AskUserQuestion, Read, Write, Edit, Bash, Glob, Grep, TaskList, TaskGet, TaskUpdate, TaskCreate, TeamCreate, TeamDelete, SendMessage, mcp__maestro__read_file, mcp__maestro__write_file, mcp__maestro__edit_file, mcp__maestro__team_msg, mcp__chrome-devtools__performance_start_trace, mcp__chrome-devtools__performance_stop_trace, mcp__chrome-devtools__performance_analyze_insight, mcp__chrome-devtools__evaluate_script, mcp__chrome-devtools__take_screenshot
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team Motion Design
 
@@ -44,7 +50,7 @@ Skill(skill="team-motion-design", args="task description")
 ## Pre-load (coordinator, before dispatch)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for module boundaries
-2. **Specs (ui)**: `maestro spec load --category ui` — load ui constraints as shared context
+2. **Specs (ui)**: `maestro load --type spec --category ui` — load ui constraints as shared context
 3. **Wiki knowledge**: `maestro search "animation motion design tokens" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 ## Role Router
@@ -56,9 +62,9 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `MD`
-- **Session path**: `.workflow/.team/MD-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 - **Max GC rounds**: 2
 
 ## Worker Spawn Template
@@ -75,14 +81,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: motion-design
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -109,22 +115,22 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 ## Session Directory
 
 ```
-.workflow/.team/MD-<slug>-<date>/
+{run_dir}/work/team/
 +-- .msg/
 |   +-- messages.jsonl         # Team message bus
 |   +-- meta.json              # Pipeline config + GC state
-+-- research/                  # Motion researcher output
++-- {run_dir}/outputs/research/                  # Motion researcher output
 |   +-- perf-traces/           # Chrome DevTools performance traces
 |   +-- animation-inventory.json
 |   +-- performance-baseline.json
 |   +-- easing-catalog.json
-+-- choreography/              # Choreographer output
++-- {run_dir}/outputs/choreography/              # Choreographer output
 |   +-- motion-tokens.json
 |   +-- sequences/             # Scroll choreography sequences
-+-- animations/                # Animator output
++-- {run_dir}/outputs/animations/                # Animator output
 |   +-- keyframes/             # CSS @keyframes files
 |   +-- orchestrators/         # JS animation orchestrators
-+-- testing/                   # Motion tester output
++-- {run_dir}/outputs/testing/                   # Motion tester output
 |   +-- traces/                # Performance trace data
 |   +-- reports/               # Performance reports
 +-- wisdom/                    # Cross-task knowledge

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import YAML from 'yaml';
 
 import {
   initDomain,
@@ -44,18 +45,19 @@ afterEach(() => {
 });
 
 describe('initDomain', () => {
-  it('creates glossary.json and concepts/ directory', () => {
+  it('creates glossary.yaml and concepts/ directory', () => {
     const path = initDomain(workflowRoot);
     expect(existsSync(path)).toBe(true);
+    expect(path.endsWith('.yaml')).toBe(true);
     expect(existsSync(join(workflowRoot, 'domain', 'concepts'))).toBe(true);
-    const glossary = JSON.parse(readFileSync(path, 'utf-8'));
+    const glossary = YAML.parse(readFileSync(path, 'utf-8'));
     expect(glossary.$schema).toBe('domain/1.0');
     expect(glossary.terms).toEqual([]);
   });
 
   it('sets project name when provided', () => {
     const path = initDomain(workflowRoot, 'my-project');
-    const glossary = JSON.parse(readFileSync(path, 'utf-8'));
+    const glossary = YAML.parse(readFileSync(path, 'utf-8'));
     expect(glossary.project).toBe('my-project');
   });
 

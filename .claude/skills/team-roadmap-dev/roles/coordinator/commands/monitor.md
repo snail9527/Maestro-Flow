@@ -1,12 +1,10 @@
 # Command: Monitor
 
-Handle all coordinator monitoring events for the roadmap-dev pipeline using the async Spawn-and-Stop pattern. Multi-phase execution with gap closure expressed as event-driven state machine transitions. One operation per invocation, then STOP and wait for the next callback.
-
 ## Constants
 
 | Key | Value | Description |
 |-----|-------|-------------|
-| SPAWN_MODE | background | All workers spawned via `Task(run_in_background: true)` |
+| SPAWN_MODE | background | All workers spawned via `Agent(subagent_type: "team-worker", run_in_background: true)` |
 | ONE_STEP_PER_INVOCATION | true | Coordinator does one operation then STOPS |
 | WORKER_AGENT | team-worker | All workers spawned as team-worker agents |
 | MAX_GAP_ITERATIONS | 3 | Maximum gap closure re-plan/exec/verify cycles per phase |
@@ -15,8 +13,8 @@ Handle all coordinator monitoring events for the roadmap-dev pipeline using the 
 
 | Prefix | Role | Role Spec | inner_loop |
 |--------|------|-----------|------------|
-| PLAN | planner | `~  or <project>/.claude/skills/team-roadmap-dev/roles/planner/role.md` | true (cli_tools: gemini --mode analysis) |
-| EXEC | executor | `~  or <project>/.claude/skills/team-roadmap-dev/roles/executor/role.md` | true (cli_tools: gemini --mode write) |
+| PLAN | planner | `~  or <project>/.claude/skills/team-roadmap-dev/roles/planner/role.md` | true (cli_tools: agy --mode analysis) |
+| EXEC | executor | `~  or <project>/.claude/skills/team-roadmap-dev/roles/executor/role.md` | true (cli_tools: agy --mode write) |
 | VERIFY | verifier | `~  or <project>/.claude/skills/team-roadmap-dev/roles/verifier/role.md` | true |
 
 ### Pipeline Structure
@@ -45,17 +43,17 @@ session.coordinates = {
 
 | Input | Source | Required |
 |-------|--------|----------|
-| Session file | `<session-folder>/.msg/meta.json` | Yes |
+| Session file | `{run_dir}/work/team/.msg/meta.json` | Yes |
 | Task list | `TaskList()` | Yes |
 | Active workers | session.active_workers[] | Yes |
 | Coordinates | session.coordinates | Yes |
-| Config | `<session-folder>/config.json` | Yes |
-| State | `<session-folder>/state.md` | Yes |
+| Config | `{run_dir}/work/team/config.json` | Yes |
+| State | `{run_dir}/work/team/state.md` | Yes |
 
 ```
 Load session state:
-  1. Read <session-folder>/.msg/meta.json -> session
-  2. Read <session-folder>/config.json -> config
+  1. Read {run_dir}/work/team/.msg/meta.json -> session
+  2. Read {run_dir}/work/team/config.json -> config
   3. TaskList() -> allTasks
   4. Extract coordinates from session (current_phase, gap_iteration, step)
   5. Extract active_workers[] from session (default: [])
@@ -114,7 +112,7 @@ Receive callback from [<role>]
   |   |   +- VERIFY-* completed:
   |   |       +- Update coordinates.step = "verify_done"
   |   |       +- Read verification result from:
-  |   |       |   <session-folder>/phase-<N>/verification.md
+  |   |       |   {run_dir}/outputs/phase-<N>/verification.md
   |   |       +- Parse gaps from verification
   |   |       +- Gaps found?
   |   |           +- NO -> Phase passed
@@ -228,7 +226,7 @@ Ready tasks found?
       |   EXEC-*   -> executor
       |   VERIFY-* -> verifier
       +- TaskUpdate -> in_progress
-      +- team_msg log -> task_unblocked (team_session_id=<session-id>)
+      +- team_msg log -> task_unblocked (team_session_id=<run-id>)
       +- Spawn team-worker (see spawn call below)
       +- Add to session.active_workers
       +- Update session file
@@ -248,8 +246,8 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: ~  or <project>/.claude/skills/team-roadmap-dev/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: roadmap-dev
 requirement: <task-description>
 inner_loop: true
@@ -261,7 +259,7 @@ inner_loop: true
 - Gap Iteration: <gap_iteration>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -367,6 +365,12 @@ All phases done. Generate final project summary and finalize session.
 
 ```
 All phases completed (no pending, no in_progress across all phases)
+  +- Run lifecycle completion:
+  |   - Read run_id from team-session.json.run.run_id
+  |   - Write {run_dir}/report.md with frontmatter (verdict/summary/concerns)
+  |   - Run `maestro run complete <run_id>`
+  |   - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
+  |
   +- Generate project-level summary:
   |   - Roadmap overview (phases completed)
   |   - Per-phase results:

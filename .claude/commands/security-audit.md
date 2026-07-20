@@ -1,5 +1,6 @@
 ---
 name: security-audit
+disable-model-invocation: true
 description: OWASP Top 10 and STRIDE security auditing with supply chain analysis
 argument-hint: "[quick|standard|deep] [--scope <path>]"
 allowed-tools:
@@ -10,15 +11,21 @@ allowed-tools:
   - Grep
   - Agent
   - AskUserQuestion
+session-mode: run
+contract:
+  discovery: self-described
+  consumes: []
+  produces: []
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
+
 <purpose>
 Systematic security audit covering OWASP Top 10, dependency supply chain, secrets detection,
 CI/CD pipeline review, and optional STRIDE threat modeling. Three tiers control depth vs speed.
 </purpose>
-
-<required_reading>
-@~/.maestro/workflows/review.md
-</required_reading>
 
 <context>
 $ARGUMENTS — Parse tier and scope:
@@ -32,7 +39,18 @@ $ARGUMENTS — Parse tier and scope:
 | quick | ✓ | ✓ | — | — | — | — |
 | standard | ✓ | ✓ | ✓ | ✓ | — | — |
 | deep | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+**Output boundary**: ALL file writes MUST target `{run_dir}/outputs/` or `.workflow/state.json` only. NEVER modify source code, configuration files, or dependencies. Audit is read-only analysis.
 </context>
+
+<invariants>
+1. **Audit is read-only** — NEVER modify source code, configuration, dependencies, or CI/CD files during audit. Security audit produces reports only.
+2. **Findings require file:line evidence** — every finding MUST reference a specific file:line location and include the vulnerable code pattern. No vague or category-only findings.
+3. **Severity NEVER downgraded without justification** — if a finding matches a known OWASP category, its severity follows OWASP guidance. Downgrading requires documented rationale (e.g., compensating control exists).
+4. **Tier coverage is mandatory** — all scan phases required by the selected tier MUST complete. NEVER skip a tier-required phase silently; failures are logged as W00x warnings.
+5. **False positive marking requires evidence** — marking a finding as false positive MUST include the compensating control or code path that prevents exploitation. NEVER dismiss findings without counter-evidence.
+6. **Secrets are never logged** — if secrets are discovered, report their location (file:line) and type but NEVER include the actual secret value in the report output.
+</invariants>
 
 <execution>
 
@@ -98,10 +116,12 @@ Check for:
 
 **Phase 4: Secrets Detection** (standard + deep)
 
-```bash
-# Current codebase
-grep -rn --include="*.ts" --include="*.js" --include="*.json" --include="*.env*" \
-  -E "(password|secret|api.?key|token|credential).*=.*['\"][^'\"]{8,}" . || true
+```
+Grep({
+  pattern: "(password|secret|api.?key|token|credential).*=.*['\"][^'\"]{8,}",
+  glob: "*.{ts,js,json,env*}",
+  output_mode: "content"
+})
 ```
 
 Check `.env.example` for leaked values. Check `.gitignore` for missing `.env` patterns.
@@ -159,24 +179,8 @@ Summary: {total} findings ({critical} critical, {high} high, {medium} medium, {l
 ```
 
 **Register artifact on completion:**
-```
-Append to state.json.artifacts[]:
-{
-  id: nextArtifactId(artifacts, "review"),  // RVW-NNN (security-audit reuses review type)
-  type: "review",
-  subtype: "security-audit",
-  milestone: current_milestone || null,
-  phase: target_phase || null,
-  scope: target_phase ? "phase" : "standalone",
-  path: "scratch/{YYYYMMDD}-security-audit-{tier}-{slug}",
-  status: critical_count == 0 ? "completed" : "completed_with_concerns",
-  tier: tier,                              // quick|standard|deep
-  harvested: false,
-  created_at: start_time,
-  completed_at: now()
-}
-```
-Write findings report to the same `path` (severity matrix, file:line refs, remediation).
+
+Write the declared security findings under `{run_dir}/outputs/` and the human summary to `{run_dir}/report.md`. `maestro run complete` performs registration automatically; the model never edits an artifact registry.
 </execution>
 
 <completion>
@@ -190,22 +194,23 @@ CONCERNS: {count} critical findings require immediate action
 ```
 
 Status mapping:
-- **DONE** — No critical/high findings
-- **DONE_WITH_CONCERNS** — Critical/high findings documented with remediation
+- **done** — No critical/high findings
+- **done-with-concerns** — Critical/high findings documented with remediation
 
 ### Ralph-invoked completion
 
 End the step by calling the CLI (no text block output):
 ```
-maestro ralph complete <idx> --status {STATUS} [--evidence {path}]
+maestro run complete --session {session_id} --verdict {VERDICT} [--evidence {path}]
 ```
+(run-id 可省略 — 自动解析当前 running 步)
 
 ### Next-step routing
 
 | Condition | Suggestion |
 |-----------|-----------|
-| No critical findings | `/quality-review {phase}` |
-| Critical findings need fix | `/maestro-plan {phase} --gaps` |
+| No critical findings | `maestro run create review --session YYYYMMDD-review-{topic} --intent "{goal}" -- {phase}` |
+| Critical findings need fix | `maestro run create plan --session YYYYMMDD-plan-{topic} --intent "{goal}" -- {phase} --gaps` |
 | Need deeper analysis | `/security-audit deep --scope {path}` |
 | Want dependency remediation | Fix vulnerabilities, then re-run `/security-audit` |
 </completion>

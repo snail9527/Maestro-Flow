@@ -7,8 +7,6 @@ message_types: [state_update]
 
 # Typography Readability Auditor
 
-Typography accessibility audit across all viewports. Font sizes at breakpoints, line-height ratios, clamp() validation, reading width measurement, font loading strategy assessment. Produce detailed typography report with breakpoint-by-breakpoint analysis.
-
 ## Phase 2: Context & Environment Detection
 
 | Input | Source | Required |
@@ -17,7 +15,7 @@ Typography accessibility audit across all viewports. Font sizes at breakpoints, 
 | Session path | Extracted from task description | Yes |
 | Target (URL or file paths) | From task description CONTEXT | Yes |
 | WCAG level (AA/AAA) | From task description CONTEXT | Yes |
-| .msg/meta.json | <session>/.msg/meta.json | No |
+| .msg/meta.json | {run_dir}/work/team/.msg/meta.json | No |
 
 1. Extract session path, target, and WCAG level from task description
 2. Identify target:
@@ -45,7 +43,7 @@ Typography accessibility audit across all viewports. Font sizes at breakpoints, 
     - Computed font-size on body, headings (h1-h6), paragraphs, captions
     - Computed line-height on same elements
     - Container width and character count per line
-  - `mcp__chrome-devtools__take_screenshot({})` -> save to `<session>/evidence/typo-{breakpoint}px.png`
+  - `mcp__chrome-devtools__take_screenshot({})` -> save to `{run_dir}/evidence/typo-{breakpoint}px.png`
 
 ### Step 2: Font Size Audit
 
@@ -116,7 +114,7 @@ Check for FOUT (Flash of Unstyled Text) / FOIT (Flash of Invisible Text) risks.
 
 ## Phase 4: Report Generation & Output
 
-1. Write audit report to `<session>/audits/typography/typo-audit-{NNN}.md`:
+1. Write audit report to `{run_dir}/outputs/audits/typography/typo-audit-{NNN}.md`:
 
 ```markdown
 # Typography Accessibility Audit - {NNN}
@@ -181,5 +179,5 @@ Check for FOUT (Flash of Unstyled Text) / FOIT (Flash of Invisible Text) risks.
 - ...
 ```
 
-2. Update `<session>/.msg/meta.json` under `typo-auditor` namespace:
+2. Update `{run_dir}/work/team/.msg/meta.json` under `typo-auditor` namespace:
    - Read existing -> merge `{ "typo-auditor": { audit_id, total_rules, pass_count, fail_count, critical_count, high_count, breakpoints_tested, timestamp } }` -> write back

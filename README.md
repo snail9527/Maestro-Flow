@@ -2,226 +2,230 @@
 
 # Maestro-Flow
 
-### The Orchestration Layer for the Multi-Agent Era
+### 意图驱动的多智能体工作流编排框架
 
-**Don't just run agents. Orchestrate them.**
+**说出你要做什么，Maestro 自动规划、调度、执行、验证。**
 
+<br/>
+
+[![npm version](https://img.shields.io/npm/v/maestro-flow?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/maestro-flow)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-≥18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-Protocol-8B5CF6)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[简体中文](README.md)&nbsp;&nbsp;|&nbsp;&nbsp;[English](README.en.md)
 
 </div>
 
+<br/>
+
+> 大多数 AI 编程工具只能让一个 Agent 做一件事。
+> Maestro-Flow 让**多个 Agent 协同完成从头脑风暴到部署上线的全流程** — 自适应决策引擎根据实际结果动态调整策略，知识图谱将每次执行的经验自动积累到下一次。
+
+<br/>
+
+## 核心能力
+
+**自适应编排** — Ralph v2 引擎读取项目状态，将自然语言意图分类到 40+ 种命令链，在关键节点根据实际执行结果动态决策：继续、回退、还是插入修复循环。不写 YAML，不配置管线。
+
+**跨后端调度** — 同一工作流中混用 Claude、Codex、Gemini、Qwen、OpenCode，四种编排模式按需组合：Delegate（异步委派）、Team（角色协作）、Wave（依赖并行）、Swarm（蚁群探索）。
+
+**知识自增强** — Agent 执行中发现的模式、陷阱、决策，自动持久化为 Spec 和 Knowhow。Hook 系统将相关知识注入后续 Agent 的提示词 — 项目越用越聪明。
+
+**长周期自校正** — Odyssey 系列命令运行数小时级的自主循环，每个检查点自适应调整策略，直到满足验收标准。
+
 ---
 
-Maestro-Flow is a workflow orchestration framework for multi-agent development with Claude Code, Codex, Gemini, and other AI agents. Describe your intent, and Maestro-Flow routes to the optimal command chain, drives parallel agent execution, and closes the loop through adaptive decision-making, a real-time dashboard, and an evolving knowledge graph.
-
----
-
-## Install
+## 安装
 
 ```bash
 npm install -g maestro-flow
-maestro install
+maestro install          # 交互式选择安装组件
 ```
 
-**Prerequisites**: Node.js >= 18, Claude Code CLI. Optional: Codex CLI, Gemini CLI for multi-agent workflows.
+需要 Node.js ≥ 18 和 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)。多 Agent 工作流可选装 Codex CLI、agy CLI。
 
 ---
 
-## Quick Start
+## 快速上手
 
-**`/maestro-ralph`** is the primary entry point — a closed-loop lifecycle engine that reads project state, infers your position, builds an adaptive command chain, and drives it to completion:
+### Ralph v2 — 自适应生命周期引擎
+
+主入口。说出目标，Ralph 自动判断开发阶段、构建命令链、在 decision 节点动态调整：
 
 ```bash
-/maestro-ralph "implement OAuth2 authentication with refresh tokens"
-```
+/maestro-ralph-v2 "实现 OAuth2 认证，支持 refresh token"
 
-Ralph automatically determines where you are in the lifecycle (brainstorm → blueprint → analyze → roadmap → plan → execute → verify → review → test → milestone-complete) and builds the appropriate chain. Upstream origin commands (brainstorm, blueprint) and roadmap are optional — Ralph skips them based on project state and scope. Decision nodes at key checkpoints evaluate results and dynamically insert debug+fix loops when needed.
+# Ralph 自动构建链：analyze → plan → execute → verify → review → test
+# 遇到失败 → 自动插入 debug → fix → retry 循环
+# 遇到新项目 → 自动前置 brainstorm → blueprint
+```
 
 ```bash
-/maestro-ralph status              # View session progress
-/maestro-ralph continue            # Resume after decision pause
-/maestro-ralph -y "build a REST API"  # Full auto mode — no pauses
+/maestro-ralph-v2 status      # 查看当前会话进度
+/maestro-ralph-v2 continue    # 从 decision 暂停点恢复
+/maestro-ralph-v2 -y "..."    # 全自动，无需确认
 ```
 
-### Other Entry Points
-
-| Command | When to Use |
-|---------|-------------|
-| `/maestro "..."` | Describe intent, let AI route to the optimal command chain |
-| `/maestro-quick` | Quick fixes, small features (analyze → plan → execute) |
-| `/maestro-*` | Step-by-step: init, brainstorm, blueprint, analyze, roadmap, plan, execute, verify |
-
----
-
-## Key Features
-
-### 1. Adaptive Lifecycle Engine (`maestro-ralph`)
-
-Reads project state → infers lifecycle position → builds command chain with decision nodes. At each checkpoint, Ralph reads actual execution results and decides: continue, or insert a debug → fix → retry loop. The chain grows and shrinks dynamically based on outcomes.
+### 核心管线
 
 ```
-brainstorm → blueprint(opt) → init → analyze(macro) → roadmap(opt) → analyze(micro) → plan → execute → verify
-                                                                                                 ◆ post-verify
-                                              business-test
-                                              ◆ post-business-test
-                                              review
-                                              ◆ post-review
-                                              test
-                                              ◆ post-test
-                                              milestone-audit → milestone-complete
-                                              ◆ post-milestone → next milestone
+意图输入 → Ralph 分类（40+ 链类型）
+              │
+              ▼
+brainstorm → blueprint(opt) → analyze → plan → execute → verify
+                                                           ◆ decision
+                                    review ── ◆ ── test ── ◆ ── milestone
+                                                           ◆ → 下一里程碑
 ```
 
-**Three quality modes** — control how thorough each phase is:
+三种质量模式控制管线深度：
 
-| Mode | Stages | When |
-|------|--------|------|
-| `full` | verify → business-test → review → test-gen → test | Production features, security-critical code |
-| `standard` | verify → review → test | Default, balanced quality |
-| `quick` | verify → CLI-review | Quick fixes, prototyping |
+| 模式 | 管线 | 适用场景 |
+|------|------|---------|
+| `full` | verify → business-test → review → test-gen → test | 生产环境、安全关键 |
+| `standard` | verify → review → test | 默认平衡 |
+| `quick` | verify → CLI-review | 原型、热修 |
 
-**Full pipeline explained** — each stage serves a distinct quality gate:
-
-1. **verify** — goal-backward verification: checks that all plan requirements are implemented, validates architectural constraints, anti-pattern scan, Nyquist test coverage
-2. **business-test** — PRD-forward business testing: requirement traceability, fixture generation, multi-layer execution against acceptance criteria
-3. **review** — multi-dimensional code review: correctness, readability, performance, security, testing, architecture
-4. **test-gen** — coverage gap analysis and automatic test generation (TDD/E2E classification, L0-L3 progressive layers)
-5. **test** — conversational UAT: interactive exploratory testing with session persistence and gap-plan closure
-
-At each `◆` decision node, Ralph evaluates outcomes and decides: pass through, or insert a debug → fix → retry loop. Max retries configurable per decision point.
-
-### 2. Layered Command Topology
-
-Commands are organized in four layers: **upstream origin** (brainstorm, blueprint), **understanding** (analyze with dual-mode: macro for scope exploration, micro for phase-level depth), **orchestration** (roadmap — optional, pure Milestone > Phase decomposition), and **execution** (plan → execute → verify). Six canonical paths (A–F) cover everything from full greenfield projects to small fixes. 50 slash commands across 7 categories power every stage, with all artifacts in `.workflow/scratch/` tracked by `state.json`.
-
-### 3. Issue Closed-Loop
-
-Issues aren't just tickets — they're a self-healing pipeline: discover → analyze → plan → execute → close. Quality commands automatically create issues for problems they find. Issue fixes flow back into the phase pipeline.
-
-### 4. Visual Dashboard
-
-Real-time dashboard at `http://127.0.0.1:3001` with Kanban board, Gantt timeline, sortable table, and command center. Pick an agent on any issue card and dispatch. Built with React 19, Tailwind CSS 4, WebSocket live updates.
+### 其他入口
 
 ```bash
-maestro serve                  # → http://127.0.0.1:3001
-maestro view                   # Terminal TUI alternative
-maestro command-help           # Open interactive command reference in browser (alias: ch)
+/maestro "添加用户资料页"           # 意图路由，自动选链
+/maestro-quick "修复重定向 bug"     # 最短链路：plan → execute → verify
 ```
 
-### 5. Multi-Agent Engine
+### Odyssey — 长周期自主循环
 
-Coordinates Claude Code, Codex, Gemini, Qwen, and OpenCode in parallel via wave-based execution. Independent tasks run concurrently; dependent tasks wait for predecessors.
+适合大型调试、深度重构、UI 优化等需要持续迭代的场景：
 
-### 6. Smart Knowledge Base
+| 命令 | 循环模式 |
+|------|---------|
+| `/odyssey-debug` | 考古分析 → 诊断 → 修复 → 确认 → 泛化 → 知识沉淀 |
+| `/odyssey-planex` | 需求解析 → 计划 → 执行 → 严格验证 → 修复循环 |
+| `/odyssey-improve` | 多维审计 → 深度诊断 → 定向修复 → 验证 → 泛化 |
+| `/odyssey-review-test-fix` | 多维审查 → 定向修复 → 测试 → 泛化 → 知识沉淀 |
+| `/odyssey-ui` | 视觉巡检 → 多维审计 → 发散探索 → 修复 → 验证 |
 
-Wiki knowledge graph with BM25 search, backlink traversal, and health scoring. Learning toolkit (retro, follow, decompose, investigate, second-opinion) feeds into a unified `lessons.jsonl` store.
-
-### 7. Hook & Overlay System
-
-11 context-aware hooks inject project specs into agent prompts, monitor context usage, and track delegate execution. The overlay system enables non-invasive patches for `.claude/commands/*.md` that survive upgrades.
-
----
-
-## Commands & Agents
-
-| Category | Count | Prefix | Purpose |
-|----------|-------|--------|---------|
-| **Core Workflow** | 19 | `maestro-*` | Full lifecycle — ralph, init, brainstorm, blueprint, analyze, roadmap, plan, execute, verify, milestones, overlays |
-| **Management** | 12 | `manage-*` | Issue lifecycle, codebase docs, knowledge capture, memory, status |
-| **Quality** | 9 | `quality-*` | Review, test, debug, test-gen, integration-test, business-test, refactor, sync |
-| **Learning** | 5 | `learn-*` | Retro, follow-along, pattern decompose, investigate, second opinion |
-| **Specification** | 3 | `spec-*` | Setup, add, load |
-| **Wiki** | 2 | `wiki-*` | Connection discovery, knowledge digest |
-
-21 specialized agent definitions in `.claude/agents/` — each a focused Markdown file that Claude Code loads on demand.
+每个 Odyssey 命令持续运行直到验收标准达成，中间自适应调整策略，发现的知识自动持久化。
 
 ---
 
-## Architecture
+## 文档
+
+### 入门
+
+| | 指南 | 说明 |
+|---|------|------|
+| **01** | [快速开始](guide/quick-start-guide.md) | 安装、第一个工作流、核心概念 |
+| **02** | [安装指南](guide/install-guide.md) | 组件选择、工作空间配置 |
+| **03** | [Ralph 引擎](guide/maestro-ralph-guide.md) | 自适应决策、quality 模式、session 管理 |
+| **04** | [命令大全](guide/command-usage-guide.md) | 64 个命令的用法、流程图、管线衔接 |
+
+### 日常使用
+
+| 指南 | 说明 |
+|------|------|
+| [CLI 命令参考](guide/cli-commands-guide.md) | 35+ 终端命令速查 |
+| [知识管理](guide/knowledge-management-guide.md) | 知识图谱、Spec、Knowhow、Wiki 全景 |
+| [Spec 系统](guide/spec-system-guide.md) | 项目规则的编写、加载与自动注入 |
+| [质量管线](guide/quality-pipeline-guide.md) | verify → review → test 三级管线 |
+| [Hook 机制](guide/hooks-guide.md) | 17 个 Hook 的触发时机与上下文预算控制 |
+
+<details>
+<summary><b>进阶 &amp; 设计文档</b>（点击展开）</summary>
+<br/>
+
+| 指南 | 说明 |
+|------|------|
+| [工作流结构](guide/workflow-structure-guide.md) | 四层命令拓扑、六条规范路径 |
+| [多 Agent 协调](guide/maestro-coordinator-guide.md) | Delegate / Team / Wave / Swarm 详解 |
+| [Delegate 异步执行](guide/delegate-async-guide.md) | 跨 CLI 委派、消息注入、链式调用 |
+| [Overlay 扩展](guide/overlay-guide.md) | 不改源码给命令加行为 |
+| [Worktree 并行开发](guide/worktree-guide.md) | 里程碑级分支隔离 |
+| [跨项目共享](guide/workspace-guide.md) | 多项目 link/unlink 知识库 |
+| [MCP 工具](guide/mcp-tools-guide.md) | 9 个 MCP 端点工具参考 |
+| [团队协作](guide/team-lite-guide.md) | 2–8 人 Collab 模式 |
+| [搜索系统](guide/search-system-guide.md) | BM25F 全文搜索与 KG 集成 |
+| [学习工具](guide/learn-tools-guide.md) | 复盘、跟读、拆解、探究四件套 |
+| [MaestroGraph 设计](guide/plan-maestrograph.md) | 统一知识图谱引擎架构 |
+| [领域知识设计](guide/plan-domain-knowledge.md) | 语义词汇表与概念关系网络 |
+
+</details>
+
+---
+
+## 项目规模
+
+333 个 TypeScript 源文件 / ~80k 行代码 / 64 斜杠命令 / 45 技能包 / 23 Agent 定义 / 35+ CLI 命令 / 92 模板
+
+**技术栈**&nbsp;&nbsp;Commander.js · MCP SDK · better-sqlite3 · web-tree-sitter · React 19 · Zustand · Tailwind CSS 4 · Hono · Vite 6
+
+<details>
+<summary><b>目录结构</b></summary>
 
 ```
 maestro/
-├── bin/                     # CLI entry points
-├── src/                     # Core CLI (Commander.js + MCP SDK)
-│   ├── commands/            # 11 CLI commands (serve, run, cli, ext, tool, ...)
-│   ├── mcp/                 # MCP server (stdio transport)
-│   └── core/                # Tool registry, extension loader
-├── dashboard/               # Real-time web dashboard
-│   └── src/
-│       ├── client/          # React 19 + Zustand + Tailwind CSS 4
-│       ├── server/          # Hono API + WebSocket + SSE
-│       └── shared/          # Shared types
+├── src/                     # 核心 CLI（Commander.js + MCP SDK）
+│   ├── commands/            # 35+ CLI 命令
+│   ├── mcp/                 # MCP 服务器（stdio）
+│   ├── graph/               # 知识图谱（SQLite + tree-sitter）
+│   └── core/                # 工具注册、扩展加载
+├── dashboard/               # Web 仪表盘（React 19）
 ├── .claude/
-│   ├── commands/            # 50 slash commands (.md)
-│   └── agents/              # 21 agent definitions (.md)
-├── workflows/               # 45 workflow implementations (.md)
-├── templates/               # JSON templates (task, plan, issue, ...)
-└── extensions/              # Plugin system
+│   ├── commands/            # 64 斜杠命令
+│   ├── agents/              # 23 Agent 定义
+│   └── skills/              # 45 技能包
+├── workflows/               # 115 工作流定义
+└── templates/               # 92 JSON 模板
 ```
 
-| Layer | Technology |
-|-------|-----------|
-| CLI | Commander.js, TypeScript, ESM |
-| MCP | @modelcontextprotocol/sdk (stdio) |
-| Frontend | React 19, Zustand, Tailwind CSS 4, Framer Motion, Radix UI |
-| Backend | Hono, WebSocket, SSE |
-| Agents | Claude Agent SDK, Codex CLI, Gemini CLI, OpenCode |
-| Build | Vite 6, TypeScript 5.7, Vitest |
+</details>
 
 ---
 
-## Documentation
+<details>
+<summary><b>与同类工具对比</b></summary>
+<br/>
 
-- **[Maestro Ralph Guide](guide/maestro-ralph-guide.md)** — Adaptive lifecycle engine: position inference, decision nodes, quality modes, retry escalation
-- **[Command Usage Guide](guide/command-usage-guide.md)** — All 53 commands with workflow diagrams, pipeline chaining, Issue closed-loop
-- **[Command Reference (HTML)](guide/command-usage-guide.html)** — Interactive HTML version with search, card grid, and workflow examples (`maestro command-help` to open)
-- **[CLI Commands Reference](guide/cli-commands-guide.en.md)** — All 21 terminal commands: install, delegate, coordinate, wiki, hooks, overlay, collab
-- **[Spec System Guide](guide/spec-system-guide.md)** — Project specs with `<spec-entry>` format, keyword-based loading, validation hooks
-- **[Delegate Async Guide](guide/delegate-async-guide.md)** — Async task delegation: CLI & MCP usage, message injection, chaining
-- **[Overlay Guide](guide/overlay-guide.md)** — Non-invasive command extensions: format, section injection, bundle/import
-- **[Hooks Guide](guide/hooks-guide.md)** — Hook system architecture, 11 hooks, spec injection, context budget
-- **[Worktree Guide](guide/worktree-guide.md)** — Milestone-level parallel development: fork, sync, merge, dashboard integration
-- **[Collab — User Guide](guide/team-lite-guide.md)** — Multi-person collaboration for 2-8 person teams
-- **[Collab — Design](guide/team-lite-design.md)** — Architecture, data model, namespace boundaries
-- **[MCP Tools Reference](guide/mcp-tools-guide.en.md)** — All 9 MCP endpoint tools
+| | [Superpowers](https://github.com/obra/superpowers) | [OpenSpec](https://github.com/Fission-AI/OpenSpec) | [Trellis](https://github.com/mindfold-ai/trellis) | **Maestro-Flow** |
+|---|---|---|---|---|
+| **定位** | Agent 技能框架 | 规格驱动开发 | 多平台 Agent 治具 | 意图驱动编排 |
+| **架构** | 纯 `.md`，无运行时 | CLI + Git | CLI + `.trellis/` | CLI + MCP + SQLite |
+| **路由** | 手动选技能 | 手动命令序列 | 固定阶段 | AI 分类 40+ 链 |
+| **多 Agent** | 子 Agent 调度 | 单 Agent | Channel 模式 | 4 模式 × 5 后端 |
+| **知识** | 仅 Git | Git 归档 | 文件日志 | SQLite KG + 自动注入 |
+| **长时工作** | 上下文窗口 | 手动 continue | 日志恢复 | 有状态 Odyssey 循环 |
+| **自校正** | review-fix 循环 | 手动重验 | 手动 | Decision 节点自动重试 |
+
+**各有所长**：Superpowers 的 prompt 工程方法论最成熟；OpenSpec 的需求规格化最严谨；Trellis 的多平台统一做得最好；Maestro-Flow 聚焦全生命周期编排、跨后端调度和知识自增强。
+
+</details>
 
 ---
 
-## Acknowledgments
+## 致谢
 
-- **[GET SHIT DONE](https://github.com/gsd-build/get-shit-done)** by TACHES — The spec-driven development model and context engineering philosophy.
-- **[Claude-Code-Workflow](https://github.com/catlog22/Claude-Code-Workflow)** — The predecessor that pioneered multi-CLI orchestration and skill-based workflow routing.
-- **[Impeccable](https://github.com/pbakaus/impeccable)** by [@pbakaus](https://github.com/pbakaus) — The UI design skill integrated as `maestro-impeccable`. Live variant mode, critique storage, design parser, and CSP detection modules are derived from this project. Licensed under [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+- **[GET SHIT DONE](https://github.com/gsd-build/get-shit-done)** — Spec 驱动开发与上下文工程理念
+- **[Claude-Code-Workflow](https://github.com/catlog22/Claude-Code-Workflow)** — 前身项目，开创多 CLI 编排
+- **[Impeccable](https://github.com/pbakaus/impeccable)** — UI 设计技能（[Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0)）
 
-## Contributors
+---
 
-<a href="https://github.com/catlog22">
-  <img src="https://github.com/catlog22.png" width="60px" alt="catlog22" style="border-radius:50%"/>
-</a>
+<div align="center">
 
-**[@catlog22](https://github.com/catlog22)** — Creator & Maintainer
+**[@catlog22](https://github.com/catlog22)** — 创建者 & 维护者
 
-## Community
+加入微信群交流：
 
-Join the WeChat group for discussion and feedback:
+<img src="assets/wechat-group-qr.png" width="180" alt="微信群" />
 
-<img src="assets/wechat-group-qr.png" width="200" alt="WeChat Group: Claude Code Workflow交流群 2" />
+<br/><br/>
 
-## Buy Me a Coffee
+[Linux DO：学AI，上L站！](https://linux.do/)
 
-If this project helps you, consider buying me a coffee:
+<br/>
 
-<img src="assets/wechat-reward-qr.png" width="200" alt="WeChat Reward QR" />
+MIT License
 
-## Links
-
-- [Linux DO：学AI，上L站！](https://linux.do/)
-
-## License
-
-MIT
+</div>

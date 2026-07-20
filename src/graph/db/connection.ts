@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,10 +7,10 @@ import { existsSync, mkdirSync, statSync } from 'node:fs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export class DatabaseConnection {
-  private db: Database.Database | null = null;
+  private db: DatabaseSync | null = null;
   private dbPath: string = '';
 
-  get raw(): Database.Database {
+  get raw(): DatabaseSync {
     if (!this.db) throw new Error('Database not open');
     return this.db;
   }
@@ -28,10 +28,12 @@ export class DatabaseConnection {
     const dir = dirname(dbPath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-    this.db = new Database(dbPath);
+    this.db = new DatabaseSync(dbPath);
     this.applyPragmas();
-    this.loadSchema();
-    this.setSchemaVersion(1, 'Initial schema');
+    this.transaction(() => {
+      this.loadSchema();
+      this.setSchemaVersion(1, 'Initial schema');
+    });
   }
 
   open(dbPath: string): void {
@@ -39,7 +41,7 @@ export class DatabaseConnection {
       throw new Error(`Database not found: ${dbPath}`);
     }
     this.dbPath = dbPath;
-    this.db = new Database(dbPath);
+    this.db = new DatabaseSync(dbPath);
     this.applyPragmas();
   }
 
@@ -52,13 +54,13 @@ export class DatabaseConnection {
 
   private applyPragmas(): void {
     const db = this.raw;
-    db.pragma('busy_timeout = 5000');
-    db.pragma('foreign_keys = ON');
-    db.pragma('journal_mode = WAL');
-    db.pragma('synchronous = NORMAL');
-    db.pragma('cache_size = -64000');
-    db.pragma('temp_store = MEMORY');
-    db.pragma('mmap_size = 268435456');
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.exec('PRAGMA foreign_keys = ON');
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA synchronous = NORMAL');
+    db.exec('PRAGMA cache_size = -64000');
+    db.exec('PRAGMA temp_store = MEMORY');
+    db.exec('PRAGMA mmap_size = 268435456');
   }
 
   private loadSchema(): void {
@@ -84,18 +86,18 @@ export class DatabaseConnection {
   }
 
   transaction<T>(fn: () => T): T {
-    return this.raw.transaction(fn)();
+    return sqliteTransaction(this.raw, fn);
   }
 
   optimize(): void {
-    this.raw.pragma('optimize');
+    this.raw.exec('PRAGMA optimize');
     this.raw.exec('VACUUM');
     this.raw.exec('ANALYZE');
   }
 
   runMaintenance(): void {
-    this.raw.pragma('optimize');
-    this.raw.pragma('wal_checkpoint(PASSIVE)');
+    this.raw.exec('PRAGMA optimize');
+    this.raw.exec('PRAGMA wal_checkpoint(PASSIVE)');
   }
 
   getSize(): number {
@@ -107,15 +109,15 @@ export class DatabaseConnection {
   }
 
   getJournalMode(): string {
-    const result = this.raw.pragma('journal_mode') as Array<{ journal_mode: string }>;
-    return result[0]?.journal_mode ?? 'unknown';
+    const row = this.raw.prepare('PRAGMA journal_mode').get() as unknown as { journal_mode: string } | undefined;
+    return row?.journal_mode ?? 'unknown';
   }
 
   getSchemaVersion(): number {
     try {
       const row = this.raw.prepare(
         'SELECT MAX(version) as v FROM schema_versions'
-      ).get() as { v: number } | undefined;
+      ).get() as unknown as { v: number } | undefined;
       return row?.v ?? 0;
     } catch {
       return 0;
@@ -126,4 +128,16 @@ export class DatabaseConnection {
 export function getDatabasePath(projectRoot?: string): string {
   const root = projectRoot ?? process.cwd();
   return resolve(root, '.workflow', 'codebase', 'codegraph.db');
+}
+
+export function sqliteTransaction<T>(db: DatabaseSync, fn: () => T): T {
+  db.exec('BEGIN');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }

@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import { resolveParentDir, resolveSubPath, buildTree } from './BlueprintPreview.logic.js';
 import type { ComponentDef } from '../../commands/install-backend.js';

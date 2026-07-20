@@ -1,7 +1,9 @@
 ---
 name: scholar-ideation
+disable-model-invocation: true
 description: Research ideation workflow from literature search to research planning. Triggers on "brainstorm research ideas", "identify research gaps", "conduct gap analysis", "start research project", "conduct literature review", "define research question", "select research method", "plan research", "research ideation".
 allowed-tools: WebSearch, WebFetch, Read, Write, Edit, Bash, Glob, Grep, TodoWrite, AskUserQuestion
+session-mode: none
 ---
 
 # Scholar Ideation
@@ -11,7 +13,7 @@ Supports the complete research project initiation workflow: from literature sear
 ## Pre-load (before execution)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for project context
-2. **Specs**: `maestro spec load --category coding` — load coding conventions
+2. **Specs**: `maestro load --type spec --category coding` — load coding conventions
 3. **Wiki knowledge**: `maestro search "academic writing research paper" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 

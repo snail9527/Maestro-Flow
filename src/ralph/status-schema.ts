@@ -1,12 +1,12 @@
 // ---------------------------------------------------------------------------
-// Ralph status.json schema — TypeScript shape only.
+// Ralph orchestration types — used by session-adapter.ts for ralph-meta.json.
 //
-// Source of truth: `.workflow/.maestro/ralph-{ts}/status.json`.
-// All new fields are additive — legacy sessions (without `ralph_protocol_version`)
-// fall back to pre-CLI ralph-execute inline logic.
+// Session state now lives in standard `.workflow/sessions/{id}/session.json`.
+// Ralph-specific metadata in `ralph-meta.json` alongside session.json.
+// These types are retained for backward compatibility and type definitions.
 // ---------------------------------------------------------------------------
 
-export const RALPH_PROTOCOL_VERSION = '1';
+export const RALPH_PROTOCOL_VERSION = '2';
 
 export type StepStatus = 'pending' | 'running' | 'completed' | 'skipped' | 'failed';
 export type CompletionStatus = 'DONE' | 'DONE_WITH_CONCERNS' | 'NEEDS_RETRY' | 'BLOCKED';
@@ -39,6 +39,10 @@ export interface RalphStep {
   completion_confirmed: boolean;
   completion_status: CompletionStatus | null;
   completion_evidence: string | string[] | null;
+  completion_summary?: string | null;
+  completion_decisions?: string[] | null;
+  completion_caveats?: string | null;
+  completion_deferred?: string[] | null;
   completed_at: string | null;
   concerns?: string | null;
   retried?: boolean;
@@ -53,9 +57,32 @@ export interface RalphTaskDecompositionItem {
   done_when?: string;
   evidence?: string;
   lifecycle?: string[];
-  status: 'pending' | 'done';
+  status: 'pending' | 'done' | 'superseded';
   completion_confirmed?: boolean;
   completed_at?: string | null;
+  superseded_by?: string | null;
+  superseded_at?: string | null;
+  origin?: string | null;          // CHG-xxx that created this goal
+}
+
+export interface GoalChangelogEntry {
+  id: string;                       // CHG-001, CHG-002, ...
+  timestamp: string;
+  change_type: 'modify' | 'add' | 'remove' | 'boundary';
+  reason: string;
+  impact_assessment?: {
+    risk_level: 'low' | 'medium' | 'high';
+    invalidated_steps: number[];
+    new_steps_inserted: number;
+  };
+  before: {
+    goals: Pick<RalphTaskDecompositionItem, 'id' | 'goal' | 'done_when'>[];
+    boundary_snippet?: string;
+  };
+  after: {
+    goals: Pick<RalphTaskDecompositionItem, 'id' | 'goal' | 'done_when'>[];
+    boundary_snippet?: string;
+  };
 }
 
 export interface RalphSessionContext {
@@ -65,6 +92,19 @@ export interface RalphSessionContext {
   analysis_dir?: string | null;
   brainstorm_dir?: string | null;
   blueprint_dir?: string | null;
+}
+
+export interface VerificationLedgerEntry {
+  authority: string;
+  dimension: string;
+  subject_ids: string[];
+  evidence_hashes: Record<string, string>;
+  scope_hash: string;
+  verdict: 'pass' | 'fail' | string;
+  confidence: 'high' | 'medium' | 'low';
+  concerns?: string | null;
+  risk_ceiling: 'low' | 'medium' | 'high';
+  created_at: string;
 }
 
 export interface RalphSession {
@@ -86,12 +126,18 @@ export interface RalphSession {
   platform?: SessionPlatform;       // 'claude' (.claude/) | 'codex' (.codex/); absent → claude
   passed_gates?: string[];
   context?: RalphSessionContext;
+  decomposition_owner?: 'maestro' | 'ralph' | string; // absent → infer from `source`
   steps: RalphStep[];
   waves?: unknown[];
   current_step?: number;
   // CLI protocol fields (additive; absent → legacy behavior)
   ralph_protocol_version?: string;
   active_step_index?: number | null;
+  // Lease and Ownership
+  execution_owner?: 'ralph-execute' | 'maestro-inline' | string;
+  owner_epoch?: number;
+  lease_id?: string;
+  verification_ledger?: VerificationLedgerEntry[];
   // Optional decomposition block
   boundary_contract?: {
     in_scope?: string[];
@@ -102,6 +148,7 @@ export interface RalphSession {
   execution_criteria?: string[];
   task_decomposition?: RalphTaskDecompositionItem[];
   task_decomposition_all_done?: boolean;
+  goal_changelog?: GoalChangelogEntry[];
 }
 
 export interface CheckFinding {

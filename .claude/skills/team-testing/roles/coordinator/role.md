@@ -1,6 +1,8 @@
-# Coordinator Role
 
-Orchestrate team-testing: analyze -> dispatch -> spawn -> monitor -> report.
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
+# Coordinator Role
 
 ## Identity
 - Name: coordinator | Tag: [coordinator]
@@ -39,14 +41,14 @@ When coordinator needs to execute a specific phase:
 | Manual resume | Args contain "resume" or "continue" | -> handleResume (monitor.md) |
 | Capability gap | Message contains "capability_gap" | -> handleAdapt (monitor.md) |
 | Pipeline complete | All tasks completed | -> handleComplete (monitor.md) |
-| Interrupted session | Active session in .workflow/.team/TST-* | -> Phase 0 |
+| Interrupted session | Active session in {run_dir}/work/team/ | -> Phase 0 |
 | New session | None of above | -> Phase 1 |
 
 For callback/check/resume/adapt/complete: load @commands/monitor.md, execute handler, STOP.
 
 ## Phase 0: Session Resume Check
 
-1. Scan .workflow/.team/TST-*/session.json for active/paused sessions
+1. Scan {run_dir}/work/team/team-session.json for active/paused sessions
 2. No sessions -> Phase 1
 3. Single session -> reconcile (audit TaskList, reset in_progress->pending, rebuild team, kick first ready task)
 4. Multiple -> AskUserQuestion for selection
@@ -79,13 +81,13 @@ TEXT-LEVEL ONLY. No source code reading.
    - `project_root` = result of `Bash({ command: "pwd" })`
    - `skill_root` = `<project_root>/.claude/skills/team-testing`
 2. Generate session ID: TST-<slug>-<date>
-3. Create session folder structure (strategy/, tests/L1-unit/, tests/L2-integration/, tests/L3-e2e/, results/, analysis/, wisdom/)
+3. Create `{run_dir}/work/team/wisdom/` and `{run_dir}/outputs/{strategy,tests/L1-unit,tests/L2-integration,tests/L3-e2e,results,analysis}/`
 4. TeamCreate with team name "testing"
 5. Read specs/pipelines.md -> select pipeline based on mode
 6. Initialize pipeline via team_msg state_update:
    ```
    mcp__maestro__team_msg({
-     operation: "log", session_id: "<id>", from: "coordinator",
+     operation: "log", session_id: "<run-id>", from: "coordinator",
      type: "state_update", summary: "Session initialized",
      data: {
        pipeline_mode: "<targeted|standard|comprehensive>",
@@ -96,7 +98,19 @@ TEXT-LEVEL ONLY. No source code reading.
      }
    })
    ```
-7. Write session.json
+7. Write team-session.json
+
+### Run Lifecycle Integration
+
+After session folder creation and before role-spec generation:
+
+1. **Resolve Run** (birth-packet first): if the dispatch context already carries `run_id` / `run_dir` (injected by an orchestrator), store them in `team-session.json` and skip create — a second create mints an empty duplicate Run. Otherwise: `maestro run create team-testing --session <slug> --intent "<task summary>"`
+   - Slug format: `YYYYMMDD-team-testing-<topic>` (ASCII, ≤64 chars)
+   - Store returned `run_id` and `run_dir` in `team-session.json`:
+     ```json
+     "run": { "run_id": "<id>", "run_dir": "<path>" }
+     ```
+2. **Resume**: Read `team-session.json.run.run_id` → `maestro run check <run_id>` (idempotent). If status=sealed, create a new run and update the field. If `run.run_id` is missing, resolve in order: birth-packet injection, then `<session>/artifacts/`; if all are absent, fail closed — report session corruption and do NOT create a new Run.
 
 ## Phase 3: Create Task Chain
 
@@ -104,7 +118,7 @@ Delegate to @commands/dispatch.md:
 1. Read specs/pipelines.md for selected pipeline's task registry
 2. Topological sort tasks
 3. Create tasks via TaskCreate with blockedBy
-4. Update session.json
+4. Update team-session.json
 
 ## Phase 4: Spawn-and-Stop
 

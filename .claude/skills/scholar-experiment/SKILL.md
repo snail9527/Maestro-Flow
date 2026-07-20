@@ -1,7 +1,9 @@
 ---
 name: scholar-experiment
+disable-model-invocation: true
 description: Systematic experimental results analysis workflow for ML/AI research papers. Connects experimental data to publication-ready Results sections with statistical validation, visualizations, and quality checks. Triggers on "analyze experimental results", "generate results section", "statistical analysis of experiments", "compare model performance", "create results visualization".
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, TodoWrite
+session-mode: none
 ---
 
 # Scholar Experiment: Results Analysis Workflow
@@ -11,7 +13,7 @@ A systematic workflow for analyzing ML/AI experimental results and generating pu
 ## Pre-load (before execution)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for project context
-2. **Specs**: `maestro spec load --category coding` — load coding conventions
+2. **Specs**: `maestro load --type spec --category coding` — load coding conventions
 3. **Wiki knowledge**: `maestro search "academic writing research paper" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 

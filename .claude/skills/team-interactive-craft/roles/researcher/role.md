@@ -7,15 +7,13 @@ message_types: [state_update]
 
 # Interaction Pattern Researcher
 
-Analyze existing interactive components, audit browser API usage, and collect reference patterns for target component types. Produce foundation data for downstream interaction-designer, builder, and a11y-tester roles.
-
 ## Phase 2: Context & Environment Detection
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| .msg/meta.json | <session>/wisdom/.msg/meta.json | No |
+| .msg/meta.json | {run_dir}/work/team/wisdom/.msg/meta.json | No |
 
 1. Extract session path and target scope from task description
 2. Detect project structure and existing interactive patterns:
@@ -30,7 +28,7 @@ Analyze existing interactive components, audit browser API usage, and collect re
 | backdrop-filter in CSS | Glass/frosted effects |
 | clip-path in CSS | Reveal/mask animations |
 
-3. Use CLI tools (e.g., `maestro delegate "..." --to gemini --mode analysis`) or direct tools (Glob, Grep) to scan for existing interactive components, animation patterns, event handling approaches
+3. Use CLI tools (e.g., `maestro delegate "..." --to agy --mode analysis`) or direct tools (Glob, Grep) to scan for existing interactive components, animation patterns, event handling approaches
 4. Read interaction type context from session config
 
 ## Phase 3: Research Execution
@@ -43,7 +41,7 @@ Execute 3 analysis streams:
 - Map component lifecycle (init, mount, resize, destroy)
 - Find dependency patterns (any external libs vs vanilla)
 - Catalog gesture handling approaches (pointer vs mouse+touch)
-- Output: `<session>/research/interaction-inventory.json`
+- Output: `{run_dir}/outputs/research/interaction-inventory.json`
 - Schema:
   ```json
   {
@@ -72,7 +70,7 @@ Execute 3 analysis streams:
   - Web Animations API (programmatic animation control)
   - requestAnimationFrame (frame-synced updates)
 - Identify polyfill needs for target browser support
-- Output: `<session>/research/browser-api-audit.json`
+- Output: `{run_dir}/outputs/research/browser-api-audit.json`
 - Schema:
   ```json
   {
@@ -95,7 +93,7 @@ Execute 3 analysis streams:
 - For each component, document: state machine pattern, event flow, animation approach, touch handling, accessibility pattern
 - Reference well-known implementations (e.g., scroll-snap gallery, split-view compare, lightbox overlay)
 - Note performance considerations and gotchas per pattern
-- Output: `<session>/research/pattern-reference.json`
+- Output: `{run_dir}/outputs/research/pattern-reference.json`
 - Schema:
   ```json
   {
@@ -127,5 +125,5 @@ Compile research summary metrics: existing_interactive_count, vanilla_ratio, api
 
 2. If any file missing or invalid, re-run corresponding stream
 
-3. Update `<session>/wisdom/.msg/meta.json` under `researcher` namespace:
+3. Update `{run_dir}/work/team/wisdom/.msg/meta.json` under `researcher` namespace:
    - Read existing -> merge `{ "researcher": { interactive_count, vanilla_ratio, apis_available, polyfill_needs, scope } }` -> write back

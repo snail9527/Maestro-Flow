@@ -40,6 +40,53 @@ export interface GuideContent {
   rawContent: string;
 }
 
+// Guide category definitions
+export interface GuideCategory {
+  id: string;
+  title: string;
+  title_zh: string;
+  description: string;
+  description_zh: string;
+}
+
+export const guideCategories: GuideCategory[] = [
+  {
+    id: 'getting-started',
+    title: 'Getting Started',
+    title_zh: '入门上手',
+    description: 'Install, first workflow, and core concepts',
+    description_zh: '安装、第一个工作流、核心概念',
+  },
+  {
+    id: 'core',
+    title: 'Core Usage',
+    title_zh: '核心功能',
+    description: 'Daily commands, quality pipeline, and knowledge management',
+    description_zh: '日常命令、质量管线、知识管理',
+  },
+  {
+    id: 'orchestration',
+    title: 'Orchestration',
+    title_zh: '编排调度',
+    description: 'Multi-agent coordination, delegation, and team patterns',
+    description_zh: '多 Agent 协调、委派、团队协作模式',
+  },
+  {
+    id: 'knowledge',
+    title: 'Knowledge System',
+    title_zh: '知识系统',
+    description: 'Knowledge persistence, search, learning, and discovery',
+    description_zh: '知识沉淀、搜索、学习、问题发现',
+  },
+  {
+    id: 'advanced',
+    title: 'Advanced',
+    title_zh: '进阶配置',
+    description: 'Configuration, extensions, security, and internals',
+    description_zh: '配置、扩展、安全、内部架构',
+  },
+];
+
 // Guide registry — bilingual metadata for each guide
 // file = Chinese content (default), file_en = English content (optional, falls back to file)
 export const guideRegistry: Array<{
@@ -51,325 +98,228 @@ export const guideRegistry: Array<{
   title_zh: string;
   description_zh: string;
   icon: string;
+  category: string;
 }> = [
-  {
-    slug: 'command-usage',
-    file: 'command-usage-guide.md',
-    file_en: 'command-usage-guide.en.md',
-    title: 'Command Usage Guide',
-    description: 'Complete guide to all 51 commands with workflow diagrams and usage examples',
-    title_zh: '命令使用指南',
-    description_zh: '51 个命令的完整使用指南，包含工作流图和命令衔接说明',
-    icon: 'book-open',
-  },
-  {
-    slug: 'spec-system',
-    file: 'spec-system-guide.md',
-    file_en: 'spec-system-guide.en.md',
-    title: 'Spec System Guide',
-    description: 'Project specs with <spec-entry> closed-tag format, keyword loading, validation hooks',
-    title_zh: 'Spec 系统指南',
-    description_zh: '<spec-entry> 闭合标签格式、keyword 加载、验证 Hook、session dedup 注入',
-    icon: 'sparkles',
-  },
-  {
-    slug: 'spec-injection',
-    file: 'spec-injection-guide.md',
-    file_en: 'spec-injection-guide.en.md',
-    title: 'Spec Injection Configuration',
-    description: 'Keyword-granularity injection control, extra document binding, agent mapping overrides, CLI/TUI/Dashboard configuration',
-    title_zh: 'Spec 注入配置指南',
-    description_zh: 'keyword 颗粒度注入控制、额外文档绑定、agent 映射覆盖、CLI/TUI/Dashboard 三端配置',
-    icon: 'sliders',
-  },
-  {
-    slug: 'spec-analytics',
-    file: 'spec-analytics-guide.md',
-    file_en: 'spec-analytics-guide.en.md',
-    title: 'Spec Analytics Guide',
-    description: 'Injection logging, hit rate statistics, keyword analysis, hook invocation tracking, and TUI visualization',
-    title_zh: 'Spec 分析系统指南',
-    description_zh: '注入日志、命中率统计、关键词分析、Hook 调用追踪、TUI 可视化',
-    icon: 'bar-chart-2',
-  },
-  {
-    slug: 'overlay',
-    file: 'overlay-guide.md',
-    file_en: 'overlay-guide.en.md',
-    title: 'Overlay System Guide',
-    description: 'Non-invasive command extension with JSON patches and idempotent injection',
-    title_zh: 'Overlay 系统指南',
-    description_zh: '非侵入式命令扩展机制 — JSON 补丁注入，幂等且可逆',
-    icon: 'layers',
-  },
-  {
-    slug: 'worktree',
-    file: 'worktree-guide.md',
-    file_en: 'worktree-guide.en.md',
-    title: 'Worktree Parallel Development',
-    description: 'Milestone-level parallel development using git worktrees',
-    title_zh: 'Worktree 并行开发指南',
-    description_zh: '基于 git worktree 的里程碑级并行开发',
-    icon: 'git-branch',
-  },
-  {
-    slug: 'hooks-codex',
-    file: 'hooks-guide-codex.md',
-    file_en: 'hooks-guide-codex.en.md',
-    title: 'Codex Hooks Integration',
-    description: 'Hooks integration design for OpenAI Codex CLI',
-    title_zh: 'Codex Hooks 集成设计',
-    description_zh: '为 OpenAI Codex CLI 设计的 hooks 集成方案',
-    icon: 'hook',
-  },
+  // ─── Getting Started ───────────────────────────────────────────────────────
   {
     slug: 'quick-start',
     file: 'quick-start-guide.md',
     file_en: 'quick-start-guide.en.md',
-    title: 'Quick Start Guide',
-    description: 'Get started with Maestro Flow in 10 minutes — core features and common workflows',
-    title_zh: '快速入门指南',
-    description_zh: '10 分钟了解 Maestro Flow 核心功能 — 安装、管线、Issue、委托、规范、Overlay、Hook、并行开发',
+    title: 'Quick Start',
+    description: 'Get started in 10 minutes — install, first workflow, key concepts',
+    title_zh: '10 分钟快速入门',
+    description_zh: '安装 → 第一个工作流 → 核心概念，最短路径上手',
     icon: 'rocket',
+    category: 'getting-started',
   },
   {
-    slug: 'hooks',
-    file: 'hooks-guide.md',
-    file_en: 'hooks-guide.en.md',
-    title: 'Hooks System Guide',
-    description: 'Complete guide to the Maestro hooks system for Claude Code',
-    title_zh: 'Hooks 系统指南',
-    description_zh: 'Maestro hooks 系统的完整使用指南',
-    icon: 'zap',
+    slug: 'install',
+    file: 'install-guide.md',
+    title: 'Install & Setup',
+    description: 'CLI install, component selection, workspace initialization, and verification',
+    title_zh: '安装与初始化',
+    description_zh: 'CLI 安装、组件选择、工作空间初始化、验证步骤',
+    icon: 'download',
+    category: 'getting-started',
   },
+  {
+    slug: 'maestro-ralph',
+    file: 'maestro-ralph-guide.md',
+    file_en: 'maestro-ralph-guide.en.md',
+    title: 'Ralph v2 Engine & Coordinator',
+    description: 'Adaptive lifecycle engine + static coordinator — decision nodes, quality modes, intent routing, chain selection',
+    title_zh: 'Ralph v2 引擎与协调器',
+    description_zh: '自适应生命周期引擎 + 静态协调器 — decision 节点、质量模式、意图路由、链选择',
+    icon: 'refresh-cw',
+    category: 'getting-started',
+  },
+  {
+    slug: 'command-usage',
+    file: 'command-usage-guide.md',
+    file_en: 'command-usage-guide.en.md',
+    title: 'All Commands & Workflows',
+    description: '64 slash commands + supplementary commands, with workflow diagrams and pipeline chaining',
+    title_zh: '全部命令与工作流',
+    description_zh: '64 个斜杠命令 + 辅助命令，含工作流图和管线衔接',
+    icon: 'book-open',
+    category: 'getting-started',
+  },
+  // ─── Core Usage ────────────────────────────────────────────────────────────
+  {
+    slug: 'cli-commands',
+    file: 'cli-commands-guide.md',
+    file_en: 'cli-commands-guide.en.md',
+    title: 'CLI Quick Reference',
+    description: '35+ terminal commands at a glance — install, delegate, search, wiki, hooks, overlay',
+    title_zh: 'CLI 命令速查',
+    description_zh: '35+ 终端命令一览 — 安装、委派、搜索、Wiki、Hook、Overlay',
+    icon: 'terminal',
+    category: 'core',
+  },
+  {
+    slug: 'quality-pipeline',
+    file: 'quality-pipeline-guide.md',
+    file_en: 'quality-pipeline-guide.en.md',
+    title: 'Quality Pipeline',
+    description: 'verify → review → test three-tier quality gate, plus debug, refactor, and retrospective',
+    title_zh: '质量管线',
+    description_zh: 'verify → review → test 三级质量门，及调试、重构、复盘',
+    icon: 'shield-check',
+    category: 'core',
+  },
+  {
+    slug: 'knowledge-management',
+    file: 'knowledge-management-guide.md',
+    file_en: 'knowledge-management-guide.en.md',
+    title: 'Knowledge & Spec System',
+    description: 'Spec constraints + Knowhow accumulation — injection rules, config, analytics, and knowledge lifecycle',
+    title_zh: '知识管理与 Spec 系统',
+    description_zh: 'Spec 约束 + Knowhow 积累 — 注入规则、配置、分析、知识生命周期',
+    icon: 'brain',
+    category: 'core',
+  },
+  {
+    slug: 'explore',
+    file: 'explore-guide.md',
+    title: 'Explore & MOA Search',
+    description: 'Lightweight code search (single/multi-prompt) + MOA multi-model aggregation mode',
+    title_zh: 'Explore 搜索与 MOA 聚合',
+    description_zh: '轻量代码搜索（单/多 prompt）+ MOA 多模型聚合模式',
+    icon: 'search',
+    category: 'core',
+  },
+  {
+    slug: 'issue-discover',
+    file: 'issue-discover-guide.md',
+    file_en: 'issue-discover-guide.en.md',
+    title: 'Issue Discovery',
+    description: '8-perspective scanning and by-prompt discovery for comprehensive issue detection',
+    title_zh: '问题发现与扫描',
+    description_zh: '8 视角全扫描 + by-prompt 发现模式',
+    icon: 'search',
+    category: 'core',
+  },
+  // ─── Orchestration ─────────────────────────────────────────────────────────
   {
     slug: 'delegate-async',
     file: 'delegate-async-guide.md',
     file_en: 'delegate-async-guide.en.md',
-    title: 'Async Delegate Guide',
-    description: 'Asynchronous task delegation with broker-managed lifecycle',
-    title_zh: '异步委派指南',
-    description_zh: '异步任务委派与 broker 生命周期管理',
+    title: 'Async Delegation',
+    description: 'Cross-CLI task dispatch with broker lifecycle, message injection, and chaining',
+    title_zh: '跨 CLI 异步委派',
+    description_zh: '跨 CLI 任务派发、broker 生命周期、消息注入、链式调用',
     icon: 'send',
+    category: 'orchestration',
   },
   {
-    slug: 'team-lite-usage',
+    slug: 'team-lite',
     file: 'team-lite-guide.md',
-    file_en: 'team-lite-guide.en.md',
-    title: 'Team Lite Usage Guide',
-    description: 'Practical usage guide for Team Lite collaboration features',
-    title_zh: 'Team Lite 使用指南',
-    description_zh: 'Team Lite 协作功能的实际使用指南',
-    icon: 'handshake',
+    title: 'Team Collaboration',
+    description: 'Git-native collaboration for small teams (2-8 people)',
+    title_zh: '小团队协作',
+    description_zh: '面向 2-8 人的 Git-native 协作扩展',
+    icon: 'users',
+    category: 'orchestration',
+  },
+  {
+    slug: 'team-swarm',
+    file: 'team-swarm-guide.md',
+    file_en: 'team-swarm-guide.en.md',
+    title: 'Swarm Intelligence',
+    description: 'ACO-driven multi-agent exploration with adversarial decision patterns',
+    title_zh: '蚁群智能探索',
+    description_zh: 'ACO 驱动的多 Agent 探索与对抗决策',
+    icon: 'bug',
+    category: 'orchestration',
+  },
+  // ─── Knowledge System ──────────────────────────────────────────────────────
+  {
+    slug: 'learn-tools',
+    file: 'learn-tools-guide.md',
+    file_en: 'learn-tools-guide.en.md',
+    title: 'Learning Toolkit',
+    description: 'Five interactive commands — retro, follow, decompose, second opinion, investigate',
+    title_zh: '学习五件套',
+    description_zh: '复盘、跟读、模式拆解、多视角分析、系统化探究',
+    icon: 'graduation-cap',
+    category: 'knowledge',
+  },
+  {
+    slug: 'harvest',
+    file: 'harvest-guide.md',
+    file_en: 'harvest-guide.en.md',
+    title: 'Knowledge Harvest',
+    description: 'Extract knowledge from artifacts — scan, session, path modes with dedup',
+    title_zh: '知识提取与回收',
+    description_zh: '从产物中提取知识 — scan/session/path 三模式、去重',
+    icon: 'wheat',
+    category: 'knowledge',
+  },
+  {
+    slug: 'embedding',
+    file: 'embedding-guide.md',
+    file_en: 'embedding-guide.en.md',
+    title: 'Semantic Search (Embedding)',
+    description: 'ONNX-based embedding search — device detection, RRF fusion, incremental indexing',
+    title_zh: '语义搜索（Embedding）',
+    description_zh: '基于 ONNX 的向量搜索 — 设备检测、RRF 融合、增量索引',
+    icon: 'cpu',
+    category: 'knowledge',
+  },
+  // ─── Advanced ──────────────────────────────────────────────────────────────
+  {
+    slug: 'config-reference',
+    file: 'unified-config-guide.md',
+    title: 'Configuration Reference',
+    description: 'All config files, env vars, CLI options — cli-tools, api, hooks, overlays, search, workspace, skill params',
+    title_zh: '统一配置参考',
+    description_zh: '全部配置文件、环境变量、CLI 选项 — 工具注册、端点、Hook、Overlay、搜索、工作空间、Skill 参数',
+    icon: 'settings',
+    category: 'advanced',
+  },
+  {
+    slug: 'workflow-structure',
+    file: 'workflow-structure-guide.md',
+    file_en: 'workflow-structure-guide.en.md',
+    title: 'Workflow Directory Layout',
+    description: '.workflow/ structure — artifact paths, state.json schema, naming conventions',
+    title_zh: '产物目录结构',
+    description_zh: '.workflow/ 目录布局、state.json Schema、命名规则',
+    icon: 'folder-tree',
+    category: 'advanced',
   },
   {
     slug: 'mcp-tools',
     file: 'mcp-tools-guide.md',
     file_en: 'mcp-tools-guide.en.md',
     title: 'MCP Tools Reference',
-    description: 'Complete reference for all 9 MCP tools — file operations, team collaboration, and persistent memory',
+    description: 'All 9 MCP endpoint tools — file operations, team messaging, persistent memory',
     title_zh: 'MCP 工具参考',
-    description_zh: '全部 9 个 MCP 工具的完整参考 — 文件操作、团队协作和持久记忆',
+    description_zh: '9 个 MCP 工具 — 文件操作、团队消息、持久记忆',
     icon: 'wrench',
-  },
-  {
-    slug: 'cli-commands',
-    file: 'cli-commands-guide.md',
-    file_en: 'cli-commands-guide.en.md',
-    title: 'CLI Commands Reference',
-    description: 'All 21 terminal commands — install, delegate, coordinate, wiki, hooks, overlay, collab, and more',
-    title_zh: 'CLI 命令参考',
-    description_zh: '全部 21 个终端命令 — 安装、委派、协调、Wiki、Hook、Overlay、协作等',
-    icon: 'terminal',
-  },
-  {
-    slug: 'role-routing',
-    file: 'role-routing-guide.md',
-    file_en: 'role-routing-guide.en.md',
-    title: 'Role Routing & Tool Config',
-    description: 'Role-based CLI tool routing — 7 fixed roles, fallback chains, domain tags, workspace overrides',
-    title_zh: '角色路由与工具配置',
-    description_zh: '基于角色的 CLI 工具路由 — 7 个固定角色、fallback chain、domain tags、工作空间覆盖',
-    icon: 'shuffle',
-  },
-  {
-    slug: 'skill-config',
-    file: 'skill-config-guide.md',
-    file_en: 'skill-config-guide.en.md',
-    title: 'Skill Config Guide',
-    description: 'Per-skill parameter defaults with TUI editor and hook-based auto-injection',
-    title_zh: 'Skill 参数配置指南',
-    description_zh: '为 51 个命令设置默认参数 — TUI 编辑器、Hook 自动注入、双层级作用域',
-    icon: 'sliders',
-  },
-  {
-    slug: 'maestro-coordinator',
-    file: 'maestro-coordinator-guide.md',
-    file_en: 'maestro-coordinator-guide.en.md',
-    title: 'Maestro Coordinator Guide',
-    description: 'Static chain selector — intent analysis, chain routing, unified executor dispatch',
-    title_zh: 'Maestro 智能协调器指南',
-    description_zh: '静态 chain 选择器 — 意图分析、链路由、统一执行器派发',
-    icon: 'compass',
-  },
-  {
-    slug: 'maestro-ralph',
-    file: 'maestro-ralph-guide.md',
-    file_en: 'maestro-ralph-guide.en.md',
-    title: 'Maestro Ralph Lifecycle Engine',
-    description: 'Adaptive lifecycle engine — closed-loop cycling with decision nodes, auto debug-fix retry',
-    title_zh: 'Maestro Ralph 生命周期引擎指南',
-    description_zh: '自适应生命周期引擎 — decision 节点闭环循环、自动 debug-fix 重试',
-    icon: 'refresh-cw',
-  },
-  {
-    slug: 'workflow-structure',
-    file: 'workflow-structure-guide.md',
-    file_en: 'workflow-structure-guide.en.md',
-    title: 'Workflow Directory Structure',
-    description: 'Complete reference for .workflow/ directory — artifact paths, state.json schema, naming conventions',
-    title_zh: '产物目录体系指南',
-    description_zh: '.workflow/ 完整目录结构参考 — 产物路径、state.json Schema、命名规则速查',
-    icon: 'folder-tree',
-  },
-  {
-    slug: 'learn-tools',
-    file: 'learn-tools-guide.md',
-    file_en: 'learn-tools-guide.en.md',
-    title: 'Learning Toolkit Guide',
-    description: 'Interactive deep learning commands — retro, follow, decompose, second opinion, investigate',
-    title_zh: '学习工具集指南',
-    description_zh: '交互式深度学习命令 — 复盘、跟读、模式拆解、多视角分析、系统化探究',
-    icon: 'graduation-cap',
-  },
-  {
-    slug: 'quality-pipeline',
-    file: 'quality-pipeline-guide.md',
-    file_en: 'quality-pipeline-guide.en.md',
-    title: 'Quality Pipeline Guide',
-    description: 'Review, test, debug, refactor, sync, and retrospective — the complete quality closed loop',
-    title_zh: '质量管线指南',
-    description_zh: '审查、测试、调试、重构、同步、复盘 — 完整的质量闭环',
-    icon: 'shield-check',
-  },
-  {
-    slug: 'harvest',
-    file: 'harvest-guide.md',
-    file_en: 'harvest-guide.en.md',
-    title: 'Knowledge Harvest Guide',
-    description: 'Knowledge extraction and routing — scan, session, path modes with source registry',
-    title_zh: '知识回收指南',
-    description_zh: '知识提取与路由 — scan/session/path 三种模式、source registry、去重逻辑',
-    icon: 'wheat',
+    category: 'advanced',
   },
   {
     slug: 'ui-production',
     file: 'ui-production-guide.md',
     file_en: 'ui-production-guide.en.md',
     title: 'UI Production Pipeline',
-    description: 'Design → Craft → Codify — score-driven automated UI production with critique loops',
-    title_zh: 'UI 生产系统指南',
-    description_zh: 'Design → Craft → Codify — 评分驱动的自动化 UI 生产管线',
+    description: 'Design → Craft → Codify automated pipeline with score-driven critique loops',
+    title_zh: 'UI 自动化生产管线',
+    description_zh: 'Design → Craft → Codify 评分驱动的自动化 UI 管线',
     icon: 'palette',
-  },
-  {
-    slug: 'issue-discover',
-    file: 'issue-discover-guide.md',
-    file_en: 'issue-discover-guide.en.md',
-    title: 'Issue Discovery Guide',
-    description: '8-perspective scanning and by-prompt discovery for comprehensive issue detection',
-    title_zh: '问题发现指南',
-    description_zh: '8 视角全扫描和 by-prompt 发现模式的完整问题检测流程',
-    icon: 'search',
-  },
-  {
-    slug: 'misc-commands',
-    file: 'misc-commands-guide.md',
-    file_en: 'misc-commands-guide.en.md',
-    title: 'Miscellaneous Commands',
-    description: 'amend, update, spec-remove, milestone-release — supplementary workflow commands',
-    title_zh: '杂项命令指南',
-    description_zh: 'amend、update、spec-remove、milestone-release — 补充工作流命令',
-    icon: 'tool',
-  },
-  {
-    slug: 'statusline',
-    file: 'statusline-guide.md',
-    file_en: 'statusline-guide.en.md',
-    title: 'Statusline Guide',
-    description: 'Claude Code custom statusline — model, tokens, git status, context usage, milestone tracking',
-    title_zh: 'Statusline 状态栏指南',
-    description_zh: 'Claude Code 自定义状态栏 — 模型、Token、Git、上下文、里程碑追踪',
-    icon: 'monitor',
-  },
-  {
-    slug: 'knowledge-management',
-    file: 'knowledge-management-guide.md',
-    file_en: 'knowledge-management-guide.en.md',
-    title: 'Knowledge Management System',
-    description: 'Two knowledge types: constraints (specs) and accumulation (knowhow) — forced loading vs on-demand retrieval',
-    title_zh: '知识沉淀管理系统',
-    description_zh: '约束（Spec）与积累（Knowhow）两种知识 — 强制加载与按需检索',
-    icon: 'brain',
-  },
-  {
-    slug: 'team-lite-design',
-    file: 'team-lite-design.md',
-    file_en: 'team-lite-design.en.md',
-    title: 'Team Lite Design',
-    description: 'Minimal collaboration extension for 2-8 person teams — Git-native, file-driven, advisory',
-    title_zh: 'Team Lite 协作方案设计',
-    description_zh: '面向 2-8 人小团队的极简协作扩展 — Git-native + 文件驱动 + advisory',
-    icon: 'users',
-  },
-  {
-    slug: 'antigravity-tools',
-    file: 'antigravity_tools_guide.md',
-    file_en: 'antigravity_tools_guide.en.md',
-    title: 'Antigravity Tools Guide',
-    description: 'Antigravity AI assistant available tools with parameters and schema',
-    title_zh: 'Antigravity 工具指南',
-    description_zh: 'Antigravity AI 助手可用工具，包含参数和 Schema',
-    icon: 'rocket',
-  },
-  {
-    slug: 'workflow-enhancement',
-    file: 'workflow-enhancement-guide.md',
-    file_en: 'workflow-enhancement-guide.en.md',
-    title: 'Workflow Enhancement Guide',
-    description: 'Dynamic adversarial workflow generation and parallel workflow acceleration',
-    title_zh: '工作流增强指南',
-    description_zh: '动态对抗工作流生成和并行工作流加速',
-    icon: 'workflow',
+    category: 'advanced',
   },
   {
     slug: 'security-audit',
     file: 'security-audit-guide.md',
     file_en: 'security-audit-guide.en.md',
-    title: 'Security Audit Guide',
+    title: 'Security Audit',
     description: 'OWASP Top 10, STRIDE threat modeling, and supply chain analysis',
-    title_zh: '安全审计指南',
-    description_zh: 'OWASP Top 10、STRIDE 威胁建模和供应链分析',
+    title_zh: '安全审计',
+    description_zh: 'OWASP Top 10、STRIDE 威胁建模、供应链分析',
     icon: 'shield',
-  },
-  {
-    slug: 'team-swarm',
-    file: 'team-swarm-guide.md',
-    file_en: 'team-swarm-guide.en.md',
-    title: 'Team Swarm Intelligence Guide',
-    description: 'ACO swarm optimization with adversarial decision patterns',
-    title_zh: '团队蚁群智能指南',
-    description_zh: 'ACO 蚁群优化与对抗决策模式',
-    icon: 'bug',
-  },
-  {
-    slug: 'workspace',
-    file: 'workspace-guide.md',
-    title: 'Cross-Workspace Knowledge Sharing',
-    description: 'Link workspaces for shared specs, knowhow, domain glossary, and codebase knowledge across projects',
-    title_zh: '跨工作空间知识共享指南',
-    description_zh: '关联多个项目实现 Spec、Knowhow、Domain、Codebase 的跨工作空间检索与注入',
-    icon: 'link',
+    category: 'advanced',
   },
 ];
 
@@ -378,7 +328,10 @@ export const guideRegistry: Array<{
 const commandModules = import.meta.glob('/.claude/commands/*.md', { query: '?raw', import: 'default' });
 const claudeSkillModules = import.meta.glob('/.claude/skills/*/SKILL.md', { query: '?raw', import: 'default' });
 const codexSkillModules = import.meta.glob('/.codex/skills/*/SKILL.md', { query: '?raw', import: 'default' });
-const guideModules = import.meta.glob('/guides/*.md', { query: '?raw', import: 'default' });
+const guideModules = import.meta.glob('/src/content/docs/guides/*.md', { query: '?raw', import: 'default' });
+// English guide source — bilingual sibling directory. Preferred over legacy
+// `guides/{file_en}` .en.md siblings (which are rarely present on disk).
+const guideModulesEn = import.meta.glob('/src/content/docs/en/guides/*.md', { query: '?raw', import: 'default' });
 
 /**
  * Normalize allowedTools — frontmatter may be a string or an array
@@ -589,16 +542,24 @@ export async function loadGuide(slug: string, locale: string = 'zh-CN'): Promise
   const entry = guideRegistry.find(g => g.slug === slug);
   if (!entry) return null;
 
-  // Determine which file to load
   const isEn = locale === 'en';
-  const targetFile = isEn && entry.file_en ? entry.file_en : entry.file;
 
-  const modulePath = `/guides/${targetFile}`;
-  const loader = guideModules[modulePath] || guideModules[modulePath.replace(/^\//, '')];
-
-  // If English file not found, fall back to Chinese
-  const fallbackPath = `/guides/${entry.file}`;
-  const finalLoader = loader || guideModules[fallbackPath] || guideModules[fallbackPath.replace(/^\//, '')];
+  // Locale-aware fallback chain:
+  //   en: en/guides/{file}  →  guides/{file_en}  →  guides/{file} (zh)
+  //   zh: guides/{file}
+  let finalLoader: (() => Promise<unknown>) | undefined;
+  if (isEn) {
+    const enPath = `/src/content/docs/en/guides/${entry.file}`;
+    finalLoader = guideModulesEn[enPath] || guideModulesEn[enPath.replace(/^\//, '')];
+    if (!finalLoader && entry.file_en) {
+      const enSiblingPath = `/src/content/docs/guides/${entry.file_en}`;
+      finalLoader = guideModules[enSiblingPath] || guideModules[enSiblingPath.replace(/^\//, '')];
+    }
+  }
+  if (!finalLoader) {
+    const zhPath = `/src/content/docs/guides/${entry.file}`;
+    finalLoader = guideModules[zhPath] || guideModules[zhPath.replace(/^\//, '')];
+  }
 
   if (!finalLoader) return null;
 

@@ -78,7 +78,8 @@
     "session": "Session",
     "odyssey": "Odyssey",
     "learn": "Learning",
-    "wiki": "Wiki"
+    "wiki": "Wiki",
+    "meta": "Meta Skills"
   },
   "category_descriptions": {
     "maestro": "Intelligent coordinator and core workflow commands — init, plan, execute, verify, and lifecycle management",
@@ -88,7 +89,9 @@
     "odyssey": "Long-running deep-cycle commands — exhaustive iteration with archaeology, fix, generalization, and knowledge persistence",
     "team": "Multi-agent team collaboration skills for orchestrated parallel workflows",
     "learn": "Pattern extraction, guided reading, investigation, retrospectives, and multi-perspective analysis",
-    "wiki": "Knowledge graph management, connection discovery, and digest generation"
+    "wiki": "Knowledge graph management, connection discovery, and digest generation",
+    "scholar": "Academic writing & research skills — paper writing, citation verification, experiment analysis, and rebuttal",
+    "meta": "Skill tooling and prompt engineering — create, simplify, tune skills, generate prompts, and check delegation contracts"
   },
   "guides": {
     "title": "Guides",

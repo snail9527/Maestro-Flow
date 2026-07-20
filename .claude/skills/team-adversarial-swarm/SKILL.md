@@ -1,8 +1,14 @@
 ---
 name: team-adversarial-swarm
+disable-model-invocation: true
 description: "ACO swarm intelligence with modular Workflow composition and adversarial decision gates. Coordinator drives iteration loop; 4 composable Workflow scripts handle exploration, scoring, convergence, and synthesis — each with built-in adversarial patterns."
 allowed-tools: Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*), Workflow(*), AskUserQuestion(*), Agent(*)
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team Adversarial Swarm
 
@@ -73,7 +79,7 @@ SKILL.md (Coordinator — this file)
 ## Session Directory
 
 ```
-.workflow/.team/TAS-<slug>-<date>/
+{run_dir}/work/team/
 ├── swarm-config.json       # Phase 1 output
 ├── pheromone/              # ACO state (managed by aco.py)
 │   ├── current.json
@@ -81,7 +87,7 @@ SKILL.md (Coordinator — this file)
 ├── trails/                 # Per-iteration trails (managed by aco.py)
 ├── scores/                 # Adversarial scoring results
 │   └── iter-<k>-scores.json
-├── artifacts/
+├── {run_dir}/outputs/      # Formal deliverables
 │   ├── ant-<k>-<id>.json   # Ant outputs
 │   └── best-solution.md    # Final synthesis
 ├── workflows/              # Workflow run artifacts
@@ -97,7 +103,7 @@ SKILL.md (Coordinator — this file)
 
 ### Phase 0: Resume Check
 
-1. `Glob(".workflow/.team/TAS-*/swarm-config.json")` → 查找活跃 session
+1. `Glob("{run_dir}/work/team/swarm-config.json")` → 查找活跃 session
 2. 若存在且有 `workflows/converge-*.json` 未标记 converged → 恢复到对应迭代
 3. 若无活跃 session → Phase 1
 
@@ -123,21 +129,33 @@ SKILL.md (Coordinator — this file)
 }
 ```
 
-Write 到 `<session>/swarm-config.json`。
+Write 到 `{run_dir}/work/team/swarm-config.json`。
 
 ### Phase 2: ACO Init
 
 1. 创建 session 目录: `TAS-<slug>-<date>`
 2. 解析 aco.py 路径（从 team-swarm skill 继承）
-3. `Bash: python <aco.py> --session <session> init`
+3. `Bash: python <aco.py> --session {run_dir}/work/team init`
 4. 解析输出: `{ n_nodes, n_edges, pheromone_path }`
+
+### Run Lifecycle Integration
+
+After session folder creation and before role-spec generation:
+
+1. **Resolve Run** (birth-packet first): if the dispatch context already carries `run_id` / `run_dir` (injected by an orchestrator), store them in `team-session.json` and skip create — a second create mints an empty duplicate Run. Otherwise: `maestro run create team-adversarial-swarm --session <slug> --intent "<task summary>"`
+   - Slug format: `YYYYMMDD-team-adversarial-swarm-<topic>` (ASCII, ≤64 chars)
+   - Store returned `run_id` and `run_dir` in `team-session.json`:
+     ```json
+     "run": { "run_id": "<id>", "run_dir": "<path>" }
+     ```
+2. **Resume**: Read `team-session.json.run.run_id` → `maestro run check <run_id>` (idempotent). If status=sealed, create a new run and update the field. If `run.run_id` is missing, resolve in order: birth-packet injection, then `<session>/artifacts/`; if all are absent, fail closed — report session corruption and do NOT create a new Run.
 
 ### Phase 3: Iteration Loop
 
 ```python
 for k in range(1, max_iterations + 1):
     # 3a. ACO selection
-    assignments = Bash("python aco.py --session <session> select --iter k")
+    assignments = Bash("python aco.py --session {run_dir}/work/team select --iter k")
     
     # 3b. Parallel exploration (Workflow Module 1)
     explore_result = Workflow({
@@ -152,8 +170,8 @@ for k in range(1, max_iterations + 1):
     })
     
     # 3d. Write scores + pheromone update
-    Write("<session>/scores/iter-k-scores.json", score_result)
-    Bash("python aco.py --session <session> update --iter k")
+    Write("{run_dir}/work/team/scores/iter-k-scores.json", score_result)
+    Bash("python aco.py --session {run_dir}/work/team --run-dir <run_dir> update --iter k")
     
     # 3e. Adversarial convergence check (Workflow Module 3)
     converge_result = Workflow({
@@ -162,7 +180,7 @@ for k in range(1, max_iterations + 1):
     })
     
     # 3f. Save + check
-    Write("<session>/workflows/converge-k.json", converge_result)
+    Write("{run_dir}/work/team/workflows/converge-k.json", converge_result)
     if converge_result.converged: break
 ```
 
@@ -171,7 +189,7 @@ Coordinator 负责 Workflow 间的数据桥接和 Python 脚本调用。
 
 ### Phase 4: Synthesis
 
-1. `Bash: python aco.py --session <session> report` → 获取 best + top_k + curve
+1. `Bash: python aco.py --session {run_dir}/work/team report` → 获取 best + top_k + curve
 2. 调用 Workflow Module 4:
    ```
    Workflow({
@@ -179,7 +197,7 @@ Coordinator 负责 Workflow 间的数据桥接和 Python 脚本调用。
      args: { best, top_k, convergence_story, objective }
    })
    ```
-3. 将 synthesis 结果写入 `<session>/artifacts/best-solution.md`
+3. 将 synthesis 结果写入 `{run_dir}/outputs/best-solution.md`
 4. 展示完成摘要 + AskUserQuestion（归档 / 保留 / 导出 / 再跑一轮）
 
 ---
@@ -225,6 +243,12 @@ synthesize(best, top_k) → best-solution.md
 | 幻觉集群 (>50% 蚁被降分) | 暂停，AskUserQuestion（继续/调整评分规则） |
 
 ## Completion
+
+Run lifecycle completion (before displaying results):
+- Read run_id from team-session.json.run.run_id
+- Write {run_dir}/report.md with frontmatter (verdict/summary/concerns)
+- Run `maestro run complete <run_id>`
+- If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
 
 展示最终结果 + 交互选择:
 - **归档**: 保存 session，展示 best-solution.md

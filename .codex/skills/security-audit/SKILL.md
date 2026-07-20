@@ -1,20 +1,42 @@
 ---
 name: security-audit
+disable-model-invocation: true
 description: OWASP Top 10 and STRIDE security auditing with supply chain analysis
 argument-hint: "[quick|standard|deep] [--scope <path>]"
-allowed-tools: spawn_agents_on_csv, Read, Bash, Glob, Grep, request_user_input
+allowed-tools:
+  - Bash
+  - Glob
+  - Grep
+  - Read
+  - Write
+  - followup_task
+  - interrupt_agent
+  - list_agents
+  - request_user_input
+  - send_message
+  - spawn_agent
+  - spawn_agents_on_csv
+  - wait_agent
+session-mode: run
+contract:
+  discovery: self-described
+  consumes: []
+  produces: []
+version: 0.5.53
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+@~/.maestro/workflows/codex-run-mode.md
+</required_reading>
+
 <purpose>
 Systematic security audit covering OWASP Top 10, dependency supply chain, secrets detection,
 CI/CD pipeline review, and optional STRIDE threat modeling. Three tiers control depth vs speed.
 </purpose>
 
-<required_reading>
-@~/.maestro/workflows/review.md
-</required_reading>
-
 <context>
-$ARGUMENTS -- Parse tier and scope:
+$ARGUMENTS — Parse tier and scope:
 - Tier: `quick` (default) | `standard` | `deep`
 - `--scope <path>`: Limit scan to directory (default: project root)
 
@@ -22,19 +44,49 @@ $ARGUMENTS -- Parse tier and scope:
 
 | Tier | OWASP | Dependencies | Secrets | CI/CD | STRIDE | Git History |
 |------|-------|-------------|---------|-------|--------|-------------|
-| quick | Y | Y | -- | -- | -- | -- |
-| standard | Y | Y | Y | Y | -- | -- |
-| deep | Y | Y | Y | Y | Y | Y |
+| quick | ✓ | ✓ | — | — | — | — |
+| standard | ✓ | ✓ | ✓ | ✓ | — | — |
+| deep | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+**Output boundary**: ALL file writes MUST target `{run_dir}/outputs/` or `.workflow/state.json` only. NEVER modify source code, configuration files, or dependencies. Audit is read-only analysis.
 </context>
 
+<invariants>
+1. **Audit is read-only** — NEVER modify source code, configuration, dependencies, or CI/CD files during audit. Security audit produces reports only.
+2. **Findings require file:line evidence** — every finding MUST reference a specific file:line location and include the vulnerable code pattern. No vague or category-only findings.
+3. **Severity NEVER downgraded without justification** — if a finding matches a known OWASP category, its severity follows OWASP guidance. Downgrading requires documented rationale (e.g., compensating control exists).
+4. **Tier coverage is mandatory** — all scan phases required by the selected tier MUST complete. NEVER skip a tier-required phase silently; failures are logged as W00x warnings.
+5. **False positive marking requires evidence** — marking a finding as false positive MUST include the compensating control or code path that prevents exploitation. NEVER dismiss findings without counter-evidence.
+6. **Secrets are never logged** — if secrets are discovered, report their location (file:line) and type but NEVER include the actual secret value in the report output.
+</invariants>
+
 <execution>
+
+### Phase Gates (MANDATORY, BLOCKING)
+
+**GATE 1: Recon → Scan**
+- REQUIRED: Tech stack detected and entry points identified.
+- REQUIRED: Auth/authz modules listed and data flow mapped.
+- BLOCKED if missing: cannot scan without entry points and data flow baseline.
+
+**GATE 2: Scan → Report** (tier-gated)
+- REQUIRED: OWASP Top 10 scan completed (all tiers).
+- REQUIRED: Dependency audit completed (all tiers).
+- REQUIRED: Secrets + CI/CD scan completed (standard/deep only).
+- REQUIRED: STRIDE + git history completed (deep only).
+- BLOCKED if tier-required scans incomplete: finish all tier-applicable phases before reporting.
+
+**GATE 3: Report → Completion**
+- REQUIRED: Severity matrix produced with file:line references and remediation.
+- REQUIRED: Declared typed output registered by `maestro run complete`.
+- BLOCKED if missing: do not emit completion status without severity matrix.
 
 **Phase 1: Reconnaissance**
 
 1. Detect tech stack from package.json / go.mod / requirements.txt / Cargo.toml
 2. Identify entry points: HTTP handlers, API routes, CLI parsers, WebSocket handlers
 3. List authentication/authorization modules
-4. Map data flow: user input -> processing -> storage -> output
+4. Map data flow: user input → processing → storage → output
 
 **Phase 2: OWASP Top 10 Scan** (all tiers)
 
@@ -56,41 +108,6 @@ For each category, scan relevant source files:
 Use `Grep` for pattern matching (e.g., `eval(`, `exec(`, `innerHTML`, `dangerouslySetInnerHTML`,
 `sql.*\+.*req\.`, `process\.env` without validation).
 
-For `standard` and `deep` tiers, use `spawn_agents_on_csv` to parallelize OWASP category scans
-across multiple agents, one agent per 2-3 categories.
-
-**spawn_agents_on_csv contract** (OWASP scan):
-- CSV columns: `id, title, owasp_categories, scope_glob, deps, wave, status` (initial `status="pending"`); filter `wave==1 AND status=="pending"` before writing wave-1.csv.
-- `output_schema`:
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "id":              { "type": "string" },
-    "result_status":   { "type": "string", "enum": ["completed", "failed"] },
-    "findings":        { "type": "string", "maxLength": 500 },
-    "severity_counts": { "type": "string", "description": "JSON: {critical, high, medium, low}" },
-    "top_issues":      { "type": "string", "description": "JSON array: [{title, severity, file:line, cwe}]" },
-    "error":           { "type": "string" }
-  },
-  "required": ["id", "result_status", "findings"]
-}
-```
-
-- Merge: `result_status` → master `status`; copy `findings`, `severity_counts`, `top_issues`, `error`.
-- **Termination contract** (embed in instruction):
-  ```
-  You MUST call report_agent_job_result EXACTLY ONCE before exiting.
-  - Success → result_status=completed (severity_counts may be zero if clean)
-  - Failure → result_status=failed with error message
-  - Timeout → near max_runtime_seconds → result_status=completed with partial top_issues (do not fail the wave for timeout)
-  - NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
-  - Every issue MUST include file:line and CWE reference. No speculation.
-  - Read-only. Do NOT modify source.
-  Do NOT write to tasks.csv, wave-*.csv, results.csv. Do NOT call spawn_agents_on_csv (no recursion).
-  ```
-
 **Phase 3: Dependency Audit** (all tiers)
 
 ```bash
@@ -107,10 +124,12 @@ Check for:
 
 **Phase 4: Secrets Detection** (standard + deep)
 
-```bash
-# Current codebase
-grep -rn --include="*.ts" --include="*.js" --include="*.json" --include="*.env*" \
-  -E "(password|secret|api.?key|token|credential).*=.*['\"][^'\"]{8,}" . || true
+```
+Grep({
+  pattern: "(password|secret|api.?key|token|credential).*=.*['\"][^'\"]{8,}",
+  glob: "*.{ts,js,json,env*}",
+  output_mode: "content"
+})
 ```
 
 Check `.env.example` for leaked values. Check `.gitignore` for missing `.env` patterns.
@@ -136,31 +155,6 @@ For each critical module identified in Phase 1:
 | **D**enial of Service | Resource limits? Rate limiting? |
 | **E**levation of Privilege | Can roles be escalated? Input validation on role fields? |
 
-For `deep` tier, use `spawn_agents_on_csv` to parallelize STRIDE analysis across critical modules,
-one agent per module. Use `request_user_input` to confirm critical module list before spawning.
-
-**STRIDE spawn contract**:
-- CSV columns: `id, module_path, threats_to_assess, deps, wave, status` (initial `status="pending"`); filter `wave==2 AND status=="pending"`.
-- `output_schema`:
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "id":              { "type": "string" },
-    "result_status":   { "type": "string", "enum": ["completed", "failed"] },
-    "findings":        { "type": "string", "maxLength": 500 },
-    "severity_counts": { "type": "string", "description": "JSON: {critical, high, medium, low}" },
-    "top_issues":      { "type": "string", "description": "JSON array: [{stride_category, threat, severity, file:line, mitigation}]" },
-    "error":           { "type": "string" }
-  },
-  "required": ["id", "result_status", "findings"]
-}
-```
-
-- Same termination contract as the OWASP spawn above (mandatory `report_agent_job_result`, read-only, no recursion, timeout → partial findings, etc.).
-- Merge: `result_status` → master `status`; copy `findings`, `severity_counts`, `top_issues`, `error`.
-
 **Phase 7: Git History Archaeology** (deep only)
 
 ```bash
@@ -177,7 +171,7 @@ Output severity matrix:
 === Security Audit ({tier}) ===
 
 CRITICAL ({count}):
-  - [A03] SQL injection in {file}:{line} -- {description}
+  - [A03] SQL injection in {file}:{line} — {description}
     Fix: {remediation}
 
 HIGH ({count}):
@@ -192,35 +186,52 @@ LOW ({count}):
 Summary: {total} findings ({critical} critical, {high} high, {medium} medium, {low} low)
 ```
 
-Emit completion status:
+**Register artifact on completion:**
+
+Write the declared security findings under `{run_dir}/outputs/` and the human summary to `{run_dir}/report.md`. `maestro run complete` performs registration automatically; the model never edits an artifact registry.
+</execution>
+
+<completion>
+### Standalone report
+
 ```
 --- COMPLETION STATUS ---
 STATUS: DONE|DONE_WITH_CONCERNS
 CONCERNS: {count} critical findings require immediate action
-NEXT: $quality-review
 --- END STATUS ---
 ```
 
-**Register artifact on completion** (so retrospective/harvest can trace this audit):
+Status mapping:
+- **done** — No critical/high findings
+- **done-with-concerns** — Critical/high findings documented with remediation
+
+### Ralph-invoked completion
+
+End the step by calling the CLI (no text block output):
 ```
-Append to state.json.artifacts[]:
-{
-  id: nextArtifactId(artifacts, "review"),  // RVW-NNN (security-audit reuses review type)
-  type: "review",
-  subtype: "security-audit",
-  milestone: current_milestone || null,
-  phase: target_phase || null,
-  scope: target_phase ? "phase" : "standalone",
-  path: "scratch/{YYYYMMDD}-security-audit-{tier}-{slug}",
-  status: critical_count == 0 ? "completed" : "completed_with_concerns",
-  tier: tier,                              // quick|standard|deep
-  harvested: false,
-  created_at: start_time,
-  completed_at: now()
-}
+maestro run complete --session {session_id} --verdict {VERDICT} [--evidence {path}]
 ```
-Write findings report to the same `path` (severity matrix, file:line refs, remediation).
-</execution>
+(run-id 可省略 — 自动解析当前 running 步)
+
+### Next-step routing
+
+| Condition | Suggestion |
+|-----------|-----------|
+| No critical findings | `maestro run create review --session YYYYMMDD-review-{topic} --intent "{goal}" -- {phase}` |
+| Critical findings need fix | `maestro run create plan --session YYYYMMDD-plan-{topic} --intent "{goal}" -- {phase} --gaps` |
+| Need deeper analysis | `/security-audit deep --scope {path}` |
+| Want dependency remediation | Fix vulnerabilities, then re-run `/security-audit` |
+</completion>
+
+<error_codes>
+| Code | Severity | Condition | Recovery |
+|------|----------|-----------|----------|
+| E001 | error | No source files found in scope | Verify --scope path exists |
+| E002 | error | Tech stack not detected | Manually specify entry points |
+| W001 | warning | npm audit / dependency tool unavailable | Skip dependency phase, note limitation |
+| W002 | warning | Git history scan failed | Skip Phase 7, note limitation |
+| W003 | warning | Partial scan (some files inaccessible) | Report coverage gap in findings |
+</error_codes>
 
 <success_criteria>
 - [ ] Tech stack identified and entry points mapped

@@ -6,6 +6,7 @@
 import { join, dirname, resolve, relative, basename, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -15,6 +16,8 @@ import {
   readFileSync,
   writeFileSync,
   renameSync,
+  unlinkSync,
+  rmSync,
 } from 'node:fs';
 import { paths } from '../config/paths.js';
 import {
@@ -25,7 +28,7 @@ import {
   type Manifest,
 } from '../core/manifest.js';
 import { applyOverlays, ensureOverlayDir, deleteOverlayManifest } from '../core/overlay/applier.js';
-import { injectDocFile, type MigrateResult } from '../core/tag-injector.js';
+import { injectDocFile, hasAnyMarkers, removeAllSections, type MigrateResult } from '../core/tag-injector.js';
 import { COMPONENT_DEFS, type ComponentDef } from '../core/component-defs.js';
 import {
   HOOK_LEVELS,
@@ -55,7 +58,7 @@ const __dirname = dirname(__filename);
 export const PRESERVE_FILES = new Set(['settings.json', 'settings.local.json']);
 
 // Re-export component definitions from shared module
-export { COMPONENT_DEFS, migrateComponentIds, type ComponentDef } from '../core/component-defs.js';
+export { COMPONENT_DEFS, migrateComponentIds, mergeNewDefaults, type ComponentDef } from '../core/component-defs.js';
 
 // ---------------------------------------------------------------------------
 // Disabled items — preserve disabled state across reinstalls
@@ -240,6 +243,147 @@ function getCodexConfigPath(scope: 'global' | 'project', projectPath: string): s
   return scope === 'project'
     ? join(projectPath, '.codex', 'config.toml')
     : join(homedir(), '.codex', 'config.toml');
+}
+
+interface TomlPrimitiveEntry {
+  key: string;
+  value: string;
+  comments?: string[];
+}
+
+/**
+ * Update primitive keys inside one TOML table without parsing or reserializing
+ * the rest of the user's file. Unknown tables, keys, ordering, and comments
+ * remain byte-for-byte unchanged apart from newline normalization.
+ */
+function upsertTomlTable(
+  content: string,
+  tableName: string,
+  entries: TomlPrimitiveEntry[],
+): string {
+  const lines = content ? content.split(/\r?\n/) : [];
+  const tableHeader = `[${tableName}]`;
+  const escapedHeader = tableHeader.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const headerPattern = new RegExp(`^\\s*${escapedHeader}\\s*(?:#.*)?$`);
+  const headerIndex = lines.findIndex((line) => headerPattern.test(line));
+
+  if (headerIndex < 0) {
+    if (lines.length > 0 && lines[lines.length - 1].trim() !== '') lines.push('');
+    lines.push(tableHeader);
+    for (const entry of entries) {
+      for (const comment of entry.comments ?? []) lines.push(`# ${comment}`);
+      lines.push(`${entry.key} = ${entry.value}`);
+    }
+    return lines.join('\n');
+  }
+
+  const anyHeader = /^\s*\[\[?[^\]]+\]\]?\s*(?:#.*)?$/;
+  let sectionEnd = lines.length;
+  for (let i = headerIndex + 1; i < lines.length; i++) {
+    if (anyHeader.test(lines[i])) {
+      sectionEnd = i;
+      break;
+    }
+  }
+
+  for (const entry of entries) {
+    const keyPattern = new RegExp(`^(\\s*${entry.key}\\s*=\\s*)[^#]*(\\s+#.*)?$`);
+    let existingIndex = -1;
+    for (let i = headerIndex + 1; i < sectionEnd; i++) {
+      if (keyPattern.test(lines[i])) {
+        existingIndex = i;
+        break;
+      }
+    }
+
+    if (existingIndex >= 0) {
+      const match = lines[existingIndex].match(keyPattern);
+      lines[existingIndex] = `${match?.[1] ?? `${entry.key} = `}${entry.value}${match?.[2] ?? ''}`;
+      continue;
+    }
+
+    const addition = [
+      ...(entry.comments ?? []).map((comment) => `# ${comment}`),
+      `${entry.key} = ${entry.value}`,
+    ];
+    lines.splice(sectionEnd, 0, ...addition);
+    sectionEnd += addition.length;
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Enable Codex request-user-input and Multi-Agent V2 defaults. This is an
+ * additive user preference: install updates it, uninstall never removes it.
+ */
+export function configureCodexMultiAgentV2(
+  scope: 'global' | 'project',
+  projectPath: string,
+): string | null {
+  const fp = getCodexConfigPath(scope, projectPath);
+  const tempPath = `${fp}.maestro-${process.pid}-${Date.now()}.tmp`;
+  try {
+    let content = existsSync(fp) ? readFileSync(fp, 'utf-8') : '';
+    content = upsertTomlTable(content, 'features', [
+      {
+        key: 'default_mode_request_user_input',
+        value: 'true',
+        comments: ['Allow request_user_input in the default mode.'],
+      },
+      {
+        key: 'multi_agents_v2',
+        value: 'true',
+        comments: ['Enable the Codex Multi-Agent V2 feature.'],
+      },
+    ]);
+    content = upsertTomlTable(content, 'features.multi_agent_v2', [
+      {
+        key: 'enabled',
+        value: 'true',
+        comments: ['Enable V2 fallback for models without an explicit protocol.'],
+      },
+      {
+        key: 'hide_spawn_agent_metadata',
+        value: 'false',
+        comments: ['Keep spawn metadata visible; Codex defaults this option to true.'],
+      },
+      {
+        key: 'tool_namespace',
+        value: '"maestro"',
+        comments: ['Avoid the reserved collaboration namespace used by newer Codex models.'],
+      },
+      {
+        key: 'max_concurrent_threads_per_session',
+        value: '7',
+        comments: ['One primary agent plus up to six concurrent sub-agents.'],
+      },
+      {
+        key: 'min_wait_timeout_ms',
+        value: '180000',
+        comments: ['Minimum wait_agent timeout: 3 minutes.'],
+      },
+      {
+        key: 'default_wait_timeout_ms',
+        value: '180000',
+        comments: ['Default wait_agent timeout: 3 minutes.'],
+      },
+      {
+        key: 'max_wait_timeout_ms',
+        value: '3600000',
+        comments: ['Maximum wait_agent timeout: 1 hour.'],
+      },
+    ]);
+
+    const dir = join(fp, '..');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(tempPath, content.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n', 'utf-8');
+    renameSync(tempPath, fp);
+    return fp;
+  } catch {
+    if (existsSync(tempPath)) unlinkSync(tempPath);
+    return null;
+  }
 }
 
 /**
@@ -459,6 +603,55 @@ export function copyRecursive(
       addFile(manifest, destPath);
     }
   }
+}
+
+/**
+ * Remove files in `dest` that do not exist in `src` (after applying the same
+ * fileFilter). Prevents stale files from accumulating across installs when
+ * source commands/skills/agents are deleted or merged.
+ *
+ * Only operates on flat or shallow directories — walks recursively but
+ * respects PRESERVE_FILES and never removes non-empty directories.
+ */
+export function pruneOrphans(
+  src: string,
+  dest: string,
+  fileFilter?: (name: string) => boolean,
+): number {
+  if (!existsSync(dest) || !existsSync(src)) return 0;
+  const srcStat = statSync(src);
+  if (srcStat.isFile()) return 0;
+
+  const sourceEntries = new Set(
+    readdirSync(src).filter(name => !fileFilter || fileFilter(name)),
+  );
+
+  let removed = 0;
+  for (const entry of readdirSync(dest)) {
+    if (PRESERVE_FILES.has(entry)) continue;
+    if (entry.endsWith('.md.disabled')) continue;
+    if (sourceEntries.has(entry)) {
+      const srcPath = join(src, entry);
+      const destPath = join(dest, entry);
+      if (statSync(srcPath).isDirectory() && existsSync(destPath) && statSync(destPath).isDirectory()) {
+        // fileFilter classifies top-level component roots only. Applying it to
+        // nested SKILL.md/references/assets entries corrupts valid components.
+        removed += pruneOrphans(srcPath, destPath);
+      }
+      continue;
+    }
+    const orphanPath = join(dest, entry);
+    try {
+      const st = statSync(orphanPath);
+      if (st.isDirectory()) {
+        rmSync(orphanPath, { recursive: true });
+      } else {
+        unlinkSync(orphanPath);
+      }
+      removed++;
+    } catch { /* skip */ }
+  }
+  return removed;
 }
 
 // Re-export injectDocFile from shared core
@@ -797,6 +990,7 @@ export interface UninstallResult {
   claudeHooksRemoved: number;
   codexHooksRemoved: number;
   agyHooksRemoved: number;
+  genericHooksRemoved: Record<string, number>;
   statuslineRemoved: boolean;
   mcpRemoved: { claude: boolean; codex: boolean; extras: string[] };
 }
@@ -831,6 +1025,7 @@ export function uninstallManifest(
     claudeHooksRemoved: 0,
     codexHooksRemoved: 0,
     agyHooksRemoved: 0,
+    genericHooksRemoved: {},
     statuslineRemoved: false,
     mcpRemoved: { claude: false, codex: false, extras: [] },
   };
@@ -855,6 +1050,11 @@ export function uninstallManifest(
   if (hooks?.agy) {
     result.agyHooksRemoved = uninstallAgyHooks(hooks.agy.settingsPath, hooks.agy.installed);
   }
+  if (hooks?.generic) {
+    for (const [platformId, record] of Object.entries(hooks.generic)) {
+      result.genericHooksRemoved[platformId] = uninstallCodexHooks(record.settingsPath, record.installed);
+    }
+  }
 
   // --- Statusline ---
   if (manifest.statusline) {
@@ -875,6 +1075,25 @@ export function uninstallManifest(
       if (removeExtraMcpServerAt(extra.configPath, spec.format)) {
         result.mcpRemoved.extras.push(extra.targetId);
       }
+    }
+  }
+
+  // --- Plugin unregistration ---
+  if (manifest.plugin?.claude || manifest.plugin?.codex) {
+    const isWin = process.platform === 'win32';
+    const runCli = (cmd: string, args: string[]) => {
+      try {
+        execFileSync(isWin ? 'cmd' : cmd, isWin ? ['/c', cmd, ...args] : args,
+          { encoding: 'utf-8', timeout: 30_000, stdio: 'pipe' });
+      } catch { /* ignore CLI errors */ }
+    };
+    if (manifest.plugin.claude) {
+      runCli('claude', ['plugin', 'uninstall', 'maestro-flow']);
+      runCli('claude', ['plugin', 'marketplace', 'remove', 'maestro-flow-bridge']);
+    }
+    if (manifest.plugin.codex) {
+      runCli('codex', ['plugin', 'remove', 'maestro-flow']);
+      runCli('codex', ['plugin', 'marketplace', 'remove', 'maestro-flow-bridge']);
     }
   }
 
@@ -919,4 +1138,416 @@ function legacyCleanup(manifest: Manifest, result: UninstallResult): void {
   if (removeMcpServer(manifest.scope, manifest.targetPath)) {
     result.mcpRemoved.claude = true;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Fallback scan & cleanup — when no manifests exist but files remain
+// ---------------------------------------------------------------------------
+
+/** Files to preserve during fallback cleanup. */
+const FALLBACK_PRESERVE = new Set(['settings.json', 'settings.local.json']);
+
+/** Content-managed doc files: remove maestro sections, don't delete entirely. */
+const FALLBACK_CONTENT_MANAGED = new Set(['CLAUDE.md', 'AGENTS.md', 'GEMINI.md']);
+
+export interface FallbackScanResult {
+  /** Unique target directories that contain files. */
+  directories: { path: string; fileCount: number }[];
+  hooksFound: boolean;
+  statuslineFound: boolean;
+  claudeMcpFound: boolean;
+  codexMcpFound: boolean;
+  totalFiles: number;
+}
+
+/**
+ * Scan known maestro target directories for orphaned files when no manifests
+ * exist. Uses COMPONENT_DEFS to derive the exact set of directories that
+ * maestro install would populate.
+ */
+export function scanFallbackTargets(
+  scope: 'global' | 'project',
+  projectPath: string,
+): FallbackScanResult {
+  const result: FallbackScanResult = {
+    directories: [],
+    hooksFound: false,
+    statuslineFound: false,
+    claudeMcpFound: false,
+    codexMcpFound: false,
+    totalFiles: 0,
+  };
+
+  // Collect unique target directories from COMPONENT_DEFS
+  const seen = new Set<string>();
+  for (const def of COMPONENT_DEFS) {
+    const dir = def.target(scope, projectPath);
+    const norm = dir.toLowerCase();
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    if (!existsSync(dir)) continue;
+    const st = statSync(dir);
+    if (st.isFile()) {
+      // inject targets point to a file (e.g. CLAUDE.md)
+      result.directories.push({ path: dir, fileCount: 1 });
+      result.totalFiles += 1;
+    } else {
+      const count = countFiles(dir);
+      if (count > 0) {
+        result.directories.push({ path: dir, fileCount: count });
+        result.totalFiles += count;
+      }
+    }
+  }
+
+  // Check Claude hooks + statusline
+  const settingsPath = scope === 'global'
+    ? getClaudeSettingsPath()
+    : join(projectPath, '.claude', 'settings.json');
+  if (existsSync(settingsPath)) {
+    try {
+      const content = readFileSync(settingsPath, 'utf-8');
+      result.hooksFound = content.includes('maestro') && content.includes('hooks');
+      result.statuslineFound = content.includes('statusLine') && content.includes('maestro');
+    } catch { /* skip */ }
+  }
+
+  // Check Claude MCP (parse JSON for exact key match)
+  const mcpPath = getClaudeMcpConfigPath(scope, projectPath);
+  if (existsSync(mcpPath)) {
+    try {
+      const data = JSON.parse(readFileSync(mcpPath, 'utf-8')) as Record<string, unknown>;
+      const servers = data.mcpServers as Record<string, unknown> | undefined;
+      result.claudeMcpFound = !!servers && MAESTRO_MCP_SERVER_NAME in servers;
+    } catch { /* skip */ }
+  }
+
+  // Check Codex MCP (match TOML section header exactly, not substring)
+  const codexConfigPath = scope === 'project'
+    ? join(projectPath, '.codex', 'config.toml')
+    : join(homedir(), '.codex', 'config.toml');
+  if (existsSync(codexConfigPath)) {
+    try {
+      const content = readFileSync(codexConfigPath, 'utf-8');
+      result.codexMcpFound = content.includes(`[mcp_servers.${MAESTRO_MCP_SERVER_NAME}]`);
+    } catch { /* skip */ }
+  }
+
+  return result;
+}
+
+/**
+ * Walk a source directory and build a Set of corresponding target paths.
+ * Used by fallback cleanup to distinguish managed files from
+ * user-added content (e.g. custom workflows like Maestro-publish).
+ */
+function buildKnownPaths(
+  sourceDir: string,
+  targetDir: string,
+  fileFilter?: (name: string) => boolean,
+): Set<string> {
+  const paths = new Set<string>();
+  if (!existsSync(sourceDir)) return paths;
+
+  function walk(currentSource: string, currentTarget: string): void {
+    const st = statSync(currentSource);
+    if (st.isFile()) {
+      paths.add(currentTarget);
+      return;
+    }
+    if (st.isDirectory()) {
+      for (const entry of readdirSync(currentSource, { withFileTypes: true })) {
+        if (fileFilter && !fileFilter(entry.name)) continue;
+        walk(join(currentSource, entry.name), join(currentTarget, entry.name));
+      }
+    }
+  }
+
+  walk(sourceDir, targetDir);
+  return paths;
+}
+
+/**
+ * Recursively remove all files in a directory, respecting PRESERVE and
+ * CONTENT_MANAGED rules. Returns count of files removed.
+ *
+ * When `knownFiles` is provided, only files whose absolute path appears in
+ * the set are eligible for deletion — user-added content is left untouched.
+ * Directories are only removed if empty after cleaning.
+ */
+function cleanDirectory(dir: string, knownFiles?: Set<string>): number {
+  if (!existsSync(dir)) return 0;
+  const st = statSync(dir);
+
+  // Single file (e.g. inject target like CLAUDE.md)
+  if (st.isFile()) {
+    const name = basename(dir);
+    if (FALLBACK_PRESERVE.has(name)) return 0;
+    if (FALLBACK_CONTENT_MANAGED.has(name)) {
+      return cleanContentManagedFile(dir) ? 1 : 0;
+    }
+    if (knownFiles && !knownFiles.has(dir)) return 0;
+    try { unlinkSync(dir); return 1; } catch { return 0; }
+  }
+
+  let removed = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (FALLBACK_PRESERVE.has(entry.name)) continue;
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      // Pass knownFiles through — subdirectories use the same white-list
+      removed += cleanDirectory(fullPath, knownFiles);
+      // Remove empty directory after cleaning
+      try {
+        if (existsSync(fullPath) && readdirSync(fullPath).length === 0) {
+          rmSync(fullPath, { recursive: true });
+        }
+      } catch { /* skip */ }
+    } else if (FALLBACK_CONTENT_MANAGED.has(entry.name)) {
+      // Content-managed files (CLAUDE.md, AGENTS.md, GEMINI.md): clean
+      // injected sections even when knownFiles doesn't cover them —
+      // tag-injection cleanup is safe regardless.
+      if (cleanContentManagedFile(fullPath)) removed++;
+    } else {
+      // Unknown files: skip when white-list is active
+      if (knownFiles && !knownFiles.has(fullPath)) continue;
+      try { unlinkSync(fullPath); removed++; } catch { /* skip */ }
+    }
+  }
+  return removed;
+}
+
+function cleanContentManagedFile(filePath: string): boolean {
+  if (!existsSync(filePath)) return false;
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    if (!hasAnyMarkers(content)) {
+      unlinkSync(filePath);
+      return true;
+    }
+    const cleaned = removeAllSections(content);
+    if (!cleaned || cleaned.trim() === '') {
+      unlinkSync(filePath);
+      return true;
+    }
+    writeFileSync(filePath, cleaned, 'utf-8');
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Perform a manifest-less cleanup of all known maestro target directories,
+ * hooks, MCP, and statusline. Used as fallback when manifests are lost.
+ *
+ * When `pkgRoot` is provided, source directories are scanned to build a
+ * white-list of known (managed) target paths. Only files matching
+ * the white-list are deleted — user-added content (e.g. custom workflows
+ * like Maestro-publish) is left untouched.
+ */
+export function performFallbackCleanup(
+  scope: 'global' | 'project',
+  projectPath: string,
+  pkgRoot?: string,
+): UninstallResult {
+  const result: UninstallResult = {
+    filesRemoved: 0,
+    filesSkipped: 0,
+    claudeHooksRemoved: 0,
+    codexHooksRemoved: 0,
+    agyHooksRemoved: 0,
+    genericHooksRemoved: {},
+    statuslineRemoved: false,
+    mcpRemoved: { claude: false, codex: false, extras: [] },
+  };
+
+  // --- Build known-path white-list from source directories ---
+  // Key: normalized target directory. Value: Set of absolute target paths
+  // that maestro would have created.
+  const dirKnownPaths = new Map<string, Set<string>>();
+  if (pkgRoot) {
+    for (const def of COMPONENT_DEFS) {
+      // Build components transform files; we can't predict exact output paths
+      // from the source alone, so skip them in fallback cleanup.
+      if (def.build) continue;
+      // Inject components (CLAUDE.md, AGENTS.md) are handled by
+      // cleanContentManagedFile which only removes marked sections — safe.
+      if (def.inject) continue;
+
+      const dir = def.target(scope, projectPath);
+      const sourceDir = join(pkgRoot, def.sourcePath);
+      if (!existsSync(sourceDir)) continue;
+
+      const norm = dir.toLowerCase();
+      let known = dirKnownPaths.get(norm);
+      if (!known) {
+        known = new Set<string>();
+        dirKnownPaths.set(norm, known);
+      }
+
+      const paths = buildKnownPaths(sourceDir, dir, def.fileFilter);
+      for (const p of paths) known.add(p);
+    }
+  }
+
+  // --- Files: clean all component target directories ---
+  const seen = new Set<string>();
+  for (const def of COMPONENT_DEFS) {
+    // Skip build components in fallback — can't determine exact output files
+    if (def.build) continue;
+
+    const dir = def.target(scope, projectPath);
+    const norm = dir.toLowerCase();
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+
+    // When pkgRoot is available, pass the white-list so only known files
+    // are deleted. When not available (legacy callers), cleanDirectory
+    // falls back to its original behaviour.
+    const knownFiles = dirKnownPaths.get(norm);
+    result.filesRemoved += cleanDirectory(dir, knownFiles);
+  }
+
+  // --- Overlays ---
+  const targetBase = scope === 'global' ? homedir() : projectPath;
+  try { deleteOverlayManifest(scope, targetBase); } catch { /* skip */ }
+
+  // --- Hooks: broad sweep (no whitelist — strip everything with "maestro") ---
+  const settingsPath = scope === 'global'
+    ? getClaudeSettingsPath()
+    : join(projectPath, '.claude', 'settings.json');
+  if (existsSync(settingsPath)) {
+    if (removeClaudeStatusline(settingsPath)) result.statuslineRemoved = true;
+    try {
+      const settings = loadClaudeSettings(settingsPath);
+      const before = JSON.stringify(settings.hooks ?? {});
+      removeMaestroHooks(settings);
+      const after = JSON.stringify(settings.hooks ?? {});
+      if (before !== after) result.claudeHooksRemoved = 1;
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    } catch { /* skip */ }
+  }
+
+  // --- MCP ---
+  if (removeMcpServer(scope, projectPath)) result.mcpRemoved.claude = true;
+  if (removeCodexMcpServer(scope, projectPath)) result.mcpRemoved.codex = true;
+
+  // --- Extra MCP (scan all known targets) ---
+  for (const spec of EXTRA_MCP_TARGETS) {
+    if (removeExtraMcpServer(spec.id, scope, projectPath)) {
+      result.mcpRemoved.extras.push(spec.id);
+    }
+  }
+
+  // --- Codex skill dedupe config ---
+  removeCodexSkillDedupeConfig(scope, projectPath);
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Codex skill deduplication — disable .agents/ skills in codex config
+// ---------------------------------------------------------------------------
+
+const DEDUPE_START = '# maestro:dedupe-agents-start';
+const DEDUPE_END = '# maestro:dedupe-agents-end';
+
+/**
+ * Strip ALL managed dedupe blocks, orphaned markers, and orphaned
+ * .agents/skills entries from codex config content.  Handles corruption left
+ * by older versions where indexOf(END) found an orphan before START.
+ */
+function stripDedupeBlocks(content: string): string {
+  let cleaned = content;
+
+  // 1. Remove properly-formed START...END blocks (search END only AFTER START)
+  for (;;) {
+    const si = cleaned.indexOf(DEDUPE_START);
+    if (si === -1) break;
+    const ei = cleaned.indexOf(DEDUPE_END, si);
+    if (ei === -1) {
+      cleaned = cleaned.slice(0, si) + cleaned.slice(si + DEDUPE_START.length);
+      break;
+    }
+    cleaned = cleaned.slice(0, si) + cleaned.slice(ei + DEDUPE_END.length);
+  }
+
+  // 2. Remove orphaned markers (from prior corruption)
+  cleaned = cleaned.split(DEDUPE_START).join('').split(DEDUPE_END).join('');
+
+  // 3. Remove orphaned [[skills.config]] entries for .agents/skills paths
+  cleaned = cleaned.replace(
+    /\[\[skills\.config\]\]\r?\npath = "[^"]*\.agents[/\\]skills[/\\][^"]*"\r?\nenabled = false\r?\n?/g,
+    '',
+  );
+
+  return cleaned.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Write `[[skills.config]]` entries to `~/.codex/config.toml` to disable
+ * .agents/ skills that duplicate the native codex skills.
+ * Returns the number of entries written.
+ */
+export function writeCodexSkillDedupeConfig(
+  scope: 'global' | 'project',
+  projectPath: string,
+): number {
+  const agentsSkillsDir = scope === 'global'
+    ? join(homedir(), '.agents', 'skills')
+    : join(projectPath, '.agents', 'skills');
+
+  if (!existsSync(agentsSkillsDir)) return 0;
+
+  const skillDirs = readdirSync(agentsSkillsDir, { withFileTypes: true })
+    .filter(e => e.isDirectory())
+    .map(e => e.name);
+
+  if (skillDirs.length === 0) return 0;
+
+  const fp = getCodexConfigPath(scope, projectPath);
+  let content = '';
+  if (existsSync(fp)) {
+    content = readFileSync(fp, 'utf-8');
+  }
+
+  content = stripDedupeBlocks(content);
+
+  const entries = skillDirs.map(name => {
+    const skillPath = join(agentsSkillsDir, name, 'SKILL.md').replace(/\\/g, '/');
+    return `[[skills.config]]\npath = "${skillPath}"\nenabled = false`;
+  });
+
+  const block = [
+    '',
+    DEDUPE_START,
+    ...entries,
+    DEDUPE_END,
+  ].join('\n');
+
+  content = content ? content + '\n' + block + '\n' : block.trimStart() + '\n';
+
+  const dir = join(fp, '..');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(fp, content, 'utf-8');
+
+  return skillDirs.length;
+}
+
+/**
+ * Remove the managed dedupe block from codex config.
+ */
+export function removeCodexSkillDedupeConfig(
+  scope: 'global' | 'project',
+  projectPath: string,
+): boolean {
+  const fp = getCodexConfigPath(scope, projectPath);
+  if (!existsSync(fp)) return false;
+
+  const content = readFileSync(fp, 'utf-8');
+  if (!content.includes(DEDUPE_START) && !content.includes(DEDUPE_END)
+    && !/\.agents[/\\]skills[/\\]/.test(content)) return false;
+
+  const cleaned = stripDedupeBlocks(content);
+  writeFileSync(fp, cleaned + '\n', 'utf-8');
+  return true;
 }

@@ -1,6 +1,8 @@
-# Coordinator Role
 
-Orchestrate team-quality-assurance: analyze -> dispatch -> spawn -> monitor -> report.
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
+# Coordinator Role
 
 ## Identity
 - Name: coordinator | Tag: [coordinator]
@@ -40,14 +42,14 @@ When coordinator needs to execute a specific phase:
 | Manual resume | Args contain "resume" or "continue" | -> handleResume (monitor.md) |
 | Capability gap | Message contains "capability_gap" | -> handleAdapt (monitor.md) |
 | Pipeline complete | All tasks completed | -> handleComplete (monitor.md) |
-| Interrupted session | Active session in .workflow/.team/QA-* | -> Phase 0 |
+| Interrupted session | Active session in {run_dir}/work/team/ | -> Phase 0 |
 | New session | None of above | -> Phase 1 |
 
 For callback/check/resume/adapt/complete: load @commands/monitor.md, execute handler, STOP.
 
 ## Phase 0: Session Resume Check
 
-1. Scan .workflow/.team/QA-*/session.json for active/paused sessions
+1. Scan {run_dir}/work/team/team-session.json for active/paused sessions
 2. No sessions -> Phase 1
 3. Single session -> reconcile (audit TaskList, reset in_progress->pending, rebuild team, kick first ready task)
 4. Multiple -> AskUserQuestion for selection
@@ -82,12 +84,12 @@ TEXT-LEVEL ONLY. No source code reading.
 3. Create session folder structure
 4. TeamCreate with team name "quality-assurance"
 5. Read specs/pipelines.md -> select pipeline based on mode
-6. Register roles in session.json
+6. Register roles in team-session.json
 7. Initialize shared infrastructure (wisdom/*.md)
 8. Initialize pipeline via team_msg state_update:
    ```
    mcp__maestro__team_msg({
-     operation: "log", session_id: "<id>", from: "coordinator",
+     operation: "log", session_id: "<run-id>", from: "coordinator",
      type: "state_update", summary: "Session initialized",
      data: {
        pipeline_mode: "<discovery|testing|full>",
@@ -103,7 +105,19 @@ TEXT-LEVEL ONLY. No source code reading.
      }
    })
    ```
-9. Write session.json
+9. Write team-session.json
+
+### Run Lifecycle Integration
+
+After session folder creation and before role-spec generation:
+
+1. **Resolve Run** (birth-packet first): if the dispatch context already carries `run_id` / `run_dir` (injected by an orchestrator), store them in `team-session.json` and skip create — a second create mints an empty duplicate Run. Otherwise: `maestro run create team-quality-assurance --session <slug> --intent "<task summary>"`
+   - Slug format: `YYYYMMDD-team-quality-assurance-<topic>` (ASCII, ≤64 chars)
+   - Store returned `run_id` and `run_dir` in `team-session.json`:
+     ```json
+     "run": { "run_id": "<id>", "run_dir": "<path>" }
+     ```
+2. **Resume**: Read `team-session.json.run.run_id` → `maestro run check <run_id>` (idempotent). If status=sealed, create a new run and update the field. If `run.run_id` is missing, resolve in order: birth-packet injection, then `<session>/artifacts/`; if all are absent, fail closed — report session corruption and do NOT create a new Run.
 
 ## Phase 3: Create Task Chain
 
@@ -112,7 +126,7 @@ Delegate to @commands/dispatch.md:
 2. Read specs/pipelines.md for selected pipeline's task registry
 3. Topological sort tasks
 4. Create tasks via TaskCreate, then TaskUpdate with addBlockedBy
-5. Update session.json
+5. Update team-session.json
 
 ## Phase 4: Spawn-and-Stop
 

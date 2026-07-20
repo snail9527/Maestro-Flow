@@ -5,12 +5,13 @@
  * All hooks, tools, and workflows should import from here.
  */
 
-import { readFileSync, writeFileSync, renameSync, unlinkSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * Cross-platform atomic rename with retry for Windows EPERM/EBUSY.
- * Attempts unlinkSync on target before retry to handle Windows semantics.
+ * Cross-platform atomic rename with bounded retry for Windows transient errors.
+ * The committed destination is never unlinked before a successful promotion;
+ * callers that need crash recovery must retain a durable transaction intent.
  */
 export function safeRename(src: string, dest: string): void {
   for (let i = 0; i < 3; i++) {
@@ -18,10 +19,7 @@ export function safeRename(src: string, dest: string): void {
       renameSync(src, dest);
       return;
     } catch (e: any) {
-      if (i < 2 && ['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) {
-        try { unlinkSync(dest); } catch {}
-        continue;
-      }
+      if (i < 2 && ['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) continue;
       throw e;
     }
   }
@@ -107,6 +105,15 @@ export interface MilestoneHistoryEntry {
   archived_artifacts?: ArtifactEntry[];
 }
 
+export interface ProjectSessionEntry {
+  session_id: string;
+  intent: string;
+  status: 'planned' | 'running' | 'paused' | 'sealed' | 'archived' | 'failed';
+  depends_on: string[];
+  roadmap_artifact_id: string | null;
+  seed_ref: string | null;
+}
+
 export interface StateJsonV2 {
   version: '2.0';
   project_name: string | null;
@@ -123,6 +130,10 @@ export interface StateJsonV2 {
   transition_history: TransitionEntry[];
   milestone_history: MilestoneHistoryEntry[];
   last_updated: string;
+  /** Active canonical Session pointer. */
+  active_session_id?: string | null;
+  /** Canonical Session DAG projection. */
+  sessions?: ProjectSessionEntry[];
 }
 
 export interface PhasesSummary {
@@ -472,4 +483,26 @@ export function migrateStateFile(workflowRoot: string): StateJsonV2 | null {
   const v2 = migrateV1toV2(raw, join(workflowRoot, '.workflow'));
   writeStateJson(workflowRoot, v2);
   return v2;
+}
+
+// ---------------------------------------------------------------------------
+// Canonical Session projection
+// ---------------------------------------------------------------------------
+
+/** Ensure state.json carries the canonical Session DAG projection. */
+export function ensureSessionProjection(
+  state: StateJsonV2,
+  session: ProjectSessionEntry,
+  makeActive = true,
+): StateJsonV2 {
+  const sessions = [...(state.sessions ?? [])];
+  const index = sessions.findIndex(entry => entry.session_id === session.session_id);
+  if (index >= 0) sessions[index] = session;
+  else sessions.push(session);
+  return {
+    ...state,
+    sessions,
+    active_session_id: makeActive ? session.session_id : (state.active_session_id ?? null),
+    last_updated: localISO(),
+  };
 }

@@ -1,7 +1,8 @@
 ---
 name: maestro-init
+disable-model-invocation: true
 description: Initialize project with auto state detection
-argument-hint: "[-y] [--from <source>]"
+argument-hint: "[-y] [--from <source>] [--from-brainstorm SESSION-ID]"
 allowed-tools:
   - Read
   - Write
@@ -10,15 +11,12 @@ allowed-tools:
   - Grep
   - Agent
   - AskUserQuestion
+session-mode: bootstrap
 ---
 <purpose>
 Initialize project: detect state, create `.workflow/` with project.md, state.json, config.json.
-Entry point; downstream: maestro-roadmap or maestro-brainstorm.
+Entry point; downstream: step `roadmap` or step `brainstorm`.
 </purpose>
-
-<required_reading>
-@~/.maestro/workflows/init.md
-</required_reading>
 
 <deferred_reading>
 - [project.md](~/.maestro/templates/project.md) — read when generating project description
@@ -38,7 +36,17 @@ $ARGUMENTS — none for interactive mode, or `-y` with `@file` reference for aut
 
 **Load project state if exists:**
 Check for `.workflow/state.json` -- loads context if project already initialized.
+
+**Output boundary**: ALL file writes MUST target `.workflow/` (project.md, state.json, config.json, specs/) only. NEVER modify source code or files outside `.workflow/`.
 </context>
+
+<invariants>
+1. **Idempotent init** — re-running init on an already-initialized project MUST detect existing `.workflow/` and warn (E002); NEVER silently overwrite existing state
+2. **Scope guard** — init MUST only make initialization decisions; NEVER prejudge roadmap structure, plan scope, or implementation details
+3. **All artifacts required** — init MUST NOT report completion until project.md, state.json, and config.json all exist; missing artifacts MUST be created before exit
+4. **Template-driven** — deferred templates (project.md, state.json, config.json) MUST be read from `~/.maestro/templates/` and customized; NEVER generate from scratch without template
+5. **Interview writes back** — all interactive decisions MUST be written to project.md/config.json before proceeding to research or completion; NEVER leave decisions unrecorded
+</invariants>
 
 <interview_protocol>
 Follows @~/.maestro/workflows/interview-mechanics.md standard.
@@ -52,6 +60,24 @@ Follows @~/.maestro/workflows/interview-mechanics.md standard.
 </interview_protocol>
 
 <execution>
+
+### Phase Gates (MANDATORY, BLOCKING)
+
+**GATE 1: Pre-flight → Interview**
+- REQUIRED: `.workflow/` existence check completed.
+- REQUIRED: `--from` source validated (if provided).
+- BLOCKED if: E002 (greenfield conflict with existing `.workflow/`) unresolved.
+
+**GATE 2: Interview → Research**
+- REQUIRED: All interview decisions recorded in project.md and config.json.
+- REQUIRED: `.workflow/` directory created with initial structure.
+- BLOCKED if: interview decisions not yet written to files.
+
+**GATE 3: Research → Completion**
+- REQUIRED: All 3 required artifacts exist (project.md, state.json, config.json).
+- REQUIRED: `.workflow/specs/` initialized.
+- BLOCKED if: any artifact missing — write it before reporting completion.
+
 ### Pre-flight
 
 1. Check if `.workflow/` already exists — if so, load state and warn (E002 for greenfield conflicts)
@@ -90,24 +116,25 @@ Created:
 
 End the step by calling the CLI (no text block output):
 ```
-maestro ralph complete <idx> --status {STATUS} [--evidence {path}]
+maestro run complete --session {session_id} --verdict {VERDICT} [--evidence {path}]
 ```
+(run-id 可省略 — 自动解析当前 running 步)
 
-Status verdicts:
-- **DONE** — Normal completion
-- **DONE_WITH_CONCERNS** — Completed with caveats; pass `--concerns`
-- **NEEDS_RETRY** — Tooling error / transient issue; ralph will retry
-- **BLOCKED** — External hard blocker; pass `--reason`
+Verdicts:
+- **done** — Normal completion
+- **done-with-concerns** — Completed with concerns; pass `--note`
+- **needs-retry** — Tooling error / transient issue; orchestrator will retry
+- **blocked** — External hard blocker; pass `--reason`
 
 ### Next-step routing
 
 | Condition | Suggestion |
 |-----------|-----------|
-| Roadmap needed (default light) | `/maestro-roadmap <requirement>` |
-| Full spec package + roadmap | `/maestro-roadmap --mode full <idea>` |
-| Explore ideas first | `/maestro-brainstorm <topic>` |
-| View project dashboard | `/manage-status` |
-| Quick ad-hoc task | `/maestro-quick <task>` |
+| Roadmap needed (default light) | step `roadmap` (`maestro run prepare roadmap` + `maestro run create roadmap --session YYYYMMDD-roadmap-{topic} --intent "{goal}"`) |
+| Full spec package | step `blueprint` (`maestro run prepare blueprint` + `maestro run create blueprint --session YYYYMMDD-blueprint-{topic} --intent "{goal}"`) |
+| Explore ideas first | step `brainstorm` (`maestro run prepare brainstorm` + `maestro run create brainstorm --session YYYYMMDD-brainstorm-{topic} --intent "{goal}"`) |
+| View project dashboard | `/maestro-manage status` |
+| Quick ad-hoc task | `/maestro-companion "{goal}"` |
 </completion>
 
 <error_codes>

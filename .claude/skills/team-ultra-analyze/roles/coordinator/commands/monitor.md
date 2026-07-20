@@ -1,7 +1,5 @@
 # Command: Monitor
 
-Handle all coordinator monitoring events: worker callbacks, status checks, pipeline advancement, discussion loop control, and completion.
-
 ## Constants
 
 | Key | Value |
@@ -17,13 +15,13 @@ Handle all coordinator monitoring events: worker callbacks, status checks, pipel
 
 | Input | Source | Required |
 |-------|--------|----------|
-| Session state | `<session>/session.json` | Yes |
+| Session state | `{run_dir}/work/team/team-session.json` | Yes |
 | Task list | `TaskList()` | Yes |
 | Trigger event | From Entry Router detection | Yes |
-| Pipeline mode | From session.json `pipeline_mode` | Yes |
-| Discussion round | From session.json `discussion_round` | Yes |
+| Pipeline mode | From team-session.json `pipeline_mode` | Yes |
+| Discussion round | From team-session.json `discussion_round` | Yes |
 
-1. Load session.json for current state, `pipeline_mode`, `discussion_round`
+1. Load team-session.json for current state, `pipeline_mode`, `discussion_round`
 2. Run `TaskList()` to get current task statuses
 3. Identify trigger event type from Entry Router
 4. Compute max discussion rounds from pipeline mode:
@@ -86,7 +84,7 @@ discussion_round = session.discussion_round || 0
 discussion_round++
 
 // Update session state
-Update session.json: discussion_round = discussion_round
+Update team-session.json: discussion_round = discussion_round
 
 // Check if discussion loop applies
 IF pipeline_mode === 'quick':
@@ -136,12 +134,12 @@ TASK:
   - Execute <type> discussion strategy
   - Update discussion timeline
 CONTEXT:
-  - Session: <session-folder>
+  - Session: {run_dir}/work/team
   - Topic: <topic>
   - Round: <N>
   - Type: <deepen|direction-adjusted|specific-questions>
-  - Shared memory: <session>/wisdom/.msg/meta.json
-EXPECTED: <session>/discussions/discussion-round-<NNN>.json
+  - Shared memory: {run_dir}/work/team/wisdom/.msg/meta.json
+EXPECTED: {run_dir}/evidence/discussions/discussion-round-<NNN>.json
 ---
 InnerLoop: false"
 })
@@ -158,12 +156,12 @@ TASK:
   - Build on previous exploration findings
   - Generate updated discussion points
 CONTEXT:
-  - Session: <session-folder>
+  - Session: {run_dir}/work/team
   - Topic: <topic>
   - Type: direction-fix
   - Adjusted focus: <adjusted_focus>
-  - Shared memory: <session>/wisdom/.msg/meta.json
-EXPECTED: <session>/analyses/analysis-fix-<N>.json
+  - Shared memory: {run_dir}/work/team/wisdom/.msg/meta.json
+EXPECTED: {run_dir}/outputs/analyses/analysis-fix-<N>.json
 ---
 InnerLoop: false"
 })
@@ -183,11 +181,11 @@ TASK:
   - Extract themes, consolidate evidence, prioritize recommendations
   - Write conclusions and update discussion.md
 CONTEXT:
-  - Session: <session-folder>
+  - Session: {run_dir}/work/team
   - Topic: <topic>
-  - Upstream artifacts: explorations/*.json, analyses/*.json, discussions/*.json
-  - Shared memory: <session>/wisdom/.msg/meta.json
-EXPECTED: <session>/conclusions.json + discussion.md update
+  - Upstream artifacts: explorations/*.json, {run_dir}/outputs/analyses/*.json, discussions/*.json
+  - Shared memory: {run_dir}/work/team/wisdom/.msg/meta.json
+EXPECTED: {run_dir}/outputs/conclusions.json + {run_dir}/evidence/discussion.md update
 CONSTRAINTS: Pure integration, no new exploration
 ---
 InnerLoop: false"
@@ -243,8 +241,8 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: ultra-analyze
 requirement: <task-description>
 agent_name: <agent-name>
@@ -255,7 +253,7 @@ inner_loop: false
 - Task: <task-subject>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -318,7 +316,7 @@ Pipeline Status (<mode> mode):
 
 Discussion Rounds: 0/<max>
 Pipeline Mode: <mode>
-Session: <session-id>
+Session: <run-id>
 ```
 
 Output status -- do NOT advance pipeline.
@@ -345,13 +343,18 @@ Triggered when all pipeline tasks are completed.
 | deep | All EXPLORE + ANALYZE + all DISCUSS-N + SYNTH-001 completed |
 
 1. Verify all tasks completed. If any not completed, return to handleSpawnNext
-2. If all completed, **inline-execute coordinator Phase 5** (shutdown workers → report → completion action). Do NOT STOP here — continue directly into Phase 5 within the same turn.
+2. Run lifecycle completion (before Phase 5):
+   - Read run_id from `team-session.json.run.run_id`
+   - Write `{run_dir}/report.md` with frontmatter (verdict/summary/concerns)
+   - Run `maestro run complete <run_id>`
+   - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
+3. If all completed, **inline-execute coordinator Phase 5** (shutdown workers → report → completion action). Do NOT STOP here — continue directly into Phase 5 within the same turn.
 
 ## Phase 4: State Persistence
 
 After every handler execution **except handleComplete**:
 
-1. Update session.json with current state:
+1. Update team-session.json with current state:
    - `discussion_round`: current round count
    - `last_event`: event type and timestamp
    - `active_tasks`: list of in-progress task IDs

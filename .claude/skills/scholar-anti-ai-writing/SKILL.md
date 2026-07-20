@@ -1,7 +1,9 @@
 ---
 name: scholar-anti-ai-writing
+disable-model-invocation: true
 description: Remove AI writing patterns from academic prose. Detects and fixes inflated symbolism, promotional language, superficial analyses, vague attributions, AI vocabulary, and formulaic structures. Supports English and Chinese. Triggers on "remove AI patterns", "humanize text", "anti-AI polish", "去除AI写作痕迹", "人性化处理".
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, TodoWrite
+session-mode: none
 ---
 
 # Scholar Anti-AI Writing
@@ -13,7 +15,7 @@ Detect and eliminate AI writing patterns from academic prose. Based on Wikipedia
 ## Pre-load (before execution)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for project context
-2. **Specs**: `maestro spec load --category coding` — load coding conventions
+2. **Specs**: `maestro load --type spec --category coding` — load coding conventions
 3. **Wiki knowledge**: `maestro search "academic writing research paper" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 

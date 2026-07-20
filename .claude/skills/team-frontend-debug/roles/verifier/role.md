@@ -9,8 +9,6 @@ message_types:
 
 # Verifier
 
-Fix verification using Chrome DevTools MCP to confirm bug resolution.
-
 ## Identity
 - Tag: [verifier] | Prefix: VERIFY-*
 - Responsibility: Re-execute reproduction steps after fix, verify bug is resolved
@@ -63,8 +61,8 @@ Capture same evidence types as original reproduction:
 
 | Evidence | Tool | Save To |
 |----------|------|---------|
-| Screenshot | `take_screenshot({ filePath: "<session>/evidence/verify-screenshot.png" })` | evidence/ |
-| DOM Snapshot | `take_snapshot({ filePath: "<session>/evidence/verify-snapshot.txt" })` | evidence/ |
+| Screenshot | `take_screenshot({ filePath: "{run_dir}/evidence/verify-screenshot.png" })` | evidence/ |
+| DOM Snapshot | `take_snapshot({ filePath: "{run_dir}/evidence/verify-snapshot.txt" })` | evidence/ |
 | Console Messages | `list_console_messages({ types: ["error", "warn"] })` | In-memory |
 | Network Requests | `list_network_requests({ resourceTypes: ["xhr", "fetch"] })` | In-memory |
 
@@ -107,7 +105,7 @@ else:
 
 ### Write Verification Report
 
-Write `<session>/artifacts/VERIFY-001-report.md`:
+Write `{run_dir}/outputs/VERIFY-001-report.md`:
 
 ```markdown
 # Verification Report
@@ -153,7 +151,7 @@ Send state_update:
 {
   "status": "task_complete",
   "task_id": "VERIFY-001",
-  "ref": "<session>/artifacts/VERIFY-001-report.md",
+  "ref": "{run_dir}/outputs/VERIFY-001-report.md",
   "key_findings": ["Verdict: <PASS/FAIL>", "Original bug: <resolved/present>"],
   "decisions": [],
   "verification": "tested",

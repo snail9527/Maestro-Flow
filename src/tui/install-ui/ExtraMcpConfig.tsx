@@ -85,7 +85,7 @@ export function ExtraMcpConfig({
       <Text bold color={C.primary}>
         Extra MCP Targets (opt-in)
       </Text>
-      <Text dimColor>
+      <Text color={C.neutral}>
         Register maestro-tools MCP server in additional CLI/IDE configs. Default: none selected.
       </Text>
 
@@ -94,17 +94,18 @@ export function ExtraMcpConfig({
           const selected = selectedIds.includes(target.id);
           const highlighted = i === safeIndex;
           const path = target.configPath(mode, '<project>') ?? '(unsupported in global scope)';
-          const checkbox = selected ? SYM.checkOn : SYM.checkOff;
-          const labelLine = `[${i + 1}] ${checkbox} ${target.label}`;
           return (
             <Box key={target.id} flexDirection="column">
-              <Text
-                color={highlighted ? C.successBright : selected ? C.success : undefined}
-                bold={highlighted}
-              >
-                {labelLine}
-              </Text>
-              <Text dimColor>      → {path}</Text>
+              <Box>
+                <Text color={highlighted ? C.primary : C.neutral}>[{i + 1}]</Text>
+                <Text color={selected ? (highlighted ? C.successBright : C.success) : C.neutral}>
+                  {' '}{selected ? SYM.checkOn : SYM.checkOff}{' '}
+                </Text>
+                <Text color={highlighted ? C.primary : undefined} bold={highlighted}>
+                  {target.label}
+                </Text>
+              </Box>
+              <Text color={C.neutral}>      → {path}</Text>
             </Box>
           );
         })}

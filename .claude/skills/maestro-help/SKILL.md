@@ -1,7 +1,9 @@
 ---
 name: maestro-help
+disable-model-invocation: true
 description: Maestro Flow 命令帮助系统。搜索命令、浏览技能、工作流推荐、新手引导。Triggers on "maestro-help", "帮助", "命令", "怎么用", "skill", "workflow", "maestro 怎么用".
 allowed-tools: Read, Grep, Glob, AskUserQuestion
+session-mode: none
 ---
 
 # Maestro Help
@@ -47,13 +49,13 @@ Single source of truth: **[index/catalog.json](index/catalog.json)**
 
 | Field | Purpose |
 |-------|---------|
-| `commands[]` | 56 个 slash 命令，含分类和描述 |
-| `skills[]` | 10 个 Skill，含分类和描述 |
-| `agents[]` | 22 个 Agent，含分类和描述 |
+| `commands[]` | 64 个 slash 命令，含分类和描述 |
+| `skills[]` | 44 个 Skill，含分类和描述 |
+| `agents[]` | 24 个 Agent，含分类和描述 |
 | `cli_commands[]` | 21 个终端命令 |
-| `guide_files[]` | 17 个 Guide 文档索引 |
+| `guide_files[]` | 17 个 Guide 文档索引（planned，尚未创建） |
 | `essential_commands[]` | 10 个核心命令（新手用） |
-| `workflows` | 主干管线、快速渠道、Issue 闭环、初始化路径 |
+| `workflows` | 主干管线、Companion 轻量入口、Issue 闭环、初始化路径 |
 
 ## Operation Modes
 
@@ -93,7 +95,7 @@ Single source of truth: **[index/catalog.json](index/catalog.json)**
 **Process**:
 1. Read `Ref: phases/03-workflow-guide.md`
 2. 分析用户任务类型和复杂度
-3. 推荐匹配的工作流（主干管线/快速渠道/Issue 闭环）
+3. 推荐匹配的工作流（主干管线/Companion 轻量入口/Issue 闭环）
 4. 给出具体命令序列
 
 ### Mode 5: Beginner Onboarding
@@ -177,46 +179,67 @@ $ARGUMENTS → Parse:
 
 ### 上游起源 + 核心 (core)
 
+> 裸名称为 first-tier step：经 `/maestro "<意图>"` 自动路由，或 `maestro run prepare <step>` + `maestro run create <step> ...` 直接执行；`/` 前缀为独立命令。
+
 | 命令 | 用途 |
 |------|------|
 | `/maestro` | 智能协调器，自动路由 |
 | `/maestro-init` | 项目初始化 |
-| `/maestro-brainstorm` | 头脑风暴 — 发散探索，多角色创意 |
-| `/maestro-blueprint` | 正式规格文档化 — 7-phase 收敛规格链 |
-| `/maestro-roadmap` | 路线图编排 — 消费上游 context，纯 Milestone > Phase 分解 |
-| `/maestro-quick` | 快速任务 |
-| `/maestro-overlay` | Overlay 管理 |
-| `/maestro-amend` | 修正补丁 |
+| `brainstorm` | 头脑风暴 — 发散探索，多角色创意 |
+| `blueprint` | 正式规格文档化 — 7-phase 收敛规格链 |
+| `roadmap` | 路线图编排 — 消费上游 context，纯 Milestone > Phase 分解 |
+| `/maestro-companion` | 轻量任务直接执行 |
+| `/maestro-overlay` | Overlay 管理 — 自然语言创建，或 `--amend` 从信号自动生成修正补丁 |
+| `grill` | 压力测试 — 对计划或需求进行代码库现实性压力测试 |
+| `/maestro-next` | 智能导航 — 检测状态并推荐下一步最优命令 |
+| `/maestro-ralph --engine swarm` | Swarm 并行加速器 — 多 agent 并发执行 |
+| `/maestro-ralph --engine universal` | 动态对抗工作流生成器 |
 
 ### 理解层 + 执行管线 (pipeline)
 
 | 命令 | 用途 |
 |------|------|
-| `/maestro-analyze` | 双层分析 — 宏观(文本参数)探索影响面 / 微观(数字参数)Phase 级深入 |
-| `/maestro-plan` | 任务规划 — 支持 `--from analyze:ANL-xxx` 直达 |
-| `/maestro-execute` | 任务执行 |
+| `analyze` | 双层分析 — 宏观(文本参数)探索影响面 / 微观(数字参数)Phase 级深入 |
+| `plan` | 任务规划 — 支持 `--from analyze:ANL-xxx` 直达 |
+| `execute` | 任务执行 |
 
 ### 质量管线 (quality)
 
 | 命令 | 用途 |
 |------|------|
-| `/quality-review` | 代码审查 |
-| `/quality-auto-test` | 自动测试 |
-| `/quality-test` | 业务测试 |
-| `/quality-debug` | 质量调试 |
+| `review` | 代码审查 |
+| `auto-test` | 自动测试 |
+| `test` | 业务测试 |
+| `debug` | 质量调试 |
 | `/quality-refactor` | 重构 |
-| `/quality-retrospective` | 复盘 |
+| `retrospective` | 复盘 |
 
 ### 管理命令 (manage)
 
 | 命令 | 用途 |
 |------|------|
-| `/manage-issue` | Issue 管理 |
-| `/manage-issue-discover` | Issue 发现 |
-| `/manage-knowhow` | 知识管理 |
-| `/manage-status` | 状态查看 |
-| `/manage-wiki` | Wiki 管理 |
-| `/manage-harvest` | 收获 |
+| `/maestro-manage issue` | Issue 管理 |
+| `/maestro-manage issue discover` | Issue 发现 |
+| `/maestro-manage knowledge knowhow` | 知识管理 |
+| `/maestro-manage knowledge capture` | 知识捕获 |
+| `/maestro-manage status` | 状态查看 |
+| `/maestro-manage knowledge wiki` | Wiki 管理 |
+| `/maestro-manage knowledge harvest` | 收获 |
+| `/maestro-manage sync rebuild` | 代码库重建 |
+| `/maestro-manage knowledge extractors` | 知识图谱提取器管理 |
+| `/maestro-manage knowledge audit` | 知识审计 |
+
+### Odyssey 长周期循环 (odyssey)
+
+单入口 `/maestro-odyssey <intent> --mode <name>`（`--mode` 可省略，从 intent 关键词自动识别）：
+
+| 模式 | 用途 |
+|------|------|
+| `--mode debug` | 长周期调试 — 考古、诊断、修复、泛化 |
+| `--mode improve` | 长周期代码改进 — 多维审计、深度诊断、定向修复 |
+| `--mode review` | 深度审查修复循环 |
+| `--mode planex` | 需求驱动迭代 — 计划/执行/验证/修复循环 |
+| `--mode ui` | 长周期 UI 优化 — 视觉调研、多维审计、修复 |
 
 ## Workflow Mapping
 
@@ -235,7 +258,7 @@ Roadmap > Milestone > Phase > Task
 
 ```
 上游起源层（并列，可选）
-  brainstorm（发散/轻量）  |  blueprint（收敛/重型）
+  brainstorm（发散/轻量）  |  blueprint（收敛/重型）  |  grill（压力测试）
 
 理解层
   analyze 双层: 宏观(文本参数) → scope_verdict | 微观(数字参数) → Phase 级决策
@@ -245,6 +268,13 @@ Roadmap > Milestone > Phase > Task
 
 执行层
   plan → execute
+
+Odyssey 长周期循环（独立路径）
+  maestro-odyssey --mode debug|improve|review|planex|ui
+
+自适应引擎（高级）
+  ralph → 自运行决策循环
+  swarm-workflow / universal-workflow → 多 agent 并行执行
 ```
 
 ### 合法路径
@@ -257,11 +287,16 @@ Roadmap > Milestone > Phase > Task
 | Path D | 小改动 | `plan "fix auth bug"` → `execute` |
 | Path E | 纯规格文档 | `blueprint "project idea"` → (供人阅读) |
 | Path F | 纯探索 | `brainstorm "idea"` → (供人决策) |
-| 快速修复 | 已知简单问题 | `/maestro-quick "修复描述"` |
-| Bug 追踪 | Issue 闭环 | `/manage-issue-discover` → `/manage-issue create` → analyze/plan/execute → close |
+| 轻量修复 | 已知简单问题 | `/maestro-companion "修复描述"` |
+| Bug 追踪 | Issue 闭环 | `/maestro-manage issue discover` → `/maestro-manage issue create` → analyze/plan/execute → close |
 | 全自动 | /maestro 入口 | `/maestro -y "任务描述"` |
-| 代码审查 | 质量管线 | `/quality-review` → `/quality-auto-test` → `/quality-test` |
-| 团队开发 | Team Lite | `/maestro-collab` |
+| 代码审查 | 质量管线 | `review` → `auto-test` → `test` |
+| 多 CLI 交叉验证 | Collab step | `collab "需求描述"` |
+| 长周期调试 | Odyssey 深度循环 | `/maestro-odyssey "问题描述" --mode debug` |
+| 长周期改进 | Odyssey 深度循环 | `/maestro-odyssey "改进目标" --mode improve` |
+| 需求迭代 | Odyssey 深度循环 | `/maestro-odyssey "需求描述" --mode planex` |
+
+> 注：Path A/B 中 `analyze 1` / `plan 1` 的数字 `1` 指 **milestone 编号**（第 1 个里程碑），下游以 milestone 为入口。
 
 ## Core Rules
 
@@ -289,9 +324,9 @@ Roadmap > Milestone > Phase > Task
 
 ## Statistics
 
-- **Slash 命令**: 56 个（7 个分类）
+- **Slash 命令**: 64 个（13 个分类：core/pipeline/milestone/manage/quality/spec/learn/worktree/team/ralph/ui/tools/odyssey）
 - **CLI 命令**: 21 个
-- **Skills**: 11 个（4 个分类）
-- **Agents**: 22 个（5 个分类）
-- **Guide 文档**: 17 个
-- **工作流路径**: 6 个合法路径 (Path A-F) + 3 个辅助流程
+- **Skills**: 44 个（5 个分类：meta/team/knowledge/quality/scholar）
+- **Agents**: 24 个（4 个分类：workflow/team/cli/ui）
+- **Guide 文档**: 17 个（planned，尚未创建）
+- **工作流路径**: 7 个合法路径 (Path A-G) + 4 个辅助流程

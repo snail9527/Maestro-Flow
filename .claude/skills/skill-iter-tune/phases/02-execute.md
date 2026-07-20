@@ -1,3 +1,7 @@
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Phase 2: Execute Skill
 
 > **COMPACT SENTINEL [Phase 2: Execute]**
@@ -260,7 +264,7 @@ if (artifactFiles.length === 0) {
     success: false
   };
   state.error_count++;
-  // Continue to Phase 3 anyway -- Gemini can evaluate the skill even without artifacts
+  // Continue to Phase 3 anyway -- Agy can evaluate the skill even without artifacts
 } else {
   state.iterations[N - 1].execution = {
     cli_command: cliCommand,

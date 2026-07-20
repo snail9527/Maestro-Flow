@@ -9,15 +9,13 @@ message_types:
 
 # Test Strategist
 
-Analyze change scope, determine test layers (L1-L3), define coverage targets, and generate test strategy document. Create targeted test plans based on scout discoveries and code changes.
-
 ## Phase 2: Context & Change Analysis
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| .msg/meta.json | <session>/wisdom/.msg/meta.json | Yes |
+| .msg/meta.json | {run_dir}/work/team/wisdom/.msg/meta.json | Yes |
 | Discovered issues | meta.json -> discovered_issues | No |
 | Defect patterns | meta.json -> defect_patterns | No |
 
@@ -66,6 +64,6 @@ Build strategy document with: scope analysis, layer configs (level, name, target
 
 ## Phase 4: Output & Persistence
 
-1. Write strategy to `<session>/strategy/test-strategy.md`
-2. Update `<session>/wisdom/.msg/meta.json`: merge `test_strategy` field with scope, layers, coverage_targets, test_framework
+1. Write strategy to `{run_dir}/outputs/strategy/test-strategy.md`
+2. Update `{run_dir}/work/team/wisdom/.msg/meta.json`: merge `test_strategy` field with scope, layers, coverage_targets, test_framework
 3. Contribute to wisdom/decisions.md with layer selection rationale

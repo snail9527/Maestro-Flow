@@ -90,14 +90,16 @@ export async function preloadCommands(): Promise<void> {
     'maestro-init',
     'maestro-plan',
     'maestro-execute',
-    'maestro-quick',
+    'maestro-companion',
     'maestro-brainstorm',
     'maestro-analyze',
     'maestro-collab',
-    'spec-setup',
+    'maestro-spec',
     'quality-test',
     'quality-debug',
-    'manage-status',
+    'maestro-manage',
+    'maestro-odyssey',
+    'maestro-learn',
   ];
 
   await loadCommands(commonCommands);

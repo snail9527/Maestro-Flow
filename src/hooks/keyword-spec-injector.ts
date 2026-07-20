@@ -6,12 +6,15 @@
  * Also injects domain term context (compact always + expanded on keyword match).
  */
 
+import { join } from 'node:path';
 import { buildKeywordIndex, lookupKeywords, type IndexedEntry } from '../tools/spec-keyword-index.js';
 import { readSpecBridge, markInjected, filterUnjected } from './spec-bridge.js';
 import { logInjectionEvent } from './spec-analytics.js';
-import { wrapMaestroContext, type ContextSection } from './context-format.js';
+import { truncateMaestroContext, wrapMaestroContext, type ContextSection } from './context-format.js';
 import { loadGlossary, type DomainTerm } from '../tools/domain-loader.js';
 import { matchDomainTerms, collectRewriteHints } from '../tools/domain-matcher.js';
+import { searchWiki, prewarmWikiIndexer, type WikiSearchHit } from './wiki-search-bridge.js';
+import { buildKgContextSections } from './kg-context-injector.js';
 
 // ============================================================================
 // Types
@@ -60,6 +63,7 @@ const CJK_STOP_WORDS = new Set([
 
 /** Max entries to inject per prompt to avoid context bloat */
 const MAX_ENTRIES_PER_INJECTION = 5;
+const MAX_PROMPT_CONTEXT_CHARS = 4096;
 
 // ============================================================================
 // Public API
@@ -79,6 +83,9 @@ export async function evaluateKeywordInjection(
 ): Promise<KeywordInjectionResult> {
   const sections: ContextSection[] = [];
 
+  const workflowRoot = join(projectPath, '.workflow');
+  prewarmWikiIndexer(workflowRoot);
+
   // ── Domain context (always evaluated) ──────────────────────────────
   const domainSections = buildDomainSections(prompt, projectPath);
   sections.push(...domainSections);
@@ -86,6 +93,7 @@ export async function evaluateKeywordInjection(
   // ── Spec keyword matching ──────────────────────────────────────────
   const promptKeywords = tokenizePrompt(prompt);
   let toInject: IndexedEntry[] = [];
+  let overflowEntries: IndexedEntry[] = [];
   let matchedKws: string[] = [];
 
   if (promptKeywords.length > 0) {
@@ -97,16 +105,39 @@ export async function evaluateKeywordInjection(
         if (unjected.length > 0) {
           toInject = unjected.slice(0, MAX_ENTRIES_PER_INJECTION);
           sections.push(buildKeywordSection(toInject));
+          
+          const overflow = unjected.slice(MAX_ENTRIES_PER_INJECTION, MAX_ENTRIES_PER_INJECTION + 15);
+          if (overflow.length > 0) {
+            sections.push(buildCompactKeywordSection(overflow));
+            overflowEntries = overflow;
+          }
+          
           matchedKws = promptKeywords.filter(kw => index.has(kw));
         }
       }
     }
   }
 
-  // ── KG symbol lookup (best-effort) ─────────────────────────────────
+  // ── Wiki BM25 search (best-effort) ──────────────────────────────
+  let wikiSource: 'daemon' | 'indexer' | 'keyword' | 'none' = 'none';
+  if (toInject.length > 0) wikiSource = 'keyword';
   try {
-    const symbolSection = await evaluateKgSymbolLookup(prompt, projectPath);
-    if (symbolSection) sections.push(symbolSection);
+    const { hits, source } = await searchWiki(workflowRoot, prompt, { limit: 3 });
+    if (source !== 'none') wikiSource = source;
+    if (hits.length > 0) {
+      const wikiEntries = hits.map(h => ({ id: h.id, keywords: [] as string[] }));
+      const unjected = filterUnjected(sessionId, wikiEntries);
+      const unjectedHits = hits.filter(h => unjected.some(u => u.id === h.id)).slice(0, 3);
+      if (unjectedHits.length > 0) {
+        sections.push(buildWikiSection(unjectedHits));
+        markInjected(sessionId, [], unjectedHits.map(h => h.id));
+      }
+    }
+  } catch { /* best-effort */ }
+
+  // ── KG code context (best-effort, composed into the shared budget) ──
+  try {
+    sections.push(...await buildKgContextSections(prompt, projectPath));
   } catch { /* best-effort */ }
 
   // ── Assemble result ────────────────────────────────────────────────
@@ -129,11 +160,16 @@ export async function evaluateKeywordInjection(
     (sum, s) => sum + s.lines.reduce((acc, l) => acc + l.length, 0),
     0,
   );
-  const content = wrapMaestroContext(liveSections, { used: usedChars, max: usedChars });
+  let content = wrapMaestroContext(liveSections, {
+    used: Math.min(usedChars, MAX_PROMPT_CONTEXT_CHARS),
+    max: MAX_PROMPT_CONTEXT_CHARS,
+  });
+  content = truncateMaestroContext(content, MAX_PROMPT_CONTEXT_CHARS);
 
-  if (toInject.length > 0) {
-    const injectedKeywords = [...new Set(toInject.flatMap(e => e.keywords))];
-    const injectedIds = toInject.map(e => e.id);
+  let allInjectedEntries = [...toInject, ...overflowEntries];
+  if (allInjectedEntries.length > 0) {
+    const injectedKeywords = [...new Set(allInjectedEntries.flatMap(e => e.keywords))];
+    const injectedIds = allInjectedEntries.map(e => e.id);
     markInjected(sessionId, injectedKeywords, injectedIds);
   }
 
@@ -141,13 +177,14 @@ export async function evaluateKeywordInjection(
     source: 'keyword-spec-injector',
     promptSnippet: prompt.slice(0, 300),
     categories: [],
-    specCount: toInject.length,
+    specCount: toInject.length, // Only count full entries for telemetry
     contentLength: content.length,
     inject: true,
     matchedKeywords: matchedKws,
     matchedEntries: toInject.length,
     totalPromptKeywords: promptKeywords.length,
     domainTermsMatched: domainSections.length > 0 ? domainSections.reduce((n, s) => n + s.lines.length, 0) : 0,
+    searchSource: wikiSource !== 'none' ? wikiSource : (matchedKws.length > 0 ? 'keyword' : undefined),
   });
 
   return {
@@ -219,70 +256,52 @@ function buildKeywordSection(entries: IndexedEntry[]): ContextSection {
 
   const lines = entries.map(e => {
     const body = e.content
-      .replace(/^#{1,6}\s+.*$/gm, '') // strip markdown headings (title is added separately)
+      .replace(/^#{1,6}\s+.*$/gm, '')
       .replace(/\s+/g, ' ')
       .trim();
     const kws = e.keywords.join(',');
     const titlePrefix = e.title ? `${e.title}: ` : '';
-    return `${e.category} · ${kws} · ${titlePrefix}${body}`;
+    const badge = e.confidence === 'contested' ? '[CONTESTED] '
+      : e.confidence === 'low' ? '[LOW CONFIDENCE] '
+      : '';
+    return `${badge}${e.category} · ${kws} · ${titlePrefix}${body}`;
   });
 
   return { label, lines };
 }
 
+/**
+ * Build a concise keyword-match overflow section for the unified <maestro-context> block.
+ * Each line only includes the category, keywords and title.
+ */
+function buildCompactKeywordSection(entries: IndexedEntry[]): ContextSection {
+  const allKeywords = [...new Set(entries.flatMap(e => e.keywords))];
+  const label = `keyword-overflow[${allKeywords.join(',')}]`;
+
+  const lines = entries.map(e => {
+    const kws = e.keywords.join(',');
+    const title = e.title ? e.title : e.id;
+    return `↳ ${e.category} · ${kws} · ${title}`;
+  });
+
+  return { label, lines };
+}
+
+/**
+ * Build a wiki BM25 search-match section for the unified <maestro-context> block.
+ * Each line is compact: `<type> · <title>: <oneline summary>`.
+ */
+function buildWikiSection(hits: WikiSearchHit[]): ContextSection {
+  const lines = hits.map(h => {
+    const summary = h.summary.replace(/\s+/g, ' ').trim();
+    return `${h.type} · ${h.title}: ${summary}`;
+  });
+  return { label: 'wiki[matched]', lines };
+}
+
 // ============================================================================
 // KG Symbol Lookup
 // ============================================================================
-
-const KG_SYMBOL_PATTERN = /\b[a-z]+[A-Z][a-zA-Z0-9]*\b|\b[a-z]+_[a-z0-9_]+\b/g;
-const KG_MAX_SYMBOLS = 3;
-const KG_MAX_RESULTS_PER_SYMBOL = 2;
-const KG_MAX_CONTENT_LENGTH = 512;
-
-/**
- * Extract camelCase/snake_case symbols from prompt and look up in KG.
- * Returns a `kg-symbols` ContextSection or null if nothing found.
- * Entire function is best-effort — returns null on any failure.
- */
-async function evaluateKgSymbolLookup(prompt: string, projectPath: string): Promise<ContextSection | null> {
-  const matches = prompt.match(KG_SYMBOL_PATTERN);
-  if (!matches || matches.length === 0) return null;
-
-  const symbols = [...new Set(matches)].slice(0, KG_MAX_SYMBOLS);
-
-  try {
-    const { MaestroGraph } = await import('../graph/kg/engine.js');
-    if (!MaestroGraph.isInitialized(projectPath)) return null;
-
-    const mg = await MaestroGraph.open(projectPath);
-    try {
-      const lines: string[] = [];
-      let totalLen = 0;
-
-      for (const sym of symbols) {
-        if (totalLen >= KG_MAX_CONTENT_LENGTH) break;
-
-        const results = mg.searchCode(sym, { limit: KG_MAX_RESULTS_PER_SYMBOL });
-        for (const node of results) {
-          const line = `[${node.kind}] ${node.name}` +
-            (node.filePath ? ` (${node.filePath}:${node.startLine})` : '') +
-            (node.signature ? ` — ${node.signature}` : '');
-
-          if (totalLen + line.length > KG_MAX_CONTENT_LENGTH) break;
-          lines.push(line);
-          totalLen += line.length;
-        }
-      }
-
-      if (lines.length === 0) return null;
-      return { label: 'kg-symbols', lines };
-    } finally {
-      try { mg.close(); } catch { /* best-effort */ }
-    }
-  } catch {
-    return null;
-  }
-}
 
 // ============================================================================
 // Domain Context Builder

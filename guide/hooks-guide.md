@@ -23,7 +23,7 @@ Maestro Hook 系统为 Claude Code、Codex 和 Agy (Antigravity) 提供自动化
 |----|---------|---------|
 | Claude Code Hooks | `settings.json` | 子进程 `maestro hooks run <name>` |
 | Codex Hooks | `hooks.json` | 子进程 `maestro hooks run <name>` |
-| Agy (Antigravity) Hooks | `~/.gemini/antigravity-cli/` | Skills + Agents 自动发现 |
+| Agy (Antigravity) Hooks | `~/.gemini/config/hooks.json` | 子进程 `maestro hooks run <name>` |
 | Coordinator Hooks | `WorkflowHookRegistry` | 进程内插件 |
 
 ### 协议
@@ -57,9 +57,12 @@ Maestro Hook 系统为 Claude Code、Codex 和 Agy (Antigravity) 提供自动化
 | `skill-context` | UserPromptSubmit | — | standard | 必需 | Skill 调用时注入工作流状态和产物树 |
 | `coordinator-tracker` | Stop | — | standard | 必需 | 协调器链执行进度追踪 |
 | `preflight-guard` | PreToolUse | Bash\|Write\|Edit\|Agent | standard | — | 命令执行前预检守卫 |
-| `spec-validator` | PreToolUse | Write\|Edit | standard | — | 规范写入验证 |
-| `keyword-spec-injector` | UserPromptSubmit | — | standard | — | 关键词匹配注入规范 |
+| `spec-validator` | PreToolUse | Write | standard | — | 完整规范写入验证 |
+| `keyword-spec-injector` | UserPromptSubmit | — | standard | — | 单次注入 keyword/spec/wiki/domain/KG 上下文 |
+| `kg-sync` | UserPromptSubmit | — | standard | 必需 | 知识图谱增量同步（CooldownGuard 30s 去抖） |
+| `kg-auto-init` | UserPromptSubmit | — | standard | 必需 | 知识图谱自动初始化（CooldownGuard 5min 去抖） |
 | `workflow-guard` | PreToolUse | Bash\|Write\|Edit | full | 必需 | 保护关键文件和操作 |
+| `prompt-guard` | UserPromptSubmit | — | full | — | 用户 prompt 安全检查 |
 
 > **性能优化**：Stop 事件 Hook 每轮仅触发 1 次；`delegate-monitor` 通过 Bash\|Agent matcher 过滤。相比无 matcher 的 PostToolUse，每轮子进程 spawn 减少约 72%。
 
@@ -70,27 +73,44 @@ Maestro Hook 系统为 Claude Code、Codex 和 Agy (Antigravity) 提供自动化
 | `session-context` | SessionStart | startup\|resume | minimal | 必需 | 会话启动注入工作流状态 |
 | `spec-injector` | SessionStart | startup | standard | 必需 | 会话启动注入规范 |
 | `skill-context` | UserPromptSubmit | — | standard | 必需 | Skill 调用注入上下文 |
-| `keyword-spec-injector` | UserPromptSubmit | — | standard | 必需 | 关键词匹配注入规范 |
+| `keyword-spec-injector` | UserPromptSubmit | — | standard | 必需 | 单次注入 keyword/spec/wiki/domain/KG 上下文 |
+| `kg-sync` | UserPromptSubmit | — | standard | 必需 | 知识图谱增量同步 |
+| `kg-auto-init` | SessionStart | startup | standard | 必需 | 知识图谱自动初始化 |
 | `delegate-monitor` | PostToolUse | Bash | standard | — | 监控异步委托 |
 | `coordinator-tracker` | Stop | — | standard | 必需 | 协调器进度追踪 |
 | `team-monitor` | Stop | — | standard | — | 团队心跳记录 |
 | `telemetry` | Stop | — | standard | — | 遥测采集 |
 | `workflow-guard` | PreToolUse | Bash | full | 必需 | 保护文件（仅 Bash） |
+| `prompt-guard` | UserPromptSubmit | — | full | — | 用户 prompt 安全检查 |
 
 > **与 Claude Code 差异**：Codex `spec-injector` 用 SessionStart（无法拦截 Agent）；`workflow-guard` 仅防护 Bash；并发执行；正则 matcher。
 
 ### Agy (Antigravity) Hook 清单（v0.4.19+）
 
-Agy 使用 Skills + Agents 自动发现机制，而非传统 Hook 注册：
+Agy 通过 `hooks.json` 注册 Hook（前缀 `maestro-`），使用 `PreInvocation` / `PreToolUse` / `PostToolUse` / `Stop` 事件类型：
 
-| 组件 | 安装路径 | 用途 |
-|------|---------|------|
-| `agy-context` | `~/.gemini/antigravity-cli/skills/` | 会话上下文注入 |
-| `agy-md-chinese` | `~/.gemini/antigravity-cli/skills/` | 中文回复规范注入 |
-| `agy-skills` | `~/.gemini/antigravity-cli/skills/` | Skill 自动发现 |
-| `agy-agents` | `~/.gemini/antigravity-cli/agents/` | Agent 定义同步 |
+| Hook | 事件类型 | Matcher | 级别 | Workspace | 用途 |
+|------|---------|---------|------|-----------|------|
+| `spec-injector` | PreToolUse | invoke_subagent | minimal | 必需 | 按 agent 类型自动注入项目规范 |
+| `session-context` | PreInvocation | — | standard | 必需 | 会话启动注入工作流状态 |
+| `skill-context` | PreInvocation | — | standard | 必需 | Skill 调用注入上下文 |
+| `keyword-spec-injector` | PreInvocation | — | standard | 必需 | 单次注入 keyword/spec/wiki/domain/KG 上下文 |
+| `kg-sync` | PreInvocation | — | standard | 必需 | 知识图谱增量同步 |
+| `kg-auto-init` | PreInvocation | — | standard | 必需 | 知识图谱自动初始化 |
+| `delegate-monitor` | PostToolUse | run_command\|invoke_subagent | standard | — | 监控异步委托 |
+| `team-monitor` | Stop | — | standard | — | 团队心跳记录 |
+| `telemetry` | Stop | — | standard | — | 遥测采集 |
+| `coordinator-tracker` | Stop | — | standard | 必需 | 协调器进度追踪 |
+| `preflight-guard` | PreToolUse | run_command\|write_to_file\|replace_file_content\|multi_replace_file_content\|invoke_subagent | standard | 必需 | 命令执行前预检守卫 |
+| `spec-validator` | PreToolUse | write_to_file | standard | 必需 | 完整规范写入验证 |
+| `workflow-guard` | PreToolUse | run_command\|write_to_file\|replace_file_content\|multi_replace_file_content | full | 必需 | 保护文件和操作 |
+| `prompt-guard` | PreInvocation | — | full | — | 用户 prompt 安全检查 |
 
-> **与 Claude/Codex 差异**：Agy 不使用 stdin/stdout JSON 协议，而是通过目录约定自动发现 skills 和 agents。安装时将 `.claude/commands/` 和 `.claude/skills/` 镜像到 `~/.gemini/antigravity-cli/` 对应目录。
+**安装路径**：
+- 全局 → `~/.gemini/config/hooks.json`
+- 项目级 → `<project>/.agents/hooks.json`
+
+> **与 Claude/Codex 差异**：Agy 使用 `PreInvocation`（对应 Claude 的 `UserPromptSubmit`）做上下文注入；matcher 使用 Agy 工具名（如 `invoke_subagent`、`run_command`、`write_to_file`）；所有 Hook 以 `maestro-` 前缀注册到 `hooks.json` 顶层。
 
 ---
 
@@ -102,7 +122,7 @@ Hook 按**累积级别**安装，高级别包含所有低级别：
 |------|---------|---------|
 | `none` | 无 Hook | 完全手动控制 |
 | `minimal` | Statusline + spec-injector | 日常开发 |
-| `standard` | + delegate-monitor + team/telemetry/coordinator(Stop) + session-context + skill-context | 团队协作 |
+| `standard` | + delegate-monitor + kg-sync + kg-auto-init + keyword/spec/wiki/domain/KG prompt context + team/telemetry/coordinator(Stop) + session-context + skill-context + preflight/spec guards | 团队协作 |
 | `full` | + workflow-guard | 严格工作流 |
 
 ### 安装命令
@@ -213,6 +233,37 @@ maestro hooks list      # 可用 Hook 列表
 **事件**: `PreToolUse` (Bash\|Write\|Edit) | **级别**: `full`
 
 检查受保护文件和工作流阶段约束。退出码 `2` 阻止操作。
+
+### CooldownGuard — 跨进程抖动抑制
+
+> `src/utils/cooldown-guard.ts` — 非独立 Hook，供 kg-sync / kg-auto-init 内部使用。
+
+通过 tmpdir bridge 文件实现跨子进程调用的时序节流。每次执行后写入 JSON bridge 文件，冷却期内的后续调用被跳过（`shouldRun()` 返回 `false`）。
+
+| 预设实例 | 冷却时间 | 用途 |
+|---------|---------|------|
+| `kgSyncGuard` | 30 秒 | `kg-sync` 增量同步去抖 |
+| `kgInitGuard` | 5 分钟 | `kg-auto-init` 初始化去抖 |
+
+**API**：
+
+```typescript
+import { CooldownGuard, kgSyncGuard, kgInitGuard } from '../utils/cooldown-guard.js';
+
+// 自定义 guard
+const guard = new CooldownGuard({ prefix: 'my-guard-', cooldownMs: 60_000 });
+
+// 使用
+if (guard.shouldRun(sessionId)) {
+  // 执行操作
+  guard.markDone(sessionId, { extra: 'data' });
+}
+
+// 查询距上次执行的时间
+const elapsed = guard.timeSinceLastMs(sessionId); // number | null
+```
+
+**Bridge 文件**：`{tmpdir}/{prefix}{sessionId}.json`，格式为 `{ last_trigger: number, session_id?: string, extra?: Record<string, unknown> }`。
 
 ### Coordinator 插件
 

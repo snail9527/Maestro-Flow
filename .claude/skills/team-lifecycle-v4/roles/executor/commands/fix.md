@@ -1,7 +1,5 @@
 # Fix
 
-Revision workflow for bug fixes and feedback-driven changes.
-
 ## Workflow
 
 1. Read original task + feedback/revision notes from task description

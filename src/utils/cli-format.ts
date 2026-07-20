@@ -85,27 +85,41 @@ export function truncateForHistory(s: string, max: number): string {
 }
 
 /**
- * Extract the first body line containing a query term, prefixed with its
- * line number (e.g. "L12: matched context..."). Used by wiki/search output
- * to show the matched context rather than only the summary.
+ * Extract the best-matching body line for a query, prefixed with its line
+ * number (e.g. "L12: matched context..."). Scores lines by query-term
+ * coverage so multi-term queries surface the most informative line.
  */
-export function extractSnippet(body: string, query: string, maxLen = 50, highlight = false): string | null {
+export function extractSnippet(body: string, query: string, maxLen = 80, highlight = false): string | null {
   if (!body || !query) return null;
-  const lower = body.toLowerCase();
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  for (const term of terms) {
-    const idx = lower.indexOf(term);
-    if (idx === -1) continue;
-    let line = 1;
-    for (let i = 0; i < idx; i++) if (body[i] === '\n') line++;
-    const ls = body.lastIndexOf('\n', idx) + 1;
-    const le = body.indexOf('\n', idx);
-    let raw = body.slice(ls, le === -1 ? body.length : le).trim();
-    if (raw.length > maxLen) raw = raw.slice(0, maxLen) + '...';
-    if (highlight) raw = highlightTerms(raw, terms);
-    return `L${line}: ${raw}`;
+  if (terms.length === 0) return null;
+
+  const lines = body.split('\n');
+  let bestIdx = -1;
+  let bestScore = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+    const lower = trimmed.toLowerCase();
+    let score = 0;
+    for (const term of terms) {
+      if (lower.includes(term)) score++;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
   }
-  return null;
+
+  if (bestIdx === -1) return null;
+
+  let raw = lines[bestIdx].trim();
+  raw = raw.replace(/^#+\s+/, '');
+  raw = raw.replace(/^[-*]\s+/, '');
+  if (raw.length > maxLen) raw = raw.slice(0, maxLen) + '...';
+  if (highlight) raw = highlightTerms(raw, terms);
+  return `L${bestIdx + 1}: ${raw}`;
 }
 
 export function highlightTerms(text: string, terms: string[]): string {

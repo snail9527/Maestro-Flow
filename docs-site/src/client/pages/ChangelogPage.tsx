@@ -17,6 +17,239 @@ interface ChangelogEntry {
 
 const changelog: ChangelogEntry[] = [
   {
+    version: '0.5.53',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'Upgrade Session/Run to session/1.3 and command-run/1.3 with topic identity, reuse assessment, paused recovery, mutation receipts, and release-machine parity gates', text_zh: 'Session/Run 升级到 session/1.3 与 command-run/1.3，补齐 topic identity、reuse assessment、paused recovery、mutation receipt 与 release-machine parity 门禁' },
+      { type: 'refactor', text_en: 'Split development entrypoints into Companion for lightweight direct execution, Next for pure routing, and Maestro for multi-step manual or Ralph orchestration', text_zh: '开发入口分层为：Companion 负责轻量直接执行、Next 负责纯路由、Maestro 负责 manual/Ralph 多步编排' },
+      { type: 'refactor', text_en: 'Retire the first-tier quick step and route quick, small, and ad-hoc intents directly to /maestro-companion', text_zh: '退休 first-tier quick step，将 quick、small、ad-hoc 意图直接路由到 /maestro-companion' },
+      { type: 'fix', text_en: 'Harden SessionStore replay, Windows lock recovery, recall confirmation, artifact template scanning, and TOCTOU validation', text_zh: '加固 SessionStore replay、Windows 锁恢复、recall confirmation、artifact template 扫描与 TOCTOU 校验' },
+      { type: 'fix', text_en: 'Clean retired quick assets during installation and package first-tier prepare contracts for fresh consumers', text_zh: '安装升级时清理退休 quick 资产，并为 fresh consumer 正确打包 first-tier prepare contracts' },
+      { type: 'docs', text_en: 'Add the Session/Run architecture guide and remove stale documentation that described Maestro Next as a fixed analyze-plan-execute quick chain', text_zh: '新增 Session/Run architecture 指南，并移除将 Maestro Next 描述为固定 analyze-plan-execute quick chain 的旧文案' },
+    ],
+  },
+  {
+    version: '0.5.52',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'Upgrade Session/Run to session/1.2 and command-run/1.2 with a machine-readable run-response/1.0 envelope and automatic next-action discovery after completion', text_zh: 'Session/Run 升级到 session/1.2 与 command-run/1.2，引入可机读 run-response/1.0，并在完成后自动识别下一动作' },
+      { type: 'feat', text_en: 'Expose concise execution guidance, command arguments, requirements, resolved inputs, and missing inputs so an LLM can reason about the next step before dispatch', text_zh: '透出精简执行指南、命令参数、requirements、已解析输入与缺失输入，便于 LLM 在派发前判断所需上下文' },
+      { type: 'feat', text_en: 'Add Unicode-safe intent identity and advisory Session recall with confirmation-token fork, import, and new-session actions instead of unsafe automatic resume', text_zh: '新增 Unicode-safe intent identity 与 advisory Session recall，通过 confirmation token 执行 fork、import、new，避免不安全的自动 resume' },
+      { type: 'fix', text_en: 'Harden SessionStore durability with locks, transition receipts, lineage checks, audited rebind, and fail-closed resolve/resume recovery', text_zh: '通过锁、transition receipt、lineage 校验、审计 rebind 与 fail-closed resolve/resume 加固 SessionStore durability' },
+      { type: 'refactor', text_en: 'Make Ralph a canonical Session/Run adapter and align command, workflow, agent, and generated mirror contracts across supported platforms', text_zh: '将 Ralph 收敛为标准 Session/Run 适配层，并对齐多平台 command、workflow、agent 与生成镜像契约' },
+      { type: 'docs', text_en: 'Refresh the v2 command architecture, Session/Run guidance, knowledge and issue workflows, bilingual guides, and docs-site references', text_zh: '更新 v2 命令架构、Session/Run 指南、knowledge/issue 工作流、双语指南与 docs-site reference' },
+    ],
+  },
+  {
+    version: '0.5.51',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'Unify the Session/Run lifecycle around prepare, create, brief, check, and complete, with run next stepping, explicit ASCII session IDs, progressive context injection, and finish checklists', text_zh: 'Session/Run 生命周期统一为 prepare、create、brief、check、complete，新增 run next 步进、显式 ASCII Session ID、渐进式上下文注入与 finish 收口清单' },
+      { type: 'feat', text_en: 'Integrate Codex Multi-Agent V2 collaboration, TOML agent generation, platform tool profiles, update_plan task tracking, and isolated Goal guidance', text_zh: '集成 Codex Multi-Agent V2 collaboration、TOML Agent 生成、平台工具 profile、update_plan 任务跟踪与独立 Goal 指引' },
+      { type: 'feat', text_en: 'Rebuild Explore around parallel streaming batches, repository maps, a reusable agent loop, configurable turn limits, direct proxy fallback, and stronger evidence validation', text_zh: 'Explore 重构为并行流式 Batch、repository map、通用 agent loop、可配置轮次、代理直连回退与更严格证据校验' },
+      { type: 'feat', text_en: 'Add docs v1/v2 switching with the consolidated v2 command model and a unified configuration reference', text_zh: 'docsite 新增 v1/v2 切换、v2 合并命令模型与统一配置参考指南' },
+      { type: 'fix', text_en: 'Harden Ralph and team execution with birth-packet-first dispatch, lease fencing, single-source state, fail-closed completion, and canonical artifact paths', text_zh: 'Ralph 与 team 执行加固：birth-packet 优先派发、lease fencing、状态单源、fail-closed completion 与标准产物路径' },
+      { type: 'fix', text_en: 'Make knowledge writes and graph migrations atomic, block SQL injection and nested transactions, expose index corruption, and normalize searchable Session/Run topology', text_zh: '知识写入与图谱迁移原子化，修复 SQL 注入与嵌套事务，显式暴露索引损坏并规范化可搜索的 Session/Run 拓扑' },
+      { type: 'refactor', text_en: 'Converge commands and workflows on prepare/workflows/ref entry steps, retire the chains data layer and obsolete commands, and move collab/grill to run-lite entry steps', text_zh: '命令与工作流收敛到 prepare/workflows/ref entry step，退役 chains 数据层与废弃命令，并将 collab/grill 迁移为 run-lite entry step' },
+      { type: 'fix', text_en: 'Align 23 team-skill coordinators and all generated Claude/Codex/Agy/Agents mirrors with the canonical Run contract', text_zh: '将 23 个 team skill coordinator 及 Claude/Codex/Agy/Agents 生成镜像对齐标准 Run 契约' },
+      { type: 'fix', text_en: 'Make fresh-checkout dashboard builds independent of pre-existing root dist artifacts', text_zh: '修复 fresh checkout 中 dashboard 构建依赖预先存在 root dist 产物的问题' },
+    ],
+  },
+  {
+    version: '0.5.50',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'Expand the installer to 14 platforms with shared hooks, platform-grouped Hub controls, OpenAI Responses API support, and endpoint circuit-breaker recovery', text_zh: '安装矩阵扩展至 14 平台与通用 hooks，Hub 按功能分组，并加入 OpenAI Responses API 与端点熔断恢复' },
+      { type: 'feat', text_en: 'Add local embedding model paths, spec JSON output, knowhow tool registration, and on-demand workflow installation', text_zh: '新增本地 embedding 模型路径、spec JSON 输出、knowhow 工具注册与按需 workflow 安装' },
+      { type: 'fix', text_en: 'Prevent uninstall from deleting user workflows and harden knowledge-system memory, SQLite locking, and search-daemon limits', text_zh: '防止 uninstall 误删用户 workflow，并加固知识系统内存、SQLite 锁与 search daemon 限制' },
+      { type: 'refactor', text_en: 'Unify Ralph verification-ledger completion and normalize generated Codex skill categories', text_zh: '统一 Ralph verification-ledger 完成流程并规范化 Codex skill 生成分类' },
+      { type: 'docs', text_en: 'Restructure the bilingual README, guides, competitive comparison, and docs-site deployment', text_zh: '重构双语 README、指南、竞品对比与 docsite 部署' },
+    ],
+  },
+  {
+    version: '0.5.49',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'Explore circuit-breaker persistence + pre-flight probing + immediate fallback retry', text_zh: 'Explore circuit-breaker 持久化 + pre-flight 探测 + 即时 fallback' },
+      { type: 'feat', text_en: 'Knowledge evolution chain supersession + time-decay search weighting', text_zh: '知识演化链替代机制 + 遗忘曲线搜索权重' },
+      { type: 'feat', text_en: 'Spec conflict-marked entries downgraded in search scoring', text_zh: 'Spec 冲突标记条目搜索降级评分' },
+      { type: 'fix', text_en: 'Wiki P1/P2 review fixes — staleness detection, embedding identity, link integrity', text_zh: 'Wiki P1/P2 审查修复——陈旧检测、嵌入身份、链路完整性' },
+      { type: 'refactor', text_en: 'Wiki indexer streaming cache write + embedding build abort support', text_zh: 'Wiki indexer streaming 写入 + embedding 构建 abort 支持' },
+      { type: 'fix', text_en: 'Search daemon connection limit, socket timeout, request size guard', text_zh: 'Search daemon 连接数上限 + socket 超时 + 请求大小保护' },
+    ],
+  },
+  {
+    version: '0.5.48',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'Add embedding model management commands — download, status, index rebuild', text_zh: '新增 embedding 模型管理命令——下载、状态、索引重建' },
+      { type: 'refactor', text_en: 'Ralph-v2 executor refactored from named teammate to unnamed nested nesting model', text_zh: 'Ralph-v2 executor 从 named teammate 重构为 unnamed 嵌套套娃模型' },
+      { type: 'refactor', text_en: 'Unify analyze/plan entry params from phase to milestone', text_zh: 'analyze/plan 入口参数统一从 phase 改为 milestone' },
+      { type: 'fix', text_en: 'Remove default emphasis color from install execute button', text_zh: '移除「执行安装」按钮的默认强调色' },
+      { type: 'docs', text_en: 'Sync guide/docs-site milestone param semantics + fix MOA page loading', text_zh: '同步 guide/docs-site 的 milestone 参数语义 + 修复 MOA 页面加载' },
+    ],
+  },
+  {
+    version: '0.5.47',
+    date: '2026-07',
+    changes: [
+      { type: 'fix', text_en: 'Eliminate applyProxyEnv global process.env pollution in explore agent', text_zh: '消除 explore 代理 applyProxyEnv 的 process.env 全局污染' },
+      { type: 'fix', text_en: 'Skip uncached embedding model download during update', text_zh: 'update 时跳过未缓存的 embedding 模型下载' },
+      { type: 'fix', text_en: 'Fix orchestrator nested transactions and cross-file foreign key constraint causing index failure', text_zh: '修复 orchestrator 嵌套事务和跨文件外键约束导致索引失败' },
+      { type: 'chore', text_en: 'Raise all command file gate constraints to 95%+', text_zh: '提升全部命令文件门禁约束至 95%+' },
+    ],
+  },
+  {
+    version: '0.5.46',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'MOA (Mixture of Agents) engine — core loop, per-turn mode, reference disk cache, cost tracking', text_zh: 'MOA 多模型聚合引擎——核心循环、per-turn 模式、reference 磁盘缓存、成本跟踪' },
+      { type: 'feat', text_en: 'Ralph-v2 dual dispatch — executor supports multi-agent orchestration + CLI delegate 3 modes', text_zh: 'Ralph-v2 dual dispatch——executor 支持多 agent 编排 + CLI delegate 三模式' },
+      { type: 'feat', text_en: 'Integrate WikiIndexer BM25 search into keyword-spec-injector', text_zh: '集成 WikiIndexer BM25 搜索到 keyword-spec-injector' },
+      { type: 'fix', text_en: 'Fix KG code search multi-word query returning 0 results + generalized search OR fallback', text_zh: '修复知识图谱代码搜索多词查询返回 0 结果 + 泛化搜索 OR 降级' },
+      { type: 'fix', text_en: 'Fix odyssey A_GENERALIZE/A_DISCOVER/A_RECORD phases being skipped', text_zh: '修复 odyssey 举一反三阶段被跳过的问题' },
+      { type: 'refactor', text_en: 'Refactor MOA into pipeline engine with dynamic step orchestration', text_zh: '重构 MOA 为 pipeline 引擎，支持动态 step 编排' },
+    ],
+  },
+  {
+    version: '0.5.45',
+    date: '2026-07',
+    changes: [
+      { type: 'fix', text_en: 'Fix maestro-next SKILL.md frontmatter YAML parsing error in codex', text_zh: '修复 maestro-next SKILL.md frontmatter YAML 解析错误' },
+      { type: 'refactor', text_en: 'Refactor ralph-agent into ralph-v2 + ralph-executor dual agent architecture', text_zh: '重构 ralph-agent 为 ralph-v2 + ralph-executor 双 agent 架构' },
+    ],
+  },
+  {
+    version: '0.5.44',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'Claude Agent-specific ralph orchestrator + executor commands', text_zh: '新增 Claude Agent 专属 ralph 编排器 + 执行器命令' },
+      { type: 'feat', text_en: 'rmux-collab multi-agent channel collaboration system — atomic send+wait + structured AgentResult', text_zh: 'rmux-collab 多 Agent 频道协作系统——atomic send+wait + 结构化 AgentResult' },
+      { type: 'feat', text_en: 'Enhanced explore search tools — multi-mode Search, PCRE2 fallback, SRAG loop', text_zh: 'explore 增强——Search 多模式、PCRE2 回退、SRAG 循环' },
+      { type: 'fix', text_en: 'Search daemon type dedup + over-fetch cascade fix + MCP fallback alignment', text_zh: 'search daemon 类型去重 + 过度获取级联修复 + MCP fallback 对齐' },
+      { type: 'refactor', text_en: 'Migrate graph module to node:sqlite, remove better-sqlite3 deprecated dependency', text_zh: 'graph 模块迁移至 node:sqlite，消除 better-sqlite3 deprecated 依赖' },
+      { type: 'refactor', text_en: 'Explore: remove maxTurns limit, parallel tool calls, async ripgrep', text_zh: 'explore 去除 maxTurns 限制、并行 tool calls、async ripgrep' },
+    ],
+  },
+  {
+    version: '0.5.43',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'KG code embedding engine — structured text extraction + vector index + hybrid search (BM25F + vector)', text_zh: 'KG 代码嵌入引擎——结构化文本提取 + 向量索引 + 混合搜索' },
+      { type: 'feat', text_en: 'New MCP tools: maestro_wiki_search + maestro_code_semantic_search', text_zh: '新增 MCP 工具 maestro_wiki_search / maestro_code_semantic_search' },
+      { type: 'feat', text_en: 'Integrate zvec vector storage backend with multi-chunk embedding + parallel indexing + GPU acceleration', text_zh: '集成 zvec 向量存储后端：多分块嵌入 + 并行索引 + GPU 加速' },
+      { type: 'feat', text_en: 'Ralph S_POST_ANALYZE artifact deviation auto-correction', text_zh: 'ralph S_POST_ANALYZE 产物偏离自动修正环节' },
+      { type: 'fix', text_en: 'Fix 238 skill/command execution ambiguity issues', text_zh: '修复 skill/command 238 个执行歧义问题' },
+      { type: 'refactor', text_en: 'Refactor ralph CLI delegation architecture + dynamic context loading', text_zh: '重构 ralph CLI 委托架构 + 增加动态上下文加载' },
+    ],
+  },
+  {
+    version: '0.5.42',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'AGENTS.md instruction injection component for .agents/ platform', text_zh: '新增 .agents/ 平台 AGENTS.md 指令注入组件' },
+      { type: 'feat', text_en: 'Enhanced install-guide skill pages + per-skill detail pages on docs-site', text_zh: '完善附加安装包 skill 介绍 + 每技能单独详情页' },
+      { type: 'feat', text_en: 'Unified workflow documentation format with explore enhancements', text_zh: '统一工作流文档指令格式 + explore Cross-Search 增强' },
+      { type: 'fix', text_en: 'Relax spec-loader category matching — support filename stem inference', text_zh: 'spec-loader 放宽 category 匹配——支持文件名 stem 推断' },
+      { type: 'fix', text_en: 'Fix codex config.toml skill dedupe marker misalignment causing infinite file growth', text_zh: '修复 codex config.toml skill dedupe 标记错位导致文件无限膨胀' },
+      { type: 'refactor', text_en: 'Command content separation — move procedural logic to workflow layer', text_zh: '命令文件内容分离——过程性逻辑下沉到 workflow 层' },
+    ],
+  },
+  {
+    version: '0.5.41',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'spec init --preset extension mechanism + academic preset', text_zh: 'spec init --preset 扩展机制 + academic 学术预设' },
+      { type: 'fix', text_en: 'Inline base-delegated content into all 10 Odyssey commands', text_zh: '将 base 委托内容内联到全部 10 个 Odyssey 命令' },
+      { type: 'fix', text_en: 'Disambiguate 5 codex odyssey skills and create dedicated base', text_zh: '消除 5 个 codex odyssey skill 的歧义并创建专用 base' },
+      { type: 'refactor', text_en: 'Streamline 10 Odyssey command file structures — remove base duplication and prose', text_zh: '精简 10 个 Odyssey 命令文件结构，去除 base 重复与散文' },
+    ],
+  },
+  {
+    version: '0.5.40',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'Native plugin install mode (maestro plugin) — install third-party plugins directly into workspace', text_zh: '新增原生插件安装模式 (maestro plugin)——第三方插件直接安装到工作区' },
+      { type: 'feat', text_en: 'Code block copy button + light mode dark background fix for docs-site', text_zh: 'docs-site 代码框增加复制按钮 + 亮色模式深色背景修复' },
+      { type: 'fix', text_en: 'Fix 7 core skill confirmation gate missing and wave flow defects', text_zh: '修复 7 个核心 skill 的确认门控缺失和 wave 流程缺陷' },
+      { type: 'fix', text_en: 'CLI bare intent interception + Codex skill disambiguation enhancement', text_zh: 'CLI 裸 intent 拦截优化 + Codex skill 防混淆增强' },
+      { type: 'fix', text_en: 'Fix docs-site guide loading path mismatch and missing completion icons', text_zh: '修复 docs-site guide 加载路径不匹配及补全缺失图标' },
+      { type: 'refactor', text_en: 'Unify codex skill shell execution interface to shell_exec abstraction', text_zh: '统一 codex skill 的 shell 执行接口为 shell_exec 抽象' },
+    ],
+  },
+  {
+    version: '0.5.39',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'Embedding supports KG node hierarchical indexing + dynamic token batching', text_zh: 'embedding 支持 KG 节点分层索引 + 动态 token 分批' },
+      { type: 'feat', text_en: 'Embedding supports external API configuration (~/.maestro/api-embedding.json)', text_zh: 'embedding 支持外部 API 配置 (~/.maestro/api-embedding.json)' },
+      { type: 'feat', text_en: 'Session-context hook injects project summary, source file tree and recent sessions', text_zh: 'session-context hook 注入项目摘要、源码文件树和最近 session' },
+      { type: 'fix', text_en: 'Embedding system review fixes — daemon notification resilience, race protection, partial failure retention', text_zh: 'embedding 系统 review 修复——daemon 通知容错、竞态防护、部分失败保留' },
+      { type: 'refactor', text_en: 'Odyssey commands extract shared base + inject anti-stagnation mechanism', text_zh: 'Odyssey 命令提取共享基座 + 注入防停滞机制' },
+      { type: 'refactor', text_en: 'Codex Odyssey command sync refactor', text_zh: 'codex 版本 Odyssey 命令同步重构' },
+    ],
+  },
+  {
+    version: '0.5.38',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'Restore maestro view/stop commands — re-enable frontend dashboard entry', text_zh: '恢复 maestro view/stop 命令，重新启用前端 dashboard 入口' },
+      { type: 'feat', text_en: 'Install TUI refactor — platform-driven installation + update migration fix', text_zh: 'install TUI 重构——平台驱动安装 + update 迁移修复' },
+      { type: 'feat', text_en: 'New manage-drift-realign command + maestro timeline CLI', text_zh: '新增 manage-drift-realign 命令 + maestro timeline CLI' },
+      { type: 'feat', text_en: 'Ralph anti-drift 4-layer protection + goal hot-amendment --amend', text_zh: 'ralph 反漂移 4 层防护 + 目标热修改 --amend' },
+      { type: 'feat', text_en: 'Codex full re-grounding subsystem migration + grill auto_mode alignment', text_zh: 'codex 完整移植 re-grounding 子系统 + grill auto_mode 对齐' },
+      { type: 'fix', text_en: 'Cross-file schema alignment + protocol version fix', text_zh: '跨文件 schema 对齐 + protocol version 遗漏修复' },
+    ],
+  },
+  {
+    version: '0.5.37',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'Profile-based reinstall for maestro update — avoids Windows cmd length limits', text_zh: 'update 重装改用 profile-based --import --upgrade 机制，解决 Windows 命令行长度限制' },
+      { type: 'feat', text_en: 'Unified maestro load command — merged spec/wiki/session loading', text_zh: '统一 maestro load 命令——合并 spec/wiki/session 加载' },
+      { type: 'feat', text_en: 'maestro search --kg mode — unified KG full-source search', text_zh: 'maestro search --kg 模式——KG 全源统一搜索' },
+      { type: 'feat', text_en: 'Search cold-start optimization — from ~3200ms down to ~280ms', text_zh: 'search 命令冷启动优化——从 ~3200ms 降至 ~280ms' },
+      { type: 'refactor', text_en: 'Replace gemini CLI with agy CLI globally', text_zh: '全局替换 gemini CLI 为 agy CLI' },
+      { type: 'chore', text_en: 'Migrate 37 node:test suites to vitest', text_zh: '测试体系统一——37 个 node:test 全迁 vitest' },
+    ],
+  },
+  {
+    version: '0.5.36',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'Session Anchor — auto-inject intent/boundary/goal context grounding per step', text_zh: 'Session Anchor——每个 step 自动注入 intent/boundary/goal 上下文锚定' },
+      { type: 'feat', text_en: 'Re-grounding drift circuit breaker — periodic intent fidelity checks with safety halt', text_zh: 'Re-grounding 漂移熔断——周期性意图保真检查 + 漂移安全门' },
+      { type: 'feat', text_en: 'Search daemon with ONNX model hot cache for faster search responses', text_zh: 'Search Daemon 常驻进程——ONNX 模型热缓存，搜索响应提速' },
+      { type: 'feat', text_en: 'New api-explore lightweight code exploration subagent with standalone config', text_zh: '新增 api-explore 轻量代码探索 subagent + 独立配置文件' },
+      { type: 'feat', text_en: 'Boundary Grill protocol — analyze/collab/plan/brainstorm boundary conflict review', text_zh: 'Boundary Grill 协议——analyze/collab/plan/brainstorm 边界冲突审查' },
+      { type: 'fix', text_en: 'Search scoring optimization — dynamic weights, name-match fix, tie handling', text_zh: '搜索评分优化——动态权重 + name-match 修复 + tie 处理' },
+    ],
+  },
+  {
+    version: '0.5.35',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'Search engine embedding upgrade — bilingual E5 + content hash incremental rebuild + hybrid fusion', text_zh: '搜索引擎嵌入模型升级——双语 E5 + content hash 增量重建 + hybrid 融合' },
+      { type: 'feat', text_en: 'Enhanced query — IDF adaptive weighting + camelCase splitting', text_zh: '增强查询功能——IDF 自适应加权与 camelCase 拆分' },
+      { type: 'feat', text_en: 'Embedding search performance — batch inference + smart device detection + incremental indexing', text_zh: '嵌入搜索性能优化——批量推理 + 智能设备检测 + 增量索引' },
+      { type: 'feat', text_en: 'Search semantic enhancement — synonym/stemming query expansion + embedding hybrid retrieval', text_zh: '搜索语义增强——同义词/词干查询扩展 + 嵌入模型混合检索' },
+      { type: 'fix', text_en: 'Codex command chain context passing — 4 Critical + 7 High fixes', text_zh: 'codex 命令链上下文传递——4 Critical + 7 High 修复' },
+      { type: 'fix', text_en: 'Install pipeline custom hook selection loss + update reinstall option completion', text_zh: '安装流水线自定义 hook 选择丢失 + update 重装选项补全' },
+    ],
+  },
+  {
+    version: '0.5.34',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'Spec confidence system with conflict marking — high/medium/low/contested states + audit resolution', text_zh: 'Spec 置信度系统与冲突标记——high/medium/low/contested 四态 + 审查消除' },
+      { type: 'feat', text_en: 'Knowledge extractor plugin registry + node type registration for extensible KG extraction', text_zh: '知识提取器插件注册 + 节点类型注册，扩展化 KG 提取' },
+      { type: 'feat', text_en: 'Knowledge command conflict resolution — harvest pre-check + audit 4-state decisions + review conflict marking', text_zh: '知识命令冲突解决闭环——harvest 预检 + audit 四态决策 + review 冲突标记' },
+      { type: 'fix', text_en: 'Search system 16 quality fixes — dedup, BM25F scoring, CJK bigram/trigram, performance', text_zh: '搜索系统 16 项质量修复——去重/BM25F 评分/CJK bigram+trigram/性能' },
+      { type: 'fix', text_en: 'Fix install/registry/config 7 bugs — component resolution, migration, CLI tools config', text_zh: '修复 install/registry/config 系统 7 个 bug' },
+      { type: 'fix', text_en: 'Fix 3 performance risks — Math.max spread overflow, O(n²) includes, linear find', text_zh: '泛化修复 3 项性能风险——Math.max spread 溢出/O(n²) includes/线性查找' },
+    ],
+  },
+  {
     version: '0.5.33',
     date: '2026-06',
     changes: [
@@ -101,6 +334,15 @@ const changelog: ChangelogEntry[] = [
     changes: [
       { type: 'feat', text_en: 'delegate: add proxy config in cli-tools.json — per-tool proxy toggle, subprocess-only env injection', text_zh: 'delegate: cli-tools.json 新增代理配置，支持 per-tool 开关，仅注入子进程环境变量' },
       { type: 'fix', text_en: 'codex adapter: classify Rust tracing stderr (RMCP/MCP errors) as non-fatal thinking instead of error', text_zh: 'codex adapter: 将 Rust tracing stderr（RMCP/MCP 错误）归类为非致命诊断信息而非错误' },
+    ],
+  },
+  {
+    version: '0.4.26',
+    date: '2026-06',
+    changes: [
+      { type: 'feat', text_en: 'commands: new manage-drift-realign — detect and realign .workflow/ artifact drift against code reality with 4 parallel scanners (roadmap/spec/codebase/artifact)', text_zh: 'commands: 新增 manage-drift-realign — 4 路并行 scanner 检测重构后 .workflow/ 产物与代码的偏移并交互式对齐' },
+      { type: 'feat', text_en: 'cli: new maestro timeline command — unified git + session activity timeline with platform breakdown and hot/cold path analysis', text_zh: 'cli: 新增 maestro timeline 命令 — git + session 统一活动时间线，支持平台分组和热/冷路径分析' },
+      { type: 'feat', text_en: 'codex: new manage-drift-realign skill with CSV-wave parallel scanner pattern', text_zh: 'codex: 新增 manage-drift-realign 技能，使用 CSV-wave 并行 scanner 模式' },
     ],
   },
   {
@@ -428,7 +670,7 @@ export default function ChangelogPage() {
 
       {/* Version entries */}
       <div className="space-y-[var(--spacing-8)] max-w-[860px]">
-        {changelog.map((entry) => (
+        {changelog.map((entry, index) => (
           <section key={entry.version}>
             {/* Version header */}
             <div className="flex items-center gap-[var(--spacing-3)] mb-[var(--spacing-3)]">
@@ -438,7 +680,7 @@ export default function ChangelogPage() {
               <span className="text-[length:var(--font-size-sm)] text-text-tertiary">
                 {entry.date}
               </span>
-              {entry.version === '0.4.3' && (
+              {index === 0 && (
                 <span className="text-[length:10px] font-[var(--font-weight-semibold)] px-[var(--spacing-2)] py-[2px] rounded-full bg-status-bg-completed text-accent-green">
                   {t('changelog.latest')}
                 </span>

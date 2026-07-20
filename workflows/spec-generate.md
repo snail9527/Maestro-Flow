@@ -1,8 +1,9 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Workflow: Spec Generate (Full Mode)
-
-Specification document chain producing a complete specification package (Product Brief, PRD, Architecture, Epics, Roadmap) through 7 sequential phases with multi-CLI analysis and interactive refinement. Pure documentation — no code generation.
-
-**Shared logic**: `@roadmap-common.md` (worktree guard, context loading, codebase exploration, external research, minimum-phase principle, roadmap write logic)
 
 ## Pipeline Position
 
@@ -35,25 +36,27 @@ $ARGUMENTS: "<idea or @file> [-y] [-c] [--from <source>]"
 ## Output Structure
 
 ```
-.workflow/.spec/SPEC-{slug}-{YYYY-MM-DD}/
-├── spec-config.json              # Session configuration + phase state
-├── discovery-context.json        # Codebase exploration (optional)
-├── refined-requirements.json     # Phase 1.5: Confirmed requirements
-├── glossary.json                 # Phase 2: Terminology glossary
-├── product-brief.md              # Phase 2: Product brief
-├── requirements/                 # Phase 3: Detailed PRD
-│   ├── _index.md                 #   Summary, MoSCoW table, traceability
-│   ├── REQ-NNN-{slug}.md         #   Functional requirement
-│   └── NFR-{type}-NNN-{slug}.md  #   Non-functional requirement
-├── architecture/                 # Phase 4: Architecture decisions
-│   ├── _index.md                 #   Overview, components, tech stack
-│   └── ADR-NNN-{slug}.md         #   Architecture Decision Record
-├── epics/                        # Phase 5: Epic/Story breakdown
-│   ├── _index.md                 #   Epic table, dependency map, MVP
-│   └── EPIC-NNN-{slug}.md        #   Individual Epic with Stories
-├── readiness-report.md           # Phase 6: Quality report
-├── spec-summary.md               # Phase 6: Executive summary
-└── roadmap.md                    # Phase 7: Project roadmap (also written to .workflow/roadmap.md)
+{run_dir}/
+├── outputs/
+│   ├── spec-config.json              # Session configuration + phase state
+│   ├── discovery-context.json        # Codebase exploration (optional)
+│   ├── refined-requirements.json     # Phase 1.5: Confirmed requirements
+│   ├── glossary.json                 # Phase 2: Terminology glossary
+│   ├── product-brief.md              # Phase 2: Product brief
+│   ├── requirements/                 # Phase 3: Detailed PRD
+│   │   ├── _index.md                 #   Summary, MoSCoW table, traceability
+│   │   ├── REQ-NNN-{slug}.md         #   Functional requirement
+│   │   └── NFR-{type}-NNN-{slug}.md  #   Non-functional requirement
+│   ├── architecture/                 # Phase 4: Architecture decisions
+│   │   ├── _index.md                 #   Overview, components, tech stack
+│   │   └── ADR-NNN-{slug}.md         #   Architecture Decision Record
+│   ├── epics/                        # Phase 5: Epic/Story breakdown
+│   │   ├── _index.md                 #   Epic table, dependency map, MVP
+│   │   └── EPIC-NNN-{slug}.md        #   Individual Epic with Stories
+│   ├── readiness-report.md           # Phase 6: Quality report
+│   ├── spec-summary.md               # Phase 6: Executive summary
+│   └── roadmap.md                    # Phase 7: Project roadmap
+└── report.md
 ```
 
 ---
@@ -70,7 +73,7 @@ Load specification and template documents:
 | Quality gates | Per-phase quality criteria and scoring | P0 - must read |
 | Templates | product-brief, requirements-prd, architecture-doc, epics-template | Read on-demand per phase |
 
-**Load project specs and history**: Follow roadmap-common.md "Load Project Context".
+**Load project specs and history**: MANDATORY: execute ~/.maestro/workflows/roadmap-common.md "Load Project Context"; REQUIRED produce: specs+history loaded.
 
 Additional full-mode rules:
 - Features in `already_shipped` are EXCLUDED from spec generation scope
@@ -105,19 +108,19 @@ Parse input, analyze the seed idea, optionally explore codebase, establish sessi
 
 **Step 2.2: Session Initialization**
 ```
-Session ID: SPEC-{slug}-{YYYY-MM-DD}
-Output dir: .workflow/.spec/{session_id}/
+Session: via maestro run create spec-generate --session YYYYMMDD-spec-{slug}
+Output dir: {run_dir}/outputs/
 ```
 
-**Step 2.3: Seed Analysis via CLI**
+**Step 2.3: Seed Analysis via CLI** (MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep)
 - Spawn CLI analysis to extract: problem_statement, target_users, domain, constraints, dimensions (3-5)
 - Assess complexity: simple (1-2 components) / moderate (3-5) / complex (6+)
 - For context-package input: enrich with feature decomposition data
 
-**Step 2.4: Codebase Exploration** — follow roadmap-common.md
+**Step 2.4: Codebase Exploration** — MANDATORY: execute ~/.maestro/workflows/roadmap-common.md Codebase Exploration logic; REQUIRED produce: discovery-context.json (codebase context)
 - Output: `discovery-context.json` with relevant_files, patterns, tech_stack
 
-**Step 2.5: External Research** — follow roadmap-common.md
+**Step 2.5: External Research** — MANDATORY: execute ~/.maestro/workflows/roadmap-common.md External Research logic; REQUIRED produce: apiResearchContext (or [LOW CONFIDENCE] if none)
 
 `apiResearchContext` is passed into:
 - Step 4 (Product Brief): technology feasibility assessment
@@ -166,7 +169,7 @@ Generate product brief through multi-perspective CLI analysis.
 - Read discovery-context.json (if codebase detected)
 - For context-package input: read context-package.json domain and requirements sections
 
-**Step 4.2: Multi-CLI Parallel Analysis (3 perspectives)**
+**Step 4.2: Multi-CLI Parallel Analysis (3 perspectives)** (MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep)
 
 | Perspective | Role | Focus |
 |-------------|------|-------|
@@ -190,6 +193,8 @@ Generate product brief through multi-perspective CLI analysis.
   - Injected into all subsequent phase CLI prompts for terminology consistency
 
 **Output**: `product-brief.md`, `glossary.json`
+
+**GATE P2→P3**: REQUIRED product-brief.md written; BLOCKED if missing
 
 ### Step 5: Requirements / PRD (Phase 3)
 
@@ -216,11 +221,13 @@ Generate detailed PRD with functional/non-functional requirements.
 
 **Output**: `requirements/` directory (index + individual files)
 
+**GATE P3→P4**: REQUIRED requirements/_index.md with MoSCoW table; BLOCKED if missing
+
 ### Step 6: Architecture (Phase 4)
 
 Generate architecture decisions, component design, and technology selections.
 
-**Step 6.1: Architecture Analysis via CLI (role: review)**
+**Step 6.1: Architecture Analysis via CLI (role: review)** (MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep)
 - System architecture style with justification
 - Core components and responsibilities
 - Component interaction diagram (Mermaid graph TD)
@@ -340,7 +347,7 @@ Convert Epics into an interactive roadmap with user confirmation.
 - Read individual `EPIC-NNN-{slug}.md` for Stories and acceptance criteria
 - Read `architecture/_index.md` for technical constraints (ADR decisions)
 
-Apply **Minimum-Phase Principle** from roadmap-common.md for Epic→Phase mapping:
+Apply **Minimum-Phase Principle** from ~/.maestro/workflows/roadmap-common.md for Epic→Phase mapping:
 - Default: ALL Epics → 1 Phase (wave DAG orders tasks by Epic dependencies)
 - Only split if hard dependency conditions are all met
 - MVP-tagged Epics → Milestone 1, Post-MVP → Milestone 2+
@@ -350,7 +357,7 @@ Apply **Minimum-Phase Principle** from roadmap-common.md for Epic→Phase mappin
 - ADR decisions → phase technical constraints
 
 **Step 11.2: Generate Draft Roadmap**
-Follow roadmap-common.md **Roadmap Template** format. For full mode, populate from product-brief.md vision and Epic→Stories acceptance criteria.
+MANDATORY: apply ~/.maestro/workflows/roadmap-common.md **Roadmap Template** format. For full mode, populate from product-brief.md vision and Epic→Stories acceptance criteria; REQUIRED produce: roadmap section.
 
 **Step 11.3: Interactive Refinement (max 3 rounds)**
 - Present roadmap overview: phase count, milestone structure, dependency graph
@@ -364,29 +371,30 @@ Follow roadmap-common.md **Roadmap Template** format. For full mode, populate fr
 
 **Step 11.4: Write Outputs**
 - Write `roadmap.md` to spec directory: `{spec_dir}/roadmap.md`
-- Write `.workflow/roadmap.md` — follow roadmap-common.md **Overwrite vs Edit Rules**
+- MANDATORY: apply ~/.maestro/workflows/roadmap-common.md **Overwrite vs Edit Rules**; REQUIRED produce: .workflow/roadmap.md; BLOCKED if missing
 - Update `spec-config.json`: add Phase 7 completion
-- Update `state.json` — follow roadmap-common.md **state.json Update Rules**
+- MANDATORY: apply ~/.maestro/workflows/roadmap-common.md **state.json Update Rules**; REQUIRED produce: state.json updated
 
 **Step 11.5: Handoff Options (AskUserQuestion)**
 
 | Option | Action |
 |--------|--------|
-| Initialize project | Skill({ skill: "maestro-init" }) |
-| Plan first phase | Skill({ skill: "maestro-plan", args: "1" }) |
-| Create issues | Generate issues per phase via Skill({ skill: "manage-issue" }) |
+| Initialize project | Recommend `/maestro-init` |
+| Plan first phase | step `plan 1` |
+| Create issues | Recommend `/maestro-manage issue create ...` per phase |
 | Export only | Spec + roadmap complete, no further action |
 
 ### Step 12: Final Report
 
 ```
+Glob product-brief.md AND requirements/ AND architecture/ AND epics/ MUST exist before final report; BLOCKED if missing.
 == spec-generate complete ==
-Session: SPEC-{slug}-{date} | Quality: {score}% ({gate}) | Phases: {completed_count}/7
-Output: .workflow/.spec/{session_id}/
+Session: {session_id} | Quality: {score}% ({gate}) | Phases: {completed_count}/7
+Output: {run_dir}/outputs/
   spec-config.json, product-brief.md, requirements/, architecture/, epics/,
   readiness-report.md, spec-summary.md, roadmap.md
 
-Next: maestro-init (setup) | maestro-plan 1 (plan first phase)
+Next: maestro-init (setup) | plan 1 (plan first phase)
 ```
 
 ---
@@ -457,14 +465,14 @@ Init detects existing `.workflow/roadmap.md` and skips roadmap creation.
 | Phase | Error | Blocking? | Action |
 |-------|-------|-----------|--------|
 | Phase 1 | Empty input | Yes | Error and exit |
-| Phase 1 | CLI analysis fails | No | Basic parsing fallback |
+| Phase 1 | CLI analysis fails | No | Basic parsing fallback; flag seed analysis as [LOW CONFIDENCE] (basic parsing) |
 | Phase 1.5 | Gap analysis fails | No | Skip to basic prompts |
-| Phase 2 | Single CLI fails | No | Continue with available |
-| Phase 3 | Gemini fails | No | Codex fallback |
-| Phase 4 | Review fails | No | Skip review |
+| Phase 2 | Single CLI fails | No | Continue with available; flag product-brief as [LOW CONFIDENCE] (N-1 perspectives) |
+| Phase 3 | Gemini fails | No | Codex fallback; flag requirements as [LOW CONFIDENCE] (fallback tool) |
+| Phase 4 | Review fails | No | Skip review; flag architecture/ as [LOW CONFIDENCE] (review skipped) |
 | Phase 5 | Story generation fails | No | Generate epics only |
-| Phase 6 | Validation fails | No | Partial report |
+| Phase 6 | Validation fails | No | Partial report; flag readiness-report as [LOW CONFIDENCE] (validation incomplete) |
 | Phase 6.5 | Max iterations (2) | No | Force handoff |
-| Step 2.5 | External research fails | No | apiResearchContext = null, continue |
+| Step 2.5 | External research fails | No | apiResearchContext = null, continue; flag Phase 2-5 outputs as [LOW CONFIDENCE] (no external research) |
 
-CLI Fallback Chain: Role-based resolution → degraded mode (local only)
+CLI Fallback Chain: Role-based resolution → degraded mode (local only); flag all affected outputs as [LOW CONFIDENCE] (degraded local-only mode)

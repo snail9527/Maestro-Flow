@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { DefaultExprEvaluator, ExprSyntaxError } from '../expr-evaluator.js';
 import type { WalkerContext, DecisionEdge } from '../graph-types.js';

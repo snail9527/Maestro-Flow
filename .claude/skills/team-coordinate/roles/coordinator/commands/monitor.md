@@ -1,3 +1,4 @@
+
 # Command: monitor
 
 ## Purpose
@@ -24,7 +25,7 @@ Event-driven pipeline coordination with Spawn-and-Stop pattern. Role names are r
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| SPAWN_MODE | background | All workers spawned via `Task(run_in_background: true)` |
+| SPAWN_MODE | background | All workers spawned via `Agent(subagent_type: "team-worker", run_in_background: true)` |
 | ONE_STEP_PER_INVOCATION | true | Coordinator does one operation then STOPS |
 | FAST_ADVANCE_AWARE | true | Workers may skip coordinator for simple linear successors |
 | WORKER_AGENT | team-worker | All workers spawned as team-worker agents |
@@ -33,7 +34,7 @@ Event-driven pipeline coordination with Spawn-and-Stop pattern. Role names are r
 
 | Input | Source | Required |
 |-------|--------|----------|
-| Session file | `<session-folder>/team-session.json` | Yes |
+| Session file | `{run_dir}/work/team/team-session.json` | Yes |
 | Task list | `TaskList()` | Yes |
 | Active workers | session.active_workers[] | Yes |
 | Role registry | session.roles[] | Yes |
@@ -174,7 +175,7 @@ Ready tasks found?
       |   +- YES -> SKIP spawn (existing worker will pick it up via inner loop)
       |   +- NO -> normal spawn below
       +- TaskUpdate -> in_progress
-      +- team_msg log -> task_unblocked (session_id=<session-id>)
+      +- team_msg log -> task_unblocked (session_id=<run-id>)
       +- Spawn team-worker (see spawn tool call below)
       +- Add to session.active_workers
       Update session file -> output summary -> STOP
@@ -191,15 +192,15 @@ Agent({
   run_in_background: true,
   prompt: `## Role Assignment
 role: <role>
-role_spec: <session-folder>/role-specs/<role>.md
-session: <session-folder>
-session_id: <session-id>
+role_spec: {run_dir}/work/team/role-specs/<role>.md
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: <team-name>
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -216,6 +217,12 @@ Pipeline complete. Execute completion action based on session configuration.
 
 ```
 All tasks completed (no pending, no in_progress)
+  +- Run lifecycle completion:
+  |   - Read run_id from team-session.json.run.run_id
+  |   - Write {run_dir}/report.md with frontmatter (verdict/summary/concerns)
+  |   - Run `maestro run complete <run_id>`
+  |   - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
+  |
   +- Generate pipeline summary:
   |   - Deliverables list with paths
   |   - Pipeline stats (tasks completed, duration)
@@ -280,7 +287,7 @@ Parse capability_gap message:
   +- Generate new role-spec:
       1. Read specs/role-spec-template.md
       2. Fill template with: frontmatter (role, prefix, inner_loop, message_types) + Phase 2-4 content
-      3. Write to <session-folder>/role-specs/<new-role>.md
+      3. Write to {run_dir}/work/team/role-specs/<new-role>.md
       4. Add to session.roles[]
   +- Create new task(s) via TaskCreate
   +- Update team-session.json

@@ -7,15 +7,13 @@ message_types: [state_update]
 
 # Motion & Animation Researcher
 
-Audit existing animations in the codebase, measure paint/composite costs via Chrome DevTools performance traces, and catalog easing patterns. Produce foundation data for downstream choreographer, animator, and motion-tester roles.
-
 ## Phase 2: Context & Environment Detection
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| .msg/meta.json | <session>/wisdom/.msg/meta.json | No |
+| .msg/meta.json | {run_dir}/work/team/wisdom/.msg/meta.json | No |
 
 1. Extract session path and target scope from task description
 2. Detect project type and tech stack from package.json or equivalent:
@@ -31,7 +29,7 @@ Audit existing animations in the codebase, measure paint/composite costs via Chr
 | @react-spring/web | react-spring |
 | (default) | css-vanilla |
 
-3. Use CLI tools (e.g., `maestro delegate "..." --to gemini --mode analysis`) or direct tools (Glob, Grep) to scan for existing animations, transitions, keyframes
+3. Use CLI tools (e.g., `maestro delegate "..." --to agy --mode analysis`) or direct tools (Glob, Grep) to scan for existing animations, transitions, keyframes
 4. Read framework context from session config
 
 ## Phase 3: Research Execution
@@ -45,7 +43,7 @@ Execute 3 analysis streams:
 - Search for IntersectionObserver usage (scroll-triggered animations)
 - Catalog each animation: name, properties animated, duration, easing, trigger mechanism
 - Flag unsafe properties (width, height, top, left, margin, padding, color, background-color)
-- Output: `<session>/research/animation-inventory.json`
+- Output: `{run_dir}/outputs/research/animation-inventory.json`
   ```json
   {
     "css_keyframes": [{ "name": "", "file": "", "properties": [], "safe": true }],
@@ -67,7 +65,7 @@ Execute 3 analysis streams:
 - If Chrome DevTools unavailable:
   - Static analysis: count layout-triggering properties, estimate performance from code patterns
   - Mark `_source: "static-analysis"`
-- Output: `<session>/research/performance-baseline.json`
+- Output: `{run_dir}/outputs/research/performance-baseline.json`
   ```json
   {
     "_source": "chrome-devtools|static-analysis",
@@ -87,7 +85,7 @@ Execute 3 analysis streams:
 - Catalog each: name/value, usage count, context (hover, scroll, entry)
 - Recommend additions based on gaps (missing ease-spring, missing stagger patterns)
 - Reference specs/motion-tokens.md for recommended token schema
-- Output: `<session>/research/easing-catalog.json`
+- Output: `{run_dir}/outputs/research/easing-catalog.json`
   ```json
   {
     "existing": [{ "value": "", "usage_count": 0, "contexts": [] }],
@@ -111,5 +109,5 @@ Compile research summary metrics: animation_count, safe_percentage, fps_baseline
 
 2. If any file missing or invalid, re-run corresponding stream
 
-3. Update `<session>/wisdom/.msg/meta.json` under `motion-researcher` namespace:
+3. Update `{run_dir}/work/team/wisdom/.msg/meta.json` under `motion-researcher` namespace:
    - Read existing -> merge `{ "motion-researcher": { detected_stack, animation_count, safe_percentage, fps_baseline, easing_count, has_reduced_motion } }` -> write back

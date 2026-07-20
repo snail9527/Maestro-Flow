@@ -9,8 +9,6 @@ message_types:
 
 # Codebase Explorer
 
-Explore codebase structure through cli-explore-agent, collecting structured context (files, patterns, findings) for downstream analysis. One explorer per analysis perspective.
-
 ## Phase 2: Context & Scope Assessment
 
 | Input | Source | Required |
@@ -18,7 +16,7 @@ Explore codebase structure through cli-explore-agent, collecting structured cont
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
 
-1. Load debug specs: Run `ccw spec load --category debug` for known issues and root-cause notes
+1. Load debug specs: Run `maestro spec load --category debug` for known issues and root-cause notes
 2. Extract session path, topic, perspective, dimensions from task description:
 
 | Field | Pattern | Default |
@@ -41,24 +39,31 @@ Explore codebase structure through cli-explore-agent, collecting structured cont
 
 ## Phase 3: Codebase Exploration
 
-Use CLI tool for codebase exploration:
+**Primary: `maestro explore`** (structured multi-prompt):
 
-```javascript
-Bash({
-  command: `maestro delegate "PURPOSE: Explore codebase for <topic> from <perspective> perspective; success = structured findings with relevant files and patterns
-TASK: • Run module depth analysis • Search for topic-related patterns • Identify key files and their relationships • Extract architectural insights
-MODE: analysis
-CONTEXT: @**/* | Memory: Session <session-folder>, perspective <perspective>
-EXPECTED: JSON output with: relevant_files (path, relevance, summary), patterns, key_findings, module_map, questions_for_analysis, _metadata (perspective, search_queries, timestamp)
-CONSTRAINTS: Focus on <perspective> angle - <strategy.focus> | Write to <session>/explorations/exploration-<num>.json
-" --tool gemini --mode analysis --rule analysis-analyze-code-patterns`,
-  run_in_background: false
-})
+```bash
+maestro explore \
+  "FIND: <topic> patterns and implementations
+SCOPE: src/
+ATTENTION: <perspective>-specific concerns
+EXPECTED: file:line evidence with relevance" \
+  "FIND: module boundaries and relationships for <topic>
+SCOPE: src/
+EXCLUDE: tests, generated code
+EXPECTED: dependency pairs and architectural insights" \
+  --max-turns 3 --json
 ```
 
-**ACE fallback** (when CLI produces no output):
-```javascript
-({ project_root_path: ".", query: "<topic> <perspective>" })
+Parse JSON results → extract relevant_files, patterns, key_findings.
+
+**Fallback: `maestro delegate`** (when explore results insufficient):
+
+```bash
+maestro delegate "PURPOSE: Explore codebase for <topic> from <perspective> perspective
+TASK: Search for topic-related patterns | Identify key files and relationships | Extract architectural insights
+EXPECTED: JSON with relevant_files, patterns, key_findings
+CONSTRAINTS: Focus on <perspective> angle
+" --tool agy --mode analysis --rule analysis-analyze-code-patterns
 ```
 
 ## Phase 4: Result Validation
@@ -69,7 +74,7 @@ CONSTRAINTS: Focus on <perspective> angle - <strategy.focus> | Write to <session
 | Has relevant_files | Array length > 0 | Trigger ACE supplementary search |
 | Has key_findings | Array length > 0 | Note partial results, proceed |
 
-Write validated exploration to `<session>/explorations/exploration-<num>.json`.
+Write validated exploration to `{run_dir}/work/team/explorations/exploration-<num>.json`.
 
-Update `<session>/wisdom/.msg/meta.json` under `explorer` namespace:
+Update `{run_dir}/work/team/wisdom/.msg/meta.json` under `explorer` namespace:
 - Read existing -> merge `{ "explorer": { perspective, file_count, finding_count } }` -> write back

@@ -1,3 +1,8 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # KnowHow Workflow
 
 ## Dual Store Architecture
@@ -32,7 +37,7 @@ All types share `WikiNodeType = 'knowhow'`. The `type` field distinguishes subty
 
 ---
 
-## Part A: KnowHow Management (manage-knowhow)
+## Part A: KnowHow Management (/maestro-manage knowledge knowhow)
 
 Operations: list, search, view, edit, delete, prune across both stores.
 
@@ -69,11 +74,17 @@ Full-text search across both stores. Rank: exact match > heading > content.
 
 ### Step 5-9: View, Edit, Delete, Prune, Integrity Check
 
-Same logic as before. Workflow entries managed via WikiWriter; system entries via direct file ops.
+MANDATORY: execute View/Edit/Delete/Prune/Integrity-Check logic per spec; REQUIRED produce: per-step result + final store-consistency report; BLOCKED if any step's produce missing.
+
+- **View**: Workflow `maestro wiki get <slug>`, System Read file; BLOCKED if entry not found.
+- **Edit**: System store only, direct file edit preserving frontmatter; BLOCKED if frontmatter schema invalid after edit.
+- **Delete**: Workflow `maestro wiki delete <slug>`, System mv to `.workflow/.trash/`; REQUIRED produce backup; BLOCKED if backup missing.
+- **Prune**: Scan `status=deprecated|superseded` entries, list candidates, delete after confirm; REQUIRED produce prune report; BLOCKED if delete without backup.
+- **Integrity Check**: Workflow verify `wiki-index.json` matches disk, System verify MEMORY.md links; REQUIRED produce report {missing[], stale[]}; BLOCKED if missing>0.
 
 ---
 
-## Part B: KnowHow Capture (manage-knowhow-capture)
+## Part B: KnowHow Capture (/maestro-manage knowledge capture)
 
 Capture reusable knowledge into `.workflow/knowhow/`.
 
@@ -409,8 +420,8 @@ Multiple workflows append `<spec-entry>` blocks to this container:
 
 | Workflow | Source value | When |
 |----------|-------------|------|
-| `manage-learn` | `manual` or `tip` | Manual capture during active work |
-| `quality-retrospective` | `retrospective` | Phase retrospective insight distillation |
+| `/maestro-manage knowledge capture` | `manual` or `tip` | Manual capture during active work |
+| `retrospective` | `retrospective` | Phase retrospective insight distillation |
 | `learn-retro` | `retro-git` or `retro-decision` | Retrospective from git activity or decisions |
 | `wiki-connect` | `wiki-connect` | Graph connectivity insights |
 | `wiki-digest` | `wiki-digest` | Knowledge synthesis meta-insights |

@@ -23,6 +23,16 @@ export interface RalphStep {
   completed_at?: string;
   error?: string;
   retried?: boolean;
+  // R10-2: surface completion telemetry so the dashboard can distinguish
+  // DONE / DONE_WITH_CONCERNS / NEEDS_RETRY / BLOCKED instead of rendering
+  // every step identically. Mirrors src/ralph/status-schema.ts RalphStep.
+  // NOTE: retry_count/max_retries are present for parity but are currently
+  // never incremented (decision-node fields owned by the LLM layer, see R7-1),
+  // so they read as空 until that side is wired.
+  completion_status?: 'DONE' | 'DONE_WITH_CONCERNS' | 'NEEDS_RETRY' | 'BLOCKED' | null;
+  completion_confirmed?: boolean;
+  retry_count?: number;
+  max_retries?: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -35,6 +35,10 @@ title: ".workflow/ 产物目录体系"
 ├── project.md                    # 项目定义（Core Value, Requirements, Key Decisions）
 ├── roadmap.md                    # 里程碑/阶段路线图
 ├── wiki-index.json               # Wiki 统一索引（WikiIndexer 自动生成）
+├── search-cache.json             # Wiki 搜索缓存（BM25F 索引 + mtime 快照）
+├── search-daemon.json            # 搜索守护进程状态（pid/port/startedAt）
+├── embedding-index.bin           # 向量嵌入索引（ONNX 模型生成）
+├── spec-analytics.jsonl          # Spec 注入分析日志
 │
 ├── specs/                        # 规范文件（6 类，项目级）
 │   ├── coding-conventions.md     # 编码规范（核心）
@@ -98,42 +102,70 @@ title: ".workflow/ 产物目录体系"
 │   ├── features.md
 │   └── concerns.md
 │
-├── blueprint/                    # 规范蓝图包（maestro-blueprint）
-│   ├── blueprint-config.json
-│   ├── product-brief.md
-│   ├── glossary.json
-│   ├── requirements/REQ-*.md, NFR-*.md
-│   ├── architecture/ADR-*.md
-│   ├── epics/EPIC-*.md
-│   ├── readiness-report.md
-│   └── blueprint-summary.md
+├── active/                       # WFS 工作流会话
+│   └── WFS-{name}-{date}/        # 活跃工作流会话
+│
+├── explore/                      # Explore 会话存储
+│   └── exp-{date}-{id}.json      # 探索会话结果
+│
+├── domain/                       # 领域知识系统
+│   ├── glossary.yaml             # 术语表（YAML 格式，主格式）
+│   ├── glossary.json             # 术语表（JSON 格式，向后兼容）
+│   └── concepts/                 # 概念文档
+│
+├── kg/                           # 知识图谱数据库
+│   └── maestro.db                # SQLite 数据库（MaestroGraph）
+│
+├── learning/                     # 学习模式
+│   └── patterns.jsonl            # 学习到的模式
+│
+├── execution/                    # 执行日志
+│   └── journal.jsonl             # 执行日志
+│
+├── plans/                        # 归档计划文档
+│
+├── research/                     # 研究缓存
+│
+├── analytics/                    # 分析数据
+│   └── spec-analytics.jsonl      # Spec 注入分析
+│
+├── commands/                     # 命令配置
+│   └── search-system-mapping.yaml # 搜索系统映射
+│
+├── phases/                       # 里程碑阶段文档
+│   └── {NN}-{name}/              # 阶段文档
+│
+├── memory/                       # 记忆存储
+│
+├── task-specs/                   # 任务规范
 │
 ├── collab/                       # 人类团队协作
 │   ├── specs/                    # 团队级规范
 │   └── specs/{uid}/              # 个人级规范
 │
-├── .maestro/                     # Agent 会话状态（内部）
-│   ├── maestro-*/status.json
-│   ├── ralph-*/status.json
-│   ├── player-*/status.json
-│   └── coord-*/walker-state.json
-│
-├── .team/{session-id}/.msg/      # Agent 团队消息总线
-│   └── messages.jsonl
-│
-├── templates/design-drafts/      # 工作流模板设计草稿
-├── reference_style/              # UI 设计系统参考
 ├── impeccable/                   # Impeccable UI 设计上下文
 │   ├── PRODUCT.md
 │   ├── DESIGN.md
 │   ├── design.json
-│   ├── critique/
-│   └── live/config.json, sessions/
+│   └── design-system/            # 设计系统
 │
-├── worktrees.json                # Worktree 注册表
-├── worktree-scope.json           # Worktree 作用域标记
-├── harvest-log.jsonl             # 收获日志
-└── harvest-report-{date}.md      # 收获报告
+├── .maestro/                     # Maestro 会话状态（内部）
+│   └── maestro-*/status.json     # maestro 会话状态
+│
+├── .team/                        # Agent 团队消息总线
+│   └── {session-id}/.msg/
+│       └── messages.jsonl
+│
+├── .analysis/                    # 分析会话
+├── .brainstorm/                  # 头脑风暴会话
+├── .brainstorm-visualize/        # 头脑风暴可视化
+├── .csv-wave/                    # CSV 波次分析
+├── .debug/                       # 调试会话
+├── .lite-plan/                   # 轻量计划
+├── .maestro-coordinate/          # 协调会话
+├── .scratchpad/                  # 临时笔记
+├── .spec-index/                  # 规范索引
+└── .workflow/                    # 子工作流
 ```
 
 </details>

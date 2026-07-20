@@ -1,3 +1,8 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Wiki Digest Workflow
 
 Knowledge synthesis from the wiki knowledge graph. Clusters entries by semantic theme, identifies knowledge gaps, produces coverage heatmaps, and optionally creates knowledge-gap issues.
@@ -20,12 +25,12 @@ Unlike `maestro wiki list` which shows raw entries, this workflow synthesizes an
 ## Argument Shape
 
 ```
-/wiki-digest                                  → digest entire wiki
-/wiki-digest auth                             → topic-scoped digest
-/wiki-digest --recent 14                      → entries updated in last 14 days
-/wiki-digest --type spec                      → spec entries only
-/wiki-digest --format full                    → detailed per-entry summaries
-/wiki-digest auth --create-issues             → digest + auto-create gap issues
+/maestro-manage knowledge wiki digest                                  → digest entire wiki
+/maestro-manage knowledge wiki digest auth                             → topic-scoped digest
+/maestro-manage knowledge wiki digest --recent 14                      → entries updated in last 14 days
+/maestro-manage knowledge wiki digest --type spec                      → spec entries only
+/maestro-manage knowledge wiki digest --format full                    → detailed per-entry summaries
+/maestro-manage knowledge wiki digest auth --create-issues             → digest + auto-create gap issues
 ```
 
 | Flag | Effect |
@@ -74,8 +79,8 @@ Synthesize what these entries collectively teach. Focus on the knowledge pattern
 
 ### Key Entries
 Top 3-5 most important entries by:
-- Hub score (in-degree from `maestro wiki hubs`)
-- Backlink count (from `maestro wiki backlinks <id>`)
+- MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: Hub score (in-degree from `maestro wiki hubs`)
+- MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: Backlink count (from `maestro wiki backlinks <id>`)
 - Recency (recently updated entries weigh more)
 
 ### Gap Detection
@@ -93,7 +98,7 @@ Per-theme health adapted from wiki health formula (entries, connectivity, comple
 
 Search via `maestro wiki search` or parse `.workflow/specs/learnings.md` for keyword matches against each theme. Flag **unlinked insights** — learning entries matching a theme but not referenced by any wiki entry in that theme.
 
-If `learnings.md` not found, skip with W002 warning.
+If `learnings.md` not found, skip with W002 warning; mark digest cross-reference as [LOW CONFIDENCE] (learnings.md missing).
 
 ---
 
@@ -140,7 +145,7 @@ Produce `.workflow/knowhow/KNW-digest-{slug}-{YYYY-MM-DD}.md`:
 ## Knowledge Gaps
 | Gap | Theme | Type Missing | Suggested Action |
 |-----|-------|-------------|-----------------|
-| No knowhow for auth patterns | Security | knowhow | /learn-decompose src/auth/ |
+| No knowhow for auth patterns | Security | knowhow | /maestro-learn decompose src/auth/ |
 
 ## Unlinked Insights
 {knowhow entries not connected to wiki graph}
@@ -151,6 +156,8 @@ Produce `.workflow/knowhow/KNW-digest-{slug}-{YYYY-MM-DD}.md`:
 ```
 
 ---
+
+GATE Stage 6→7: gaps identified BEFORE issue routing; BLOCKED if no gaps identified in Stage 5
 
 ## Stage 7: Gap → Issue Routing (if --create-issues)
 
@@ -170,9 +177,9 @@ For each knowledge gap from Stage 5: dedup against `.workflow/issues/issues.json
 
 | Action | Command |
 |--------|---------|
-| Deep dive on a theme | `/learn-follow <wiki-id>` |
-| Fix graph connectivity | `/wiki-connect --fix` |
-| Decompose for patterns | `/learn-decompose <path>` |
+| Deep dive on a theme | `/maestro-learn follow <wiki-id>` |
+| Fix graph connectivity | `/maestro-manage knowledge wiki connect --fix` |
+| Decompose for patterns | `/maestro-learn decompose <path>` |
 | Create missing entries | `maestro wiki create --type <type> --slug <slug>` |
-| Triage gap issues | `/manage-issue list --source wiki-digest` |
+| Triage gap issues | `/maestro-manage issue list --source wiki-digest` |
 

@@ -1,23 +1,25 @@
 // ---------------------------------------------------------------------------
-// `maestro ralph complete <idx> --status <S>` — write completion + clear active_step.
+// `maestro ralph complete <idx> --status <S>` — complete a step via standard Run.
 //
-// Consistency rules (all hard errors):
-//   E008  idx must equal session.active_step_index
-//   E009  target step.status must be "running"
+// Delegates to `completeRun()` from the standard runtime, then updates the
+// orchestration chain status in session.json.
 //
-// Status semantics:
-//   DONE                 → completed, completion_confirmed=true
-//   DONE_WITH_CONCERNS   → completed, completion_confirmed=true, .concerns recorded
-//   NEEDS_RETRY          → pending,   retried=true, completion_confirmed=false
-//   BLOCKED              → step.status=failed, session.status=paused
-//
-// NEEDS_CONTEXT is NOT accepted — context shortage is no longer a valid
-// completion verdict (Claude Code harness auto-compacts; genuine ambiguity is
-// resolved in-place via AskUserQuestion in the command itself).
+// Status semantics (unchanged):
+//   DONE                 → chain step completed, run sealed
+//   DONE_WITH_CONCERNS   → chain step completed with concerns, run sealed
+//   NEEDS_RETRY          → chain step back to pending, run completed but step re-queued
+//   BLOCKED              → chain step failed, session paused
 // ---------------------------------------------------------------------------
 
-import type { RalphSession, RalphStep } from './status-schema.js';
-import { resolveSession, writeStatus, workflowRoot } from './status-store.js';
+import { SessionStore } from '../run/store.js';
+import { completeRunWithVerdict, type CompletionVerdict } from '../run/runtime.js';
+import { checkLease } from '../run/lease.js';
+import {
+  resolveRalphSession,
+  effectiveLease,
+  readMeta,
+  workflowRoot,
+} from './session-adapter.js';
 
 export interface CompleteCmdOptions {
   sessionId?: string;
@@ -26,92 +28,179 @@ export interface CompleteCmdOptions {
   evidence: string[];
   concerns?: string;
   reason?: string;
+  summary?: string;
+  decisions?: string[];
+  caveats?: string;
+  deferred?: string[];
+  executionOwner?: string;
+  ownerEpoch?: number;
+  leaseId?: string;
+  expectedSkill?: string;
+  expectedStepIndex?: number;
+}
+
+/**
+ * Ralph completion signals that belong in the run's handoff.concerns. caveats and
+ * concerns/reason are advisory notes about the step's outcome; deferred items are
+ * follow-up work the next step should see. All flow through the P1d notes channel,
+ * where completeRun appends them to handoff.concerns (append + dedupe).
+ */
+function handoffNotes(opts: CompleteCmdOptions): string[] {
+  const notes: string[] = [];
+  if (opts.caveats) notes.push(opts.caveats);
+  if (opts.status === 'DONE_WITH_CONCERNS' && opts.concerns) notes.push(opts.concerns);
+  if (opts.deferred?.length) notes.push(...opts.deferred.map(d => `deferred: ${d}`));
+  return notes;
 }
 
 export async function runComplete(opts: CompleteCmdOptions): Promise<number> {
-  const resolved = resolveSession(workflowRoot(), opts.sessionId);
+  const projectRoot = workflowRoot();
+
+  const resolved = resolveRalphSession(projectRoot, opts.sessionId);
   if (!resolved) {
-    console.error('[ralph complete] no maestro-* / ralph-* session found in .workflow/.maestro/');
-    return 1;
-  }
-  const { sessionId, statusPath, data } = resolved;
-
-  if (opts.index < 0 || opts.index >= data.steps.length) {
-    console.error(`[ralph complete] step index ${opts.index} out of range (0..${data.steps.length - 1})`);
+    const msg = opts.sessionId
+      ? `[ralph complete] no ralph session found with id "${opts.sessionId}"`
+      : '[ralph complete] no running ralph session found in .workflow/sessions/';
+    console.error(msg);
     return 1;
   }
 
-  const active = data.active_step_index;
-  if (active !== opts.index) {
-    console.error(`[ralph complete] E008: index ${opts.index} != active_step_index ${active === null || active === undefined ? '(none)' : active}`);
-    console.error('  → edit status.json manually to recover');
+  const { sessionId, meta, bundle } = resolved;
+  const session = bundle.session;
+  const chain = session.orchestration.chain;
+
+  const leaseClaim = {
+    executionOwner: opts.executionOwner,
+    ownerEpoch: opts.ownerEpoch,
+    leaseId: opts.leaseId,
+  };
+  const leaseConflict = checkLease(effectiveLease(session, meta), leaseClaim);
+  if (leaseConflict) {
+    console.error(`[ralph complete] ${leaseConflict}`);
     return 1;
   }
 
-  const step = data.steps[opts.index];
-  if (step.status !== 'running') {
-    console.error(`[ralph complete] E009: step ${opts.index}.status is "${step.status}", expected "running"`);
+  // Validate index
+  if (opts.index < 0 || opts.index >= chain.length) {
+    console.error(`[ralph complete] step index ${opts.index} out of range (0..${chain.length - 1})`);
     return 1;
   }
 
-  const now = new Date().toISOString();
-  applyStatus(data, step, now, opts);
-  writeStatus(statusPath, data);
+  const chainStep = chain[opts.index];
+
+  // Verify expected skill
+  if (opts.expectedSkill && chainStep.command !== opts.expectedSkill) {
+    console.error(`[ralph complete] expected command "${opts.expectedSkill}" does not match step command "${chainStep.command}"`);
+    return 1;
+  }
+
+  // Verify expected step index
+  if (opts.expectedStepIndex !== undefined && opts.index !== opts.expectedStepIndex) {
+    console.error(`[ralph complete] E008: expected index ${opts.expectedStepIndex} does not match target index ${opts.index}`);
+    return 1;
+  }
+
+  // Check step is in correct state
+  if (chainStep.status === 'completed' || chainStep.status === 'sealed') {
+    console.error(`[ralph complete] step ${opts.index} already ${chainStep.status}`);
+    return 0; // idempotent
+  }
+
+  if (chainStep.status !== 'running') {
+    console.error(`[ralph complete] step ${opts.index} status is "${chainStep.status}", expected "running"`);
+    return 1;
+  }
+
+  // Complete the standard Run if one exists. Ralph's completion signals ride the
+  // P1d notes channel so run.json.handoff carries them: caveats/concerns/deferred
+  // append to handoff.concerns, and summary is a fallback when the executor left
+  // report frontmatter without one (deriveHandoff yields an empty summary then).
+  const runId = chainStep.run_id;
+  let canonicalTransitionApplied = false;
+  if (runId) {
+    try {
+      const verdict: CompletionVerdict = opts.status === 'DONE'
+        ? 'done'
+        : opts.status === 'DONE_WITH_CONCERNS'
+          ? 'done-with-concerns'
+          : opts.status === 'NEEDS_RETRY'
+            ? 'needs-retry'
+            : 'blocked';
+      const completed = completeRunWithVerdict(projectRoot, runId, sessionId, {
+        verdict,
+        notes: handoffNotes(opts),
+        summaryFallback: opts.summary,
+        reason: opts.reason,
+        leaseClaim,
+      });
+      if (!completed.run_sealed) {
+        console.error(`[ralph complete] run ${runId} did not pass completion gates; chain unchanged`);
+        return 1;
+      }
+      canonicalTransitionApplied = completed.chain !== null;
+    } catch (err) {
+      // Non-fatal: the run might already be completed/sealed
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[ralph complete] run completion failed: ${msg}`);
+      return 1;
+    }
+  }
+
+  if (!canonicalTransitionApplied) {
+    const store = new SessionStore(projectRoot);
+    let fallbackResult: 'updated' | 'already-terminal';
+    try {
+      fallbackResult = store.update(sessionId, (draft) => {
+        // Legacy sessions may have no canonical Run. Re-check the lease and
+        // expected step identity under the same store lock that commits the
+        // fallback transition; the earlier checks are only user-facing fast
+        // failures and cannot authorize this write.
+        const freshMeta = readMeta(store.sessionDir(sessionId));
+        const freshLeaseConflict = checkLease(effectiveLease(draft.session, freshMeta), leaseClaim);
+        if (freshLeaseConflict) throw new Error(freshLeaseConflict);
+
+        const step = draft.session.orchestration.chain[opts.index];
+        if (!step || step.step_id !== chainStep.step_id) {
+          throw new Error(`step ${opts.index} changed before completion`);
+        }
+        if (step.status === 'completed' || step.status === 'sealed') return 'already-terminal';
+        if (step.status !== 'running' || step.run_id !== chainStep.run_id) {
+          throw new Error(`step ${opts.index} changed before completion (status=${step.status}, run_id=${step.run_id ?? '<none>'})`);
+        }
+        if (opts.expectedSkill && step.command !== opts.expectedSkill) {
+          throw new Error(`expected command "${opts.expectedSkill}" does not match step command "${step.command}"`);
+        }
+
+        switch (opts.status) {
+          case 'DONE':
+          case 'DONE_WITH_CONCERNS':
+            step.status = 'completed';
+            draft.session.active_run_id = null;
+            break;
+          case 'NEEDS_RETRY': {
+            const current = step.retry ?? { count: 0, max: 2 };
+            step.retry = { count: current.count + 1, max: current.max };
+            step.status = 'pending';
+            step.run_id = null;
+            draft.session.active_run_id = null;
+            break;
+          }
+          case 'BLOCKED':
+            step.status = 'failed';
+            draft.session.status = 'paused';
+            draft.session.active_run_id = null;
+            break;
+        }
+        draft.session.activity_revision++;
+        return 'updated';
+      });
+    } catch (error) {
+      console.error(`[ralph complete] fallback transition refused: ${(error as Error).message}`);
+      return 1;
+    }
+    if (fallbackResult === 'already-terminal') return 0;
+  }
 
   console.error(`[ralph complete] session=${sessionId} step=${opts.index} status=${opts.status}`);
   return 0;
-}
-
-function applyStatus(
-  session: RalphSession,
-  step: RalphStep,
-  now: string,
-  opts: CompleteCmdOptions,
-): void {
-  const evidence = opts.evidence.length === 0
-    ? null
-    : opts.evidence.length === 1 ? opts.evidence[0] : opts.evidence;
-
-  switch (opts.status) {
-    case 'DONE':
-      step.status = 'completed';
-      step.completion_confirmed = true;
-      step.completion_status = 'DONE';
-      step.completion_evidence = evidence;
-      step.completed_at = now;
-      step.concerns = null;
-      session.active_step_index = null;
-      break;
-
-    case 'DONE_WITH_CONCERNS':
-      step.status = 'completed';
-      step.completion_confirmed = true;
-      step.completion_status = 'DONE_WITH_CONCERNS';
-      step.completion_evidence = evidence;
-      step.concerns = opts.concerns ?? null;
-      step.completed_at = now;
-      session.active_step_index = null;
-      break;
-
-    case 'NEEDS_RETRY':
-      step.status = 'pending';
-      step.retried = true;
-      step.completion_confirmed = false;
-      step.completion_status = 'NEEDS_RETRY';
-      step.completion_evidence = evidence;
-      step.completed_at = null;
-      session.active_step_index = null;
-      break;
-
-    case 'BLOCKED':
-      step.status = 'failed';
-      step.completion_confirmed = false;
-      step.completion_status = 'BLOCKED';
-      step.completion_evidence = evidence;
-      step.concerns = opts.reason ?? null;
-      step.completed_at = now;
-      session.status = 'paused';
-      session.active_step_index = null;
-      break;
-  }
 }

@@ -1,7 +1,8 @@
 ---
 name: maestro-merge
-description: Merge milestone worktree branch back to main
-argument-hint: "-m <milestone-number> [--force] [--dry-run] [--no-cleanup] [--continue]"
+disable-model-invocation: true
+description: Merge session worktree branch back to main
+argument-hint: "--session <session_id> [--force] [--dry-run] [--no-cleanup] [--continue]"
 allowed-tools:
   - Read
   - Write
@@ -11,26 +12,32 @@ allowed-tools:
   - Grep
   - Agent
   - AskUserQuestion
+session-mode: run
+contract:
+  discovery: self-described
+  consumes: []
+  produces: []
 ---
-<purpose>
-Merge a milestone worktree branch back into main, sync scratch artifacts, and reconcile the artifact registry.
-Two-phase: git merge first, artifact sync second (only after git succeeds).
-</purpose>
 
 <required_reading>
-@~/.maestro/workflows/merge.md
+@~/.maestro/workflows/run-mode.md
 </required_reading>
 
-<context>
-$ARGUMENTS -- milestone number and optional flags.
+<purpose>
+Merge a session worktree branch back into main, sync Run artifacts, and reconcile the artifact registry.
+Two-step: git merge first, artifact sync second (only after git succeeds).
+</purpose>
 
-Flags (`-m`, `--force`, `--dry-run`, `--no-cleanup`, `--continue`), merge sequence, artifact sync detail, and conflict handling are defined in workflow `merge.md`.
+<context>
+$ARGUMENTS -- session ID (or slug) and optional flags.
+
+Flags (`--session`, `--force`, `--dry-run`, `--no-cleanup`, `--continue`), merge sequence, artifact sync detail, and conflict handling are defined in workflow `merge.md`.
 </context>
 
 <execution>
 Follow '~/.maestro/workflows/merge.md' completely.
 
-### Phase Gates (MANDATORY, BLOCKING)
+### Gates (MANDATORY, BLOCKING)
 
 **GATE 1: Pre-merge → Git Merge**
 - REQUIRED: Registry health check completed (stale entries cleaned or flagged).
@@ -42,8 +49,8 @@ Follow '~/.maestro/workflows/merge.md' completely.
 - BLOCKED if: merge has unresolved conflicts — do NOT sync artifacts until git merge succeeds (prevents partial state corruption).
 
 **GATE 3: Artifact Sync → Completion**
-- REQUIRED: All scratch artifacts synced to main `.workflow/scratch/`.
-- REQUIRED: `state.json.artifacts[]` reconciled (worktree entries merged into main).
+- REQUIRED: All Run artifacts synced to main `sessions/{session_id}/runs/`.
+- REQUIRED: Artifact registry reconciled (worktree entries merged into main).
 - REQUIRED: Worktree cleaned up (unless --no-cleanup).
 - BLOCKED if missing: artifacts not synced or registry not reconciled — main worktree would have incomplete state.
 
@@ -52,14 +59,25 @@ Follow '~/.maestro/workflows/merge.md' completely.
 <completion>
 ### Knowledge inquiry
 
-After successful merge, ask user once: "Record milestone learnings?" If yes, persist via `Skill("spec-add", "learning \"<title>\" \"<insight>\" --keywords <kw1>,<kw2> --description \"<summary>\"")`.
+After successful merge, use `[@ask] AskUserQuestion` to confirm knowledge persistence:
+
+```
+question: "Merge 完成。是否记录本次工作经验教训？"
+options:
+  - label: "记录经验"
+    description: "通过 maestro-spec add 持久化此次工作的关键洞察"
+  - label: "跳过"
+    description: "不记录，直接完成"
+```
+
+User selects "记录经验" → prompt for title/insight, then recommend `/maestro-spec add learning "<title>" "<insight>" --keywords <kw1>,<kw2> --description "<summary>"`. User selects "跳过" → proceed to next-step routing.
 
 ### Next-step routing
 
 | Condition | Suggestion |
 |-----------|-----------|
-| Merge complete | Skill({ skill: "manage-status" }) |
-| Audit needed | Skill({ skill: "maestro-milestone-audit" }) |
+| Merge complete | Recommend `/maestro-manage status` |
+| Next dep-ready session | step `analyze` for session (`maestro run prepare analyze --session {next-dep-ready-slug}` + `maestro run create analyze --session {next-dep-ready-slug} --intent "{goal}"`) |
 </completion>
 
 <error_codes>
@@ -68,7 +86,7 @@ After successful merge, ask user once: "Record milestone learnings?" If yes, per
 | E001 | error | Running inside a worktree | Run from main worktree |
 | E002 | error | No worktree registry found | Nothing to merge |
 | E003 | error | --continue but no merge state | Start fresh merge |
-| E004 | error | No milestone number provided | Provide `-m <N>` |
+| E004 | error | No session ID provided | Provide `--session <session_id>` |
 | W001 | warning | Stale registry entries found | Auto-cleaned |
 | W002 | warning | Incomplete artifacts (without --force) | Confirm or use --force |
 | W003 | warning | Conflict pulling main into worktree | Resolve in worktree first |
@@ -78,10 +96,9 @@ After successful merge, ask user once: "Record milestone learnings?" If yes, per
 - [ ] Registry health check passed (stale entries cleaned)
 - [ ] Pre-merge rebase successful (worktree has latest main)
 - [ ] Git merge completed without conflicts (or conflicts resolved via --continue)
-- [ ] All scratch artifacts synced to main `.workflow/scratch/`
-- [ ] `state.json.artifacts[]` reconciled (worktree entries merged into main)
-- [ ] Milestone `"forked"` flag removed in `state.json.milestones[]`
-- [ ] `roadmap.md` completed phases marked
+- [ ] All Run artifacts synced to main `sessions/{session_id}/runs/`
+- [ ] Artifact registry reconciled (worktree entries merged into main)
+- [ ] Session lifecycle updated (forked_from cleared)
 - [ ] Worktree removed and branch deleted (unless --no-cleanup)
 - [ ] `worktrees.json` registry updated (entry removed)
 </success_criteria>

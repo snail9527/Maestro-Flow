@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'vitest';
 import assert from 'node:assert';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -56,7 +56,8 @@ describe('loadSpecs — single directory (no uid)', () => {
     const result = loadSpecs(TEST_DIR, undefined, undefined, undefined, undefined, TEST_OPTS);
     assert.ok(result.content.includes('Coding Conventions'));
     assert.ok(result.content.includes('Learnings'));
-    assert.strictEqual(result.totalLoaded, 2);
+    // 3 = baseline coding-conventions + baseline learnings + global seed learnings
+    assert.strictEqual(result.totalLoaded, 3);
   });
 
   it('filters by category', () => {
@@ -64,6 +65,27 @@ describe('loadSpecs — single directory (no uid)', () => {
     assert.ok(result.content.includes('Coding Conventions'));
     assert.ok(!result.content.includes('Learnings')); // 1:1 mapping, no always-include
     assert.strictEqual(result.totalLoaded, 1);
+  });
+
+  it('hides deprecated entries by default and includes them only when requested', () => {
+    writeSpec(
+      BASELINE_DIR,
+      'coding-conventions.md',
+      '# Coding Conventions\n\n' +
+      '<spec-entry title="Current rule" category="coding" keywords="current" status="active">\nCurrent body\n</spec-entry>\n\n' +
+      '<spec-entry title="Retired rule" category="coding" keywords="retired" status="deprecated">\nRetired body\n</spec-entry>',
+    );
+
+    const current = loadSpecs(TEST_DIR, 'coding', undefined, undefined, undefined, TEST_OPTS);
+    assert.ok(current.content.includes('Current body'));
+    assert.ok(!current.content.includes('Retired body'));
+
+    const audit = loadSpecs(TEST_DIR, 'coding', undefined, undefined, undefined, {
+      ...TEST_OPTS,
+      includeDeprecated: true,
+    });
+    assert.ok(audit.content.includes('Current body'));
+    assert.ok(audit.content.includes('Retired body'));
   });
 
   it('returns empty when no specs directory', () => {

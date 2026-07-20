@@ -1,7 +1,9 @@
 ---
 name: scholar-review
+disable-model-invocation: true
 description: Systematic academic paper review workflow covering self-review before submission and rebuttal writing after receiving reviewer feedback. Triggers on "review paper", "self-review", "write rebuttal", "respond to reviewers", "analyze review comments", "paper review".
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch, AskUserQuestion, TodoWrite
+session-mode: none
 ---
 
 # Scholar Review
@@ -11,7 +13,7 @@ A structured workflow for academic paper review and rebuttal. Covers two modes: 
 ## Pre-load (before execution)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for project context
-2. **Specs**: `maestro spec load --category coding` — load coding conventions
+2. **Specs**: `maestro load --type spec --category coding` — load coding conventions
 3. **Wiki knowledge**: `maestro search "academic writing research paper" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 

@@ -2,19 +2,14 @@
 role: planner
 prefix: PLAN
 inner_loop: true
-message_types:
-  success: plan_ready
-  revision: plan_revision
-  error: error
+message_types: 
 ---
 
 # Planner
 
-Codebase-informed implementation planning with complexity assessment.
-
 ## Identity
 - Tag: [planner] | Prefix: PLAN-*
-- Responsibility: Explore codebase -> generate structured plan -> assess complexity
+- Responsibility: Explore codebase → generate structured plan → assess complexity
 
 ## Boundaries
 ### MUST
@@ -29,86 +24,51 @@ Codebase-informed implementation planning with complexity assessment.
 
 ## Phase 2: Context + Exploration
 
-1. If <session>/spec/ exists -> load requirements, architecture, epics (full-lifecycle)
-2. Read context from filesystem:
-   - Read `tasks.json` for current task assignments and status
-   - Read `discoveries/*.json` for prior exploration/analysis results from other roles
-3. Check <session>/explorations/cache-index.json for cached explorations
-4. Explore codebase (cache-aware):
+1. If {run_dir}/outputs/spec/ exists → load requirements, architecture, epics (full-lifecycle)
+2. Check {run_dir}/work/team/explorations/cache-index.json for cached explorations
+3. Explore codebase (cache-aware):
    ```
-   exec_command({
-     cmd: `maestro delegate "PURPOSE: Explore codebase to inform planning
-   TASK: * Search for relevant patterns * Identify files to modify * Document integration points
+   Bash({ command: `maestro delegate "PURPOSE: Explore codebase to inform planning
+   TASK: • Search for relevant patterns • Identify files to modify • Document integration points
    MODE: analysis
    CONTEXT: @**/*
-   EXPECTED: JSON with: relevant_files[], patterns[], integration_points[], recommendations[]" --role explore --mode analysis`,
-     yield_time_ms: 30000,
-     max_output_tokens: 6000
-   })
-   // ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
-   // NEVER skip — delegate result is required for plan generation
+   EXPECTED: JSON with: relevant_files[], patterns[], integration_points[], recommendations[]" --tool agy --mode analysis`, run_in_background: false })
    ```
-5. Store results in <session>/explorations/
+4. Store results in {run_dir}/work/team/explorations/
+
+### Secondary Signal Scan
+
+After exploration, supplement upstream tech_profile with planning-phase signals (based on detected codebase characteristics):
+
+1. Check plan complexity → `scaling_concern` if O(n^2)+ patterns found
+2. Check scope → `breaking_change` if public API modifications planned
+3. Check data → `data_migration` if schema changes identified
+4. Include `tech_profile` in Phase 5 state_update (merge with any upstream signals)
 
 ## Phase 3: Plan Generation
 
 Generate plan.json + .task/TASK-*.json:
 ```
-exec_command({
-  cmd: `maestro delegate "PURPOSE: Generate implementation plan from exploration results
-TASK: * Create plan.json overview * Generate TASK-*.json files (2-7 tasks) * Define dependencies * Set convergence criteria
+Bash({ command: `maestro delegate "PURPOSE: Generate implementation plan from exploration results
+TASK: • Create plan.json overview • Generate TASK-*.json files (2-7 tasks) • Define dependencies • Set convergence criteria
 MODE: write
-CONTEXT: @<session>/explorations/*.json
+CONTEXT: @{run_dir}/work/team/explorations/*.json
 EXPECTED: Files: plan.json + .task/TASK-*.json
-CONSTRAINTS: 2-7 tasks, include id/title/files[]/convergence.criteria/depends_on" --role implement --mode write`,
-  yield_time_ms: 30000,
-  max_output_tokens: 6000
-})
-// ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
-// NEVER skip — must wait for plan files to be written
+CONSTRAINTS: 2-7 tasks, include id/title/files[]/convergence.criteria/depends_on" --tool agy --mode write`, run_in_background: false })
 ```
 
 Output files:
 ```
-<session>/plan/
-+-- plan.json              # Overview + complexity assessment
-\-- .task/TASK-*.json      # Individual task definitions
+{run_dir}/outputs/plan/
+├── plan.json              # Overview + complexity assessment
+└── .task/TASK-*.json      # Individual task definitions
 ```
 
-## Phase 4: Report Results
+## Phase 4: Submit for Approval
 
 1. Read plan.json and TASK-*.json
-2. Write discovery to `discoveries/{task_id}.json`:
-   ```json
-   {
-     "task_id": "<task_id>",
-     "role": "planner",
-     "timestamp": "<ISO-8601>",
-     "complexity": "<Low|Medium|High>",
-     "task_count": <N>,
-     "approach": "<summary>",
-     "plan_location": "<session>/plan/",
-     "findings": { ... }
-   }
-   ```
-3. Report completion:
-   ```
-   report_agent_job_result({
-     id: "<task_id>",
-     status: "completed",
-     findings: { complexity, task_count, approach, plan_location },
-     quality_score: <0-100>,
-     supervision_verdict: "approve",
-     error: null
-   })
-   ```
-4. Coordinator reads complexity for conditional routing (see specs/pipelines.md)
-
-## Exploration Cache Protocol
-
-- Before exploring, check `<session>/explorations/cache-index.json`
-- Reuse cached results if query matches and cache is fresh
-- After exploring, update cache-index with new entries
+2. Report to coordinator: complexity, task count, approach, plan location
+3. Coordinator reads complexity for conditional routing (see specs/pipelines.md)
 
 ## Error Handling
 
@@ -116,5 +76,5 @@ Output files:
 |----------|------------|
 | CLI exploration failure | Plan from description only |
 | CLI planning failure | Fallback to direct planning |
-| Plan rejected 3+ times | Report via report_agent_job_result with status "failed" |
+| Plan rejected 3+ times | Notify coordinator |
 | Cache index corrupt | Clear cache, re-explore |

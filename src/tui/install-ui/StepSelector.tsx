@@ -65,7 +65,7 @@ export function StepSelector({ steps, selectedIds, onSelectionChange, onDone }: 
               <Text color={hl ? C.primary : undefined} bold={hl}>
                 {step.label}
               </Text>
-              <Text dimColor> — {step.description}</Text>
+              <Text color={C.neutral}> — {step.description}</Text>
             </Box>
           );
         })}

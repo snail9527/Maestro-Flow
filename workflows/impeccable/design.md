@@ -1,6 +1,9 @@
-# Design Stage + Bridge
+<!-- session-mode: inherited -->
 
-Design system generation via ui-search (BM25 search engine + CSV knowledge base), **visual prototype comparison**, and bridge conversion to Google Stitch DESIGN.md format. Loaded as deferred reading by maestro-impeccable when build chain enters S_DESIGN_EXPLORE or S_BRIDGE states.
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
+# Design Stage + Bridge
 
 ## Architecture
 

@@ -1,238 +1,183 @@
 ---
 name: team-review
-description: Team code review -- scan, review, fix pipeline
-argument-hint: "[scope] [-y|--yes] [-c|--concurrency N] [--continue] [--mode default|full|fix-only|quick]"
-allowed-tools: spawn_agents_on_csv, Read, Write, Edit, Bash, Glob, Grep, request_user_input
+disable-model-invocation: true
+description: "Unified team skill for code review. 3-role pipeline: scanner,
+  reviewer, fixer. Triggers on team-review."
+allowed-tools:
+  - Bash
+  - Edit
+  - Glob
+  - Grep
+  - Read
+  - Write
+  - followup_task
+  - interrupt_agent
+  - list_agents
+  - mcp__maestro__team_msg
+  - request_user_input
+  - send_message
+  - spawn_agent
+  - spawn_agents_on_csv
+  - update_plan
+  - wait_agent
+session-mode: run
+version: 0.5.53
+contract:
+  discovery: self-described
+  consumes: []
+  produces: []
+  gates:
+    entry: []
+    exit: []
 ---
 
-<purpose>
-Wave-based code review pipeline via `spawn_agents_on_csv`. Scanner → Reviewer → Fixer with 4-dimension analysis and user-gated fixes.
+> **Agent timeout**: `spawn_agent` 异步执行且无内置超时 — 除明确短任务外一律 `spawn_agent` 后立即 `wait_agent({ timeout_ms: 3600000 })`（上限 1 小时）阻塞等待，绝不依赖 30000 默认值；`timed_out: true` 且 Agent 未完成时再次 `wait_agent` 续等，不丢弃。批量场景使用 `spawn_agents_on_csv({ max_runtime_seconds: 3600, ... })`。
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
+
+# Team Review
+
+Orchestrate multi-agent code review: scanner -> reviewer -> fixer. Toolchain + LLM scan, deep analysis with root cause enrichment, and automated fix with rollback-on-failure.
+
+## Architecture
 
 ```
-+-------------------------------------------------------------------+
-|                   REVIEW CSV WAVE WORKFLOW                          |
-+-------------------------------------------------------------------+
-|  Phase 1: Mode Selection + CSV Generation                          |
-|     +-- Detect mode (default/full/fix-only/quick)                  |
-|     +-- Build tasks.csv from pipeline definition                   |
-|                                                                     |
-|  Phase 2: Wave Execution Engine                                    |
-|     +-- Sequential waves                                           |
-|     +-- User checkpoint before FIX wave (skip if -y)               |
-|     +-- Fix scope: all / critical+high / skip                      |
-|                                                                     |
-|  Phase 3: Results Aggregation                                      |
-+-------------------------------------------------------------------+
-```
-</purpose>
-
-<context>
-```bash
-$team-review "src/auth"
-$team-review -y --mode full "src/"
-$team-review --mode fix-only "fix-manifest.json"
-$team-review --continue "20260518-rv-auth"
+spawn_agent({ task_name: "team_review", message: "Execute skill team-review, args: task description" })
+                    |
+         SKILL.md (this file) = Router
+                    |
+     +--------------+--------------+
+     |                             |
+  no --role flag              --role <name>
+     |                             |
+  Coordinator                  Worker
+  roles/coordinator/role.md    roles/<name>/role.md
+     |
+     +-- analyze -> dispatch -> spawn workers -> STOP
+                                    |
+                    +-------+-------+-------+
+                    v       v       v
+                [scan]  [review]  [fix]
+                team-worker agents, each loads roles/<role>/role.md
 ```
 
-**Flags**: `-y` (auto), `-c N` (concurrency, default 3), `--continue` (resume), `--mode default|full|fix-only|quick`
+## Role Registry
 
-### Role Registry (Fixed)
+| Role | Path | Prefix | Inner Loop |
+|------|------|--------|------------|
+| coordinator | [roles/coordinator/role.md](roles/coordinator/role.md) | — | — |
+| scanner | [roles/scanner/role.md](roles/scanner/role.md) | SCAN-* | false |
+| reviewer | [roles/reviewer/role.md](roles/reviewer/role.md) | REV-* | false |
+| fixer | [roles/fixer/role.md](roles/fixer/role.md) | FIX-* | true |
 
-| Role | Path | Prefix |
-|------|------|--------|
-| scanner | [roles/scanner/role.md](roles/scanner/role.md) | SCAN-* |
-| reviewer | [roles/reviewer/role.md](roles/reviewer/role.md) | REV-* |
-| fixer | [roles/fixer/role.md](roles/fixer/role.md) | FIX-* |
+## Role Router
 
-**Session**: `.workflow/.csv-wave/{YYYYMMDD}-rv-{slug}/`
+Parse `$ARGUMENTS`:
+- Has `--role <name>` -> Read `roles/<name>/role.md`, execute Phase 2-4
+- No `--role` -> `@roles/coordinator/role.md`, execute entry router
 
-### Review Dimensions
-Security (SEC), Correctness (COR), Performance (PRF), Maintainability (MNT)
-</context>
+## Shared Constants
 
-<csv_schema>
+- **Session prefix**: `RV`
+- **Session path**: `{run_dir}/work/team/`
+- **Team name**: `review`
+- **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 
-### tasks.csv (Input columns)
+## Worker Spawn Template
 
-```csv
-id,title,description,role,review_dimension,deps,context_from,wave
-```
-
-| Column | Description |
-|--------|-------------|
-| `id` | Task ID: `{PREFIX}-{NNN}` |
-| `title` | Short task title |
-| `description` | PURPOSE/TASK/EXPECTED/CONSTRAINTS |
-| `role` | Fixed role name |
-| `review_dimension` | SEC/COR/PRF/MNT or empty |
-| `deps` | Semicolon-separated dependency IDs |
-| `context_from` | Context source IDs |
-| `wave` | Wave number |
-
-**Output columns** (via `output_schema` only):
-
-| Column | Description |
-|--------|-------------|
-| `result_status` | completed / failed / blocked |
-| `findings` | Key findings (max 500 chars) |
-| `files_modified` | Semicolon-separated paths |
-| `finding_count` | Number of issues found |
-| `verdict` | APPROVE / CONDITIONAL / BLOCK (for REV tasks) |
-| `error` | Error message |
-
-**Column separation rule**: Input and Output MUST NOT share names.
-
-### Pipeline Wave Assignments
-
-#### default (2 waves)
-
-| Wave | Task | Role |
-|------|------|------|
-| 1 | SCAN-001 | scanner |
-| 2 | REV-001 | reviewer |
-
-#### full (3 waves + user checkpoint)
-
-| Wave | Task | Role |
-|------|------|------|
-| 1 | SCAN-001 | scanner |
-| 2 | REV-001 | reviewer |
-| — | User checkpoint: fix scope selection | — |
-| 3 | FIX-001 | fixer |
-
-#### fix-only (1 wave)
-
-| Wave | Task | Role |
-|------|------|------|
-| 1 | FIX-001 | fixer |
-
-#### quick (1 wave)
-
-| Wave | Task | Role |
-|------|------|------|
-| 1 | SCAN-001 | scanner (quick=true) |
-</csv_schema>
-
-<invariants>
-1. **Wave Order Sacred**
-2. **CSV Source of Truth**
-3. **Column Separation Rule**
-4. **User Checkpoint Before Fix**: In full mode, pause after REV for user approval (skip if -y)
-5. **0 Findings Shortcut**: If scanner finds 0 issues → skip REV and FIX
-6. **Discovery Board Append-Only**
-7. **Cleanup Temp Files**
-8. **DO NOT STOP**: Continuous between checkpoints
-9. **Role Files Authoritative**
-</invariants>
-
-<state_machine>
-
-<states>
-S_PARSE        — Parse arguments, detect mode
-S_CSV_GEN      — Generate tasks.csv
-S_WAVE_{N}     — Execute wave N
-S_FIX_GATE     — User approval before fix (full mode)
-S_AGGREGATE    — Generate report
-</states>
-
-<transitions>
-S_PARSE → S_CSV_GEN
-S_CSV_GEN → S_WAVE_1
-S_WAVE_{N} → S_FIX_GATE       WHEN: mode=full, REV wave complete, FIX pending
-S_WAVE_{N} → S_WAVE_{N+1}     WHEN: more waves
-S_WAVE_{N} → S_AGGREGATE      WHEN: last wave or 0 findings shortcut
-S_FIX_GATE → S_WAVE_{N+1}     WHEN: user selects fix scope (all/critical+high)
-S_FIX_GATE → S_AGGREGATE      WHEN: user selects skip
-</transitions>
-
-<actions>
-
-### Fix Gate Logic
-
-After REV wave in full mode:
-1. Read reviewer's `findings` and `verdict`
-2. If `finding_count` = 0 or verdict = APPROVE → skip fix, aggregate
-3. Display findings summary to user
-4. `request_user_input`: Fix all / Fix critical+high only / Skip fixes
-5. Update FIX-001 description with approved scope
-6. Continue to FIX wave
-
-### Instruction Builder
+Coordinator spawns workers using this template:
 
 ```
-You are a team-review agent.
-Role: read 'role' column. Task: read 'description' column.
+spawn_agent({
+  subagent_type: "team-worker",
+  description: "Spawn <role> worker",
+  team_name: "review",
+  name: "<role>",
+  run_in_background: true,
+  prompt: `## Role Assignment
+role: <role>
+role_spec: <skill_root>/roles/<role>/role.md
+session: {run_dir}/work/team
+session_id: <run-id>
+team_name: review
+requirement: <task-description>
+inner_loop: <true|false>
 
-## Role Definition
-Read: {skillRoot}/roles/{role}/role.md
+## Progress Milestones
+session_id: <run-id>
+Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
+Report blockers immediately via team_msg type="blocker".
+Report completion via team_msg type="task_complete" after final send_message.
 
-## Context
-Session: {sessionFolder}
-Discovery board: {sessionFolder}/discoveries.ndjson
-Previous context: 'prev_context' column
-Dimensions: {skillRoot}/specs/dimensions.md
-
-## Termination Contract (MANDATORY)
-You MUST call report_agent_job_result EXACTLY ONCE before exiting. NO exceptions.
-- Success → result_status=completed after scan/review/fix completes
-- Failure → result_status=failed with error message
-- Blocked → result_status=blocked when upstream missing
-- Timeout → near max_runtime_seconds → result_status=blocked, error="timeout"
-- NEVER continue indefinitely. NEVER exit silently. NEVER omit the call.
-
-## Output (must match output_schema)
-{
-  "id": "<your CSV row id>",
-  "result_status": "completed" | "failed" | "blocked",
-  "findings": "<key findings, max 500 chars>",
-  "files_modified": "<semicolon-separated paths or empty>",
-  "finding_count": "<integer or empty>",
-  "verdict": "APPROVE" | "CONDITIONAL" | "BLOCK" | "" (REV only),
-  "error": "<message if not completed>"
-}
-
-## Hard Constraints
-- Do NOT write to tasks.csv, wave-*.csv, results.csv (orchestrator owns those).
-- Do NOT call spawn_agents_on_csv (no recursion).
+Read role_spec file (@<skill_root>/roles/<role>/role.md) to load Phase 2-4 domain instructions.
+Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 (report).`
+})
 ```
 
-### Spawn output_schema
+## User Commands
 
-```json
-{
-  "type": "object",
-  "properties": {
-    "id":             { "type": "string" },
-    "result_status":  { "type": "string", "enum": ["completed", "failed", "blocked"] },
-    "findings":       { "type": "string", "maxLength": 500 },
-    "files_modified": { "type": "string" },
-    "finding_count":  { "type": "string" },
-    "verdict":        { "type": "string", "enum": ["APPROVE", "CONDITIONAL", "BLOCK", ""] },
-    "error":          { "type": "string" }
-  },
-  "required": ["id", "result_status", "findings"]
-}
+| Command | Action |
+|---------|--------|
+| `check` / `status` | View pipeline status graph |
+| `resume` / `continue` | Advance to next step |
+| `--full` | Enable scan + review + fix pipeline |
+| `--fix` | Fix-only mode (skip scan/review) |
+| `-q` / `--quick` | Quick scan only |
+| `--dimensions=sec,cor,prf,mnt` | Custom dimensions |
+| `-y` / `--yes` | Skip confirmations |
+
+## Completion Action
+
+When pipeline completes, coordinator presents:
+
+```
+request_user_input({
+  questions: [{
+    question: "Review pipeline complete. What would you like to do?",
+    header: "Completion",
+    multiSelect: false,
+    options: [
+      { label: "Archive & Clean (Recommended)", description: "Archive session, clean up team" },
+      { label: "Keep Active", description: "Keep session for follow-up work" },
+      { label: "Export Results", description: "Export deliverables to target directory" }
+    ]
+  }]
+})
 ```
 
-Merge maps `result_status` → master `status`.
+## Session Directory
 
-</actions>
-</state_machine>
+```
+{run_dir}/
+├── outputs/
+│   ├── scan/               # Scanner output
+│   ├── review/             # Reviewer output
+│   └── fix/                # Fixer output
+├── report.md              # Human-readable synthesis + handoff
+└── work/team/             # Team coordination (non-artifact)
+    ├── .msg/messages.jsonl # Team message bus
+    ├── .msg/meta.json      # Message-bus state + cross-role state
+    └── wisdom/             # Cross-task knowledge
+```
 
-<error_codes>
+## Specs Reference
 
-| Condition | Recovery |
-|-----------|----------|
-| Scanner found 0 issues | Skip to aggregate, report clean |
-| Reviewer verdict: BLOCK | Pause for user decision |
-| Fix introduces regressions | Mark blocked, report regression details |
-</error_codes>
+- [specs/pipelines.md](specs/pipelines.md) — Pipeline definitions and task registry
+- [specs/dimensions.md](specs/dimensions.md) — Review dimension definitions (SEC/COR/PRF/MNT)
+- [specs/finding-schema.json](specs/finding-schema.json) — Finding data schema
+- [specs/team-config.json](specs/team-config.json) — Team configuration
 
-<success_criteria>
-- [ ] Mode selected and CSV generated
-- [ ] Scan → Review → Fix pipeline executed
-- [ ] User checkpoint before fixes (unless -y)
-- [ ] 0-findings shortcut works
-- [ ] Column separation maintained
-- [ ] results.csv and context.md generated
-</success_criteria>
+## Error Handling
+
+| Scenario | Resolution |
+|----------|------------|
+| Unknown --role value | Error with available role list |
+| Role not found | Error with expected path (roles/<name>/role.md) |
+| CLI tool fails | Worker fallback to direct implementation |
+| Scanner finds 0 findings | Report clean, skip review + fix |
+| User declines fix | Delete FIX tasks, complete with review-only results |
+| Fast-advance conflict | Coordinator reconciles on next callback |
+| Completion action fails | Default to Keep Active |

@@ -1,6 +1,8 @@
 ---
 name: thesis-docx
+disable-model-invocation: true
 description: Create, revise, and format thesis or dissertation Word documents with strict academic formatting control. Use when an AI agent needs to generate or revise thesis content, normalize Word styles, follow a school template, fix captions or page numbers or section levels, or produce evidence-based Mermaid figures and LaTeX-formatted code listings for a thesis document.
+session-mode: none
 ---
 
 # Thesis DOCX
@@ -25,7 +27,7 @@ behavior should therefore be:
 ## Pre-load (before execution)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for project context
-2. **Specs**: `maestro spec load --category coding` — load coding conventions
+2. **Specs**: `maestro load --type spec --category coding` — load coding conventions
 3. **Wiki knowledge**: `maestro search "thesis academic writing docx formatting" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 

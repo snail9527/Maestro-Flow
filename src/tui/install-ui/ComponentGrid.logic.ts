@@ -5,9 +5,11 @@
 
 /**
  * Toggle a single ID in the current selection array.
+ * If the id is in mandatoryIds, the array is returned unchanged.
  * Returns a new array (immutable).
  */
-export function toggleSelection(currentIds: string[], id: string): string[] {
+export function toggleSelection(currentIds: string[], id: string, mandatoryIds?: Set<string>): string[] {
+  if (mandatoryIds?.has(id)) return currentIds;
   return currentIds.includes(id)
     ? currentIds.filter((x) => x !== id)
     : [...currentIds, id];
@@ -21,10 +23,22 @@ export function selectAllAvailable(availableIds: string[]): string[] {
 }
 
 /**
- * Deselect all.
+ * Deselect all. If mandatoryIds is provided, those IDs are kept.
  */
-export function deselectAll(): string[] {
-  return [];
+export function deselectAll(mandatoryIds?: Set<string>): string[] {
+  return mandatoryIds ? Array.from(mandatoryIds) : [];
+}
+
+/**
+ * Restore selection to default: mandatory + defaultSelected components.
+ */
+export function restoreDefaults(allDefs: Array<{ id: string; mandatory?: boolean; defaultSelected?: boolean }>, mandatoryIds?: Set<string>): string[] {
+  const ids = new Set<string>();
+  if (mandatoryIds) for (const id of mandatoryIds) ids.add(id);
+  for (const def of allDefs) {
+    if (def.mandatory || def.defaultSelected !== false) ids.add(def.id);
+  }
+  return Array.from(ids);
 }
 
 /**

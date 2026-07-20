@@ -1,3 +1,5 @@
+
+
 # Swarm Protocol — Adversarial Edition
 
 Defines how the SKILL.md coordinator, Python ACO controller, and modular Workflow scripts interface.
@@ -57,7 +59,7 @@ Defines how the SKILL.md coordinator, Python ACO controller, and modular Workflo
 ## Script ↔ Coordinator Contract
 
 Same as team-swarm. All scripts:
-- Read from `<session>/...` (via `--session` flag)
+- Read from `{run_dir}/work/team/...` (via `--session` flag)
 - Emit JSON to stdout
 - Exit 0 = success, 1 = error, 2 = config invalid
 - Idempotent: calling update twice for same iteration is safe
@@ -66,7 +68,7 @@ Same as team-swarm. All scripts:
 |------------|-------|---------------------|--------------|
 | `init` | swarm-config.json | `{status, pheromone_path, n_nodes}` | writes pheromone/current.json, task-space.json |
 | `select --iter k` | pheromone/current.json | `{assignments: [{ant_id, path_hints, ...}]}` | none |
-| `update --iter k` | artifacts/ant-k-*.json, scores | `{mean_score, best_score, delta}` | writes pheromone + trails + best.json |
+| `update --iter k` | {run_dir}/outputs/ant-k-*.json, scores | `{mean_score, best_score, delta}` | writes pheromone + trails + best.json |
 | `converged` | history/, best.json, config | `{converged, reason, metrics}` | none |
 | `report` | best.json, history/ | full report JSON | none |
 

@@ -1,7 +1,5 @@
 # Implement
 
-Execute implementation from task JSON via agent or CLI delegation.
-
 ## Agent Mode
 
 Direct implementation using Edit/Write/Bash tools:
@@ -58,5 +56,5 @@ Bash({ command: `maestro delegate "<prompt>" --to <tool> --mode write --rule dev
 Resume strategy:
 | Strategy | Command |
 |----------|---------|
-| new | --id <session>-<task_id> |
+| new | --id {run_dir}/work/team-<task_id> |
 | resume | --resume <parent_id> |

@@ -16,6 +16,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, dirname, basename, relative } from 'node:path';
+import {
+  applyCodexAgentOverrides,
+  assertNoUnsupportedCodexTaskBoardTokens,
+} from './codex-agent-overrides.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,8 +32,8 @@ export interface BuildStats {
   files: number;
 }
 
-/** Body replacement pair: regex pattern + replacement string. */
-type BodyReplacement = [RegExp, string];
+/** Body replacement pair: regex pattern + replacement string or replacer function. */
+type BodyReplacement = [RegExp, string] | [RegExp, (...args: string[]) => string];
 
 /** Platform-specific conversion configuration. */
 interface ConversionProfile {
@@ -141,12 +145,23 @@ function parseSimpleYaml(raw: string): ParsedFrontmatter {
     // Inline value — only split on commas for list-like keys
     if (LIST_KEYS.has(key) && value.includes(',')) {
       out[key] = value.split(',').map(s => s.trim()).filter(Boolean);
+    } else if (/^".*"$/.test(value)) {
+      // Unescape double-quoted scalars so serializeFrontmatter's re-escaping
+      // round-trips instead of compounding (\" → \\\" on every pass).
+      out[key] = value.slice(1, -1).replace(/\\(["\\])/g, '$1');
     } else {
       out[key] = value.replace(/^["']|["']$/g, '');
     }
     i++;
   }
   return out;
+}
+
+function yamlNeedsQuoting(s: string): boolean {
+  if (!s) return false;
+  // `"` and `\` must force quoting — parseSimpleYaml unescapes quoted scalars,
+  // so emitting them bare would strip characters on the next parse pass.
+  return /["\\\[\]{}#*&!|>,]/.test(s) || /:\s/.test(s) || /^'|'$/.test(s);
 }
 
 function serializeFrontmatter(fm: ParsedFrontmatter): string {
@@ -158,6 +173,9 @@ function serializeFrontmatter(fm: ParsedFrontmatter): string {
     } else if (typeof value === 'string' && value.includes('\n')) {
       lines.push(`${key}: |`);
       for (const ln of value.split('\n')) lines.push(`  ${ln}`);
+    } else if (typeof value === 'string' && yamlNeedsQuoting(value)) {
+      const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      lines.push(`${key}: "${escaped}"`);
     } else {
       lines.push(`${key}: ${value}`);
     }
@@ -238,6 +256,172 @@ function buildSubAgentPreamble(typeNames: string[]): string {
     '\n\n**ConversationId tracking**: `invoke_subagent` returns a ConversationId per spawned instance. Subsequent `send_message(Recipient=<ConversationId>, Message=...)` calls require that ConversationId — never use the role name as the recipient.\n\n' +
     '---\n'
   );
+}
+
+// ---------------------------------------------------------------------------
+// Cross-platform tool field mapping — queryable at build and runtime.
+// Used by rewrite functions and exposed for documentation/tooling.
+// ---------------------------------------------------------------------------
+
+/** Maps a Claude tool's parameter name to its platform equivalent. */
+interface FieldMapping {
+  /** Platform tool name (e.g. 'spawn_agent'). */
+  tool: string;
+  /** Claude param → platform param. null = dropped, string = renamed. */
+  fields: Record<string, string | null>;
+  /** Value transforms: 'lowercase_underscore' normalizes name to task_name. */
+  transforms?: Record<string, 'lowercase_underscore' | 'identity'>;
+  /** Extra params injected on the platform side. */
+  inject?: Record<string, string>;
+}
+
+export const TOOL_FIELD_MAP: Record<string, Record<string, FieldMapping>> = {
+  Agent: {
+    codex: {
+      tool: 'spawn_agent',
+      fields: {
+        name: 'task_name',
+        prompt: 'message',
+        description: 'message',
+        subagent_type: 'agent_type',
+        model: 'model',
+        run_in_background: null,
+        isolation: null,
+        mode: null,
+      },
+      transforms: { task_name: 'lowercase_underscore' },
+    },
+    agy: {
+      tool: 'invoke_subagent',
+      fields: {
+        name: 'Role',
+        prompt: 'Prompt',
+        subagent_type: 'TypeName',
+        description: 'Prompt',
+        run_in_background: null,
+      },
+    },
+  },
+  AskUserQuestion: {
+    codex: {
+      tool: 'request_user_input',
+      fields: { questions: 'questions', annotations: 'annotations' },
+    },
+    agy: {
+      tool: 'ask_question',
+      fields: { questions: 'questions' },
+    },
+  },
+  SendMessage: {
+    codex: {
+      tool: 'send_message',
+      fields: { to: 'target', message: 'message' },
+    },
+    agy: {
+      tool: 'send_message',
+      fields: { to: 'Recipient', message: 'Message' },
+    },
+  },
+  Skill: {
+    codex: {
+      tool: 'spawn_agent',
+      fields: { skill: 'task_name', args: 'message' },
+      transforms: { task_name: 'lowercase_underscore' },
+    },
+    agy: {
+      tool: 'view_file',
+      fields: { skill: 'AbsolutePath', args: null },
+    },
+  },
+  spawn_agents_on_csv: {
+    codex: {
+      tool: 'spawn_agents_on_csv',
+      fields: {
+        csv_path: 'csv_path',
+        instruction: 'instruction',
+        id_column: 'id_column',
+        max_concurrency: 'max_concurrency',
+        output_csv_path: 'output_csv_path',
+        output_schema: 'output_schema',
+      },
+      inject: { max_runtime_seconds: '3600' },
+    },
+  },
+  wait_agent: {
+    codex: {
+      tool: 'wait_agent',
+      fields: { timeout_ms: 'timeout_ms' },
+      inject: { timeout_ms: '3600000' },
+    },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Codex-specific: Agent() → spawn_agent(), Skill() → inline execution
+// ---------------------------------------------------------------------------
+
+function toSnakeCase(s: string): string {
+  return s.replace(/[-\s]+/g, '_').toLowerCase();
+}
+
+function rewriteAgentCallSitesCodex(body: string): string {
+  const fm = TOOL_FIELD_MAP.Agent.codex;
+  let out = body.replace(
+    /Agent\s*\(\s*(\{[^}]*\})\s*\)/g,
+    (_full, inner: string) => {
+      const nameMatch = inner.match(/\bname\s*[:=]\s*["']([^"']+)["']/);
+      const promptMatch = inner.match(/prompt\s*[:=]\s*["']([^"']*)["']/);
+      const descMatch = inner.match(/description\s*[:=]\s*["']([^"']*)["']/);
+      const forkMatch = inner.match(/\brun_in_background\s*[:=]\s*(true|false)/);
+      const typeMatch = inner.match(/\bsubagent_type\s*[:=]\s*["']([^"']+)["']/);
+      const modelMatch = inner.match(/\bmodel\s*[:=]\s*["']([^"']+)["']/);
+
+      const rawName = nameMatch?.[1] ?? '<task_name>';
+      const taskName = fm.transforms?.task_name === 'lowercase_underscore'
+        ? toSnakeCase(rawName)
+        : rawName;
+      const message = promptMatch?.[1] ?? descMatch?.[1] ?? '<message>';
+
+      const extras: string[] = [];
+      if (forkMatch?.[1] === 'true') extras.push('fork_turns: "none"');
+      if (typeMatch) extras.push(`agent_type: "${toSnakeCase(typeMatch[1])}"`);
+      if (modelMatch) extras.push(`model: "${modelMatch[1]}"`);
+      const extraStr = extras.length > 0 ? ', ' + extras.join(', ') : '';
+
+      return `${fm.tool}({ task_name: "${taskName}", message: "${message}"${extraStr} })`;
+    },
+  );
+  out = out.replace(/\bAgent\s*\(/g, `${fm.tool}(`);
+  return out;
+}
+
+function rewriteSkillCallSitesCodex(body: string): string {
+  let out = body;
+  // JS-object form: Skill({ skill: "X", args: "Y" })
+  out = out.replace(
+    /Skill\s*\(\s*\{\s*skill\s*:\s*["']([^"']+)["'](?:\s*,\s*args\s*:\s*["']([^"']*)["'])?\s*\}\s*\)/g,
+    (_full, name: string, args: string | undefined) => formatCodexSkill(name, args),
+  );
+  // Function-style form: Skill(skill="X", args="Y")
+  out = out.replace(
+    /Skill\s*\(\s*skill\s*=\s*["']([^"']+)["'](?:\s*,\s*args\s*=\s*["']([^"']*)["'])?\s*\)/g,
+    (_full, name: string, args: string | undefined) => formatCodexSkill(name, args),
+  );
+  // Shorthand: Skill("X")
+  out = out.replace(
+    /Skill\s*\(\s*["']([^"']+)["']\s*\)/g,
+    (_full, name: string) => formatCodexSkill(name, undefined),
+  );
+  return out;
+}
+
+function formatCodexSkill(name: string, args: string | undefined): string {
+  const fm = TOOL_FIELD_MAP.Skill.codex;
+  const taskName = fm.transforms?.task_name === 'lowercase_underscore'
+    ? toSnakeCase(name)
+    : name;
+  const message = args ? `Execute skill ${name}, args: ${args}` : `Execute skill ${name}`;
+  return `${fm.tool}({ ${fm.fields.skill}: "${taskName}", ${fm.fields.args}: ${JSON.stringify(message)} })`;
 }
 
 // ---------------------------------------------------------------------------
@@ -374,7 +558,7 @@ function convertTextAgy(
 
   const fmBlock = newFrontmatter ? serializeFrontmatter(newFrontmatter) : '';
   const preamble = subAgentTypes.length > 0 ? buildSubAgentPreamble(subAgentTypes) : '';
-  return fmBlock + preamble + convertedBody;
+  return fmBlock + preamble + stripToolTags(convertedBody);
 }
 
 function convertTextStandard(
@@ -383,19 +567,79 @@ function convertTextStandard(
 ): string {
   const { frontmatter, raw, body } = splitFrontmatter(content);
   if (frontmatter === null) {
-    return applyBodyReplacements(content, profile);
+    return stripToolTags(applyBodyReplacements(content, profile));
   }
   const newFm = rewriteAllowedToolsStandard(raw, profile);
-  const newBody = applyBodyReplacements(body, profile);
+  const newBody = stripToolTags(applyBodyReplacements(body, profile));
   return `---\n${newFm}\n---\n${newBody}`;
 }
 
-function applyBodyReplacements(body: string, profile: ConversionProfile): string {
-  let out = body;
-  for (const [pattern, replacement] of profile.bodyReplacements) {
-    out = out.replace(pattern, replacement);
+function convertTextCodex(
+  content: string,
+  profile: ConversionProfile,
+  isSkillOrCommand: boolean,
+): string {
+  const { frontmatter, body } = splitFrontmatter(content);
+
+  let hasAgent = false;
+  let hasPlan = false;
+  if (isSkillOrCommand) {
+    const agentRefs = detectAgentCalls(body);
+    if (agentRefs.length > 0 || /\bAgent\s*\(/.test(body)) hasAgent = true;
+    if (/\b(?:TaskCreate|TaskUpdate|TodoWrite)\b/.test(body)) hasPlan = true;
+    // Already-converted content (e.g. hand-tuned .codex.md overrides passing
+    // through the runtime transformer) carries these notes — don't re-inject.
+    if (body.includes('**Agent timeout**')) hasAgent = false;
+    if (body.includes('**Plan tracking**')) hasPlan = false;
   }
-  return out;
+
+  let convertedBody = rewriteAgentCallSitesCodex(body);
+  convertedBody = rewriteSkillCallSitesCodex(convertedBody);
+  convertedBody = applyBodyReplacements(convertedBody, profile);
+
+  let newFrontmatter: ParsedFrontmatter | null = null;
+  if (frontmatter) {
+    const fmOut = { ...frontmatter };
+    if (fmOut['allowed-tools']) {
+      const r = rewriteAllowedToolsAgy(fmOut['allowed-tools'], profile, hasAgent);
+      if (r) {
+        if (r.hasAgent || hasAgent) {
+          for (const t of profile.subagentTools) {
+            if (!r.tools.includes(t)) r.tools.push(t);
+          }
+          r.tools.sort();
+        }
+        fmOut['allowed-tools'] = r.tools;
+      }
+    }
+    newFrontmatter = fmOut;
+  }
+
+  const fmBlock = newFrontmatter ? serializeFrontmatter(newFrontmatter) : '';
+  const agentNote = hasAgent
+    ? '\n> **Agent timeout**: `spawn_agent` 异步执行且无内置超时 — 除明确短任务外一律 `spawn_agent` 后立即 `wait_agent({ timeout_ms: 3600000 })`（上限 1 小时）阻塞等待，绝不依赖 30000 默认值；`timed_out: true` 且 Agent 未完成时再次 `wait_agent` 续等，不丢弃。批量场景使用 `spawn_agents_on_csv({ max_runtime_seconds: 3600, ... })`。\n'
+    : '';
+  const planNote = hasPlan
+    ? '\n> **Plan tracking**: codex 无 TaskCreate/TaskUpdate/TodoWrite 任务板。进度清单用 `update_plan({ explanation?, plan: [{ step, status }] })` 维护（整体提交步骤数组，status: `pending` | `in_progress` | `completed`），权威状态始终在 session 工件中；依赖/认领（addBlockedBy/owner）是工件字段，不是工具参数。\n'
+    : '';
+  return fmBlock + agentNote + planNote + stripToolTags(convertedBody);
+}
+
+/** Injected note lines mention Claude tool names literally (e.g. "codex 无
+ * TaskCreate/... 任务板") — shield them from word-level replacements so a
+ * second pass over already-converted content leaves them intact. */
+const INJECTED_NOTE_LINE = /^> \*\*(?:Plan tracking|Agent timeout)\*\*:.*$/gm;
+
+function applyBodyReplacements(body: string, profile: ConversionProfile): string {
+  const shielded: string[] = [];
+  let out = body.replace(INJECTED_NOTE_LINE, line => {
+    shielded.push(line);
+    return `\0NOTE${shielded.length - 1}\0`;
+  });
+  for (const [pattern, replacement] of profile.bodyReplacements) {
+    out = out.replace(pattern, replacement as string);
+  }
+  return out.replace(/\0NOTE(\d+)\0/g, (_m, i: string) => shielded[Number(i)]);
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +721,8 @@ function buildTree(
 const AGY_PROFILE: ConversionProfile = {
   bodyReplacements: [
     [/ralph skills --platform claude\b/g, 'ralph skills --platform agy'],
+    [/<task_tracking>[\s\S]*?<\/task_tracking>/g, ''],
+    [/\bmaestro run (prepare|skill|brief)\b(?![^\n`]*--platform)/g, 'maestro run $1 --platform agy'],
     [/\bmcp__exa__web_search_exa\b/g, 'search_web'],
     [/\bSendMessage\b/g, 'send_message'],
     [/\bAskUserQuestion\b/g, 'ask_question'],
@@ -512,12 +758,238 @@ const AGY_PROFILE: ConversionProfile = {
 };
 
 // ---------------------------------------------------------------------------
+// Codex profile — subagent model (spawn_agent / spawn_agents_on_csv)
+//
+// Tool substitution tags for command files:
+//   <!-- @subagent -->       Agent()        → spawn_agent()
+//   <!-- @subagent:batch -->  multi Agent()  → spawn_agents_on_csv()
+//   <!-- @ask -->             AskUserQuestion → request_user_input
+//   <!-- @task -->            TaskCreate/Update → update_plan
+//   <!-- @msg -->             SendMessage    → send_message / followup_task
+//   <!-- @skill -->           Skill()        → inline execution
+// Tags are semantic anchors — placed before tool calls in .claude/ source
+// files so the converter can locate substitution points reliably.
+// ---------------------------------------------------------------------------
+
+const CODEX_TASK_TRACKING_BLOCK = `<task_tracking>
+
+**时机与操作**（plan 是 session 权威状态的 UI 镜像，不替代 session 状态）：
+
+| 时机 | 操作 | 示例 |
+|------|------|------|
+| Session 创建后 | update_plan 初始化步骤清单 | \`update_plan({ plan: [{ step: "Step {index}: {step.skill}", status: "pending" }, ...] })\` |
+| Step 派发时 | update_plan 标记当前 step | \`update_plan({ plan: [..., 当前 step status: "in_progress"] })\` |
+| Step 完成时 | update_plan 标记完成 | \`update_plan({ plan: [..., 该 step status: "completed"] })\` |
+| Step 失败时 | update_plan + explanation 说明 | \`update_plan({ explanation: "Step {index} failed: {reason}", plan: [...] })\` |
+
+</task_tracking>`;
+
+const CODEX_PROFILE: ConversionProfile = {
+  bodyReplacements: [
+    [/ralph skills --platform claude\b/g, 'ralph skills --platform codex'],
+    [/<task_tracking>[\s\S]*?<\/task_tracking>/g, CODEX_TASK_TRACKING_BLOCK],
+    [/\bmaestro run (prepare|skill|brief)\b(?![^\n`]*--platform)/g, 'maestro run $1 --platform codex'],
+    [/\bAskUserQuestion\b/g, 'request_user_input'],
+    [/\bSendMessage\s*\(\s*\{\s*to:/g, 'followup_task({ target:'],
+    [/\bSendMessage\b/g, 'send_message'],
+    [/\bTaskCreate\b/g, 'update_plan'],
+    [/\bTaskUpdate\b/g, 'update_plan'],
+    [/\bTaskList\s*\(\s*\)/g, 'list_agents()'],
+    [/\bTaskList\b/g, 'list_agents'],
+    [/\bTaskGet\b/g, 'wait_agent'],
+    [/\bTaskStop\b/g, 'interrupt_agent'],
+    [/\bTodoWrite\b/g, 'update_plan'],
+    // Enforce max_runtime_seconds: 3600 on spawn_agents_on_csv calls.
+    // Lookahead is bounded by the call's `})` closer (tempered token), so a
+    // `)` inside a string argument neither ends the scan nor causes re-injection.
+    [/spawn_agents_on_csv\s*\(\s*\{(?!(?:(?!\}\s*\))[\s\S])*?max_runtime_seconds)/g, 'spawn_agents_on_csv({ max_runtime_seconds: 3600,'],
+    // Enforce timeout_ms: 3600000 (max) on wait_agent calls
+    [/wait_agent\s*\(\s*\{(?!(?:(?!\}\s*\))[\s\S])*?timeout_ms)/g, 'wait_agent({ timeout_ms: 3600000,'],
+    [/wait_agent\s*\(\s*\)/g, 'wait_agent({ timeout_ms: 3600000 })'],
+  ],
+  frontmatterToolMap: {
+    AskUserQuestion: 'request_user_input',
+    SendMessage: 'send_message',
+    Agent: 'spawn_agent',
+    TaskCreate: 'update_plan',
+    TaskUpdate: 'update_plan',
+    TaskList: 'list_agents',
+    TaskGet: 'wait_agent',
+    TaskStop: 'interrupt_agent',
+    TodoWrite: 'update_plan',
+    Skill: 'spawn_agent',
+  },
+  removedTools: new Set([
+    'TeamCreate', 'TeamDelete',
+    'mcp__ccw-tools__team_msg',
+    'ExitPlanMode', 'EnterPlanMode',
+    'ExitWorktree', 'EnterWorktree',
+    'NotebookEdit', 'Monitor',
+    'PushNotification', 'RemoteTrigger',
+    'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList',
+    'ToolSearch', 'LSP',
+  ]),
+  subagentTools: [
+    'spawn_agent', 'send_message', 'followup_task',
+    'wait_agent', 'interrupt_agent', 'list_agents',
+    'spawn_agents_on_csv',
+  ],
+  rewriteAgentCalls: true,
+  rewriteSkillCalls: true,
+  snakeCaseUnknown: false,
+};
+
+// ---------------------------------------------------------------------------
+// Pi profile — teammate subagent model (pi-maestro-flow)
+//
+// Pi tools: same file ops as Claude + teammate() for subagent + maestro() for CLI
+// Install: https://github.com/catlog22/pi-maestro-flow
+// ---------------------------------------------------------------------------
+
+const PI_HOST_MIRROR_BLOCK = `<host_mirror>
+
+**镜像协议**（状态对账由插件自动完成，LLM 只保留两个语义动作）：
+
+| 动作 | 工具调用 | 说明 |
+|------|----------|------|
+| 步进 | \`todo({ action: "next" })\` | 激活下一步 + 注入上游摘要 + 绑定 skill |
+| 完成宣告 | \`goal done\` | 触发前置校验（chain 全 completed + gates 无 failed）+ verifier |
+
+- 禁止手工 \`todo({ action: "create" })\` / \`todo({ action: "update" })\` 镜像任务——bridge 从 session.json 自动物化
+- goal 由 bridge 从 session intent + definition_of_done 自动派生
+- 压缩恢复后首个动作：\`maestro run brief <run-id>\` 重挂协议
+
+</host_mirror>`;
+
+const PI_PROFILE: ConversionProfile = {
+  bodyReplacements: [
+    [/ralph skills --platform claude\b/g, 'ralph skills --platform pi'],
+    [/<task_tracking>[\s\S]*?<\/task_tracking>/g, PI_HOST_MIRROR_BLOCK],
+    [/\bmaestro run (prepare|skill|brief)\b(?![^\n`]*--platform)/g, 'maestro run $1 --platform pi'],
+    [/\bTaskCreate\s*\(\s*\{([^}]*)\}\s*\)/g, (_m: string, params: string) => `todo({ action: "create", ${params.trim()} })`],
+    [/\bTaskUpdate\s*\(\s*\{([^}]*)\}\s*\)/g, (_m: string, params: string) => `todo({ action: "update", ${params.trim()} })`],
+    [/\bTaskCreate\b/g, 'todo({ action: "create" })'],
+    [/\bTaskUpdate\b/g, 'todo({ action: "update" })'],
+    [/\bTaskList\s*\(\s*\)/g, 'todo({ action: "list" })'],
+    [/\bTaskList\b/g, 'todo({ action: "list" })'],
+    [/\bTaskGet\b/g, 'todo({ action: "get" })'],
+    [/\bTaskStop\b/g, 'todo({ action: "cancel" })'],
+    [/\bTodoWrite\b/g, 'todo({ action: "update" })'],
+  ],
+  frontmatterToolMap: {
+    Agent: 'teammate',
+    Workflow: 'maestro',
+    TaskCreate: 'todo',
+    TaskUpdate: 'todo',
+    TaskList: 'todo',
+    TaskGet: 'todo',
+    TaskStop: 'todo',
+    TodoWrite: 'todo',
+  },
+  removedTools: new Set([
+    'TeamCreate', 'TeamDelete',
+    'ExitPlanMode', 'EnterPlanMode',
+    'ExitWorktree', 'EnterWorktree',
+    'NotebookEdit', 'Monitor',
+    'PushNotification', 'RemoteTrigger',
+    'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList',
+    'ToolSearch', 'LSP',
+    'PowerShell',
+  ]),
+  subagentTools: ['teammate'],
+  rewriteAgentCalls: true,
+  rewriteSkillCalls: false,
+  snakeCaseUnknown: false,
+};
+
+// ---------------------------------------------------------------------------
+// Pi-specific: Agent() → teammate() call-site rewriting
+// ---------------------------------------------------------------------------
+
+function rewriteAgentCallSitesPi(body: string): string {
+  let out = body.replace(
+    /Agent\s*\(\s*(\{[^}]*\})\s*\)/g,
+    (_full, inner: string) => {
+      const promptMatch = inner.match(/prompt\s*[:=]\s*["']([^"']*)["']/);
+      const descMatch = inner.match(/description\s*[:=]\s*["']([^"']*)["']/);
+      const nameMatch = inner.match(/\bname\s*[:=]\s*["']([^"']+)["']/);
+      const typeMatch = inner.match(/\bsubagent_type\s*[:=]\s*["']([^"']+)["']/);
+      const bgMatch = inner.match(/\brun_in_background\s*[:=]\s*(true|false)/);
+
+      const parts: string[] = [];
+      if (typeMatch) parts.push(`agent: "${typeMatch[1]}"`);
+      if (nameMatch) parts.push(`name: "${nameMatch[1]}"`);
+      if (descMatch) parts.push(`description: "${descMatch[1]}"`);
+      if (promptMatch) parts.push(`prompt: "${promptMatch[1]}"`);
+      if (bgMatch?.[1] === 'true') parts.push('context: "fresh"');
+
+      return `teammate({ ${parts.join(', ')} })`;
+    },
+  );
+  out = out.replace(/\bAgent\s*\(/g, 'teammate(');
+  return out;
+}
+
+function convertTextPi(
+  content: string,
+  profile: ConversionProfile,
+  isSkillOrCommand: boolean,
+): string {
+  const { frontmatter, body } = splitFrontmatter(content);
+
+  let hasAgent = false;
+  if (isSkillOrCommand) {
+    if (detectAgentCalls(body).length > 0 || /\bAgent\s*\(/.test(body)) hasAgent = true;
+  }
+
+  let convertedBody = rewriteAgentCallSitesPi(body);
+  convertedBody = applyBodyReplacements(convertedBody, profile);
+
+  let newFrontmatter: ParsedFrontmatter | null = null;
+  if (frontmatter) {
+    const fmOut = { ...frontmatter };
+    if (fmOut['allowed-tools']) {
+      const r = rewriteAllowedToolsAgy(fmOut['allowed-tools'], profile, hasAgent);
+      if (r) {
+        if (r.hasAgent || hasAgent) {
+          for (const t of profile.subagentTools) {
+            if (!r.tools.includes(t)) r.tools.push(t);
+          }
+          r.tools.sort();
+        }
+        fmOut['allowed-tools'] = r.tools;
+      }
+    }
+    newFrontmatter = fmOut;
+  }
+
+  const fmBlock = newFrontmatter ? serializeFrontmatter(newFrontmatter) : '';
+  return fmBlock + stripToolTags(convertedBody);
+}
+
+// ---------------------------------------------------------------------------
 // Agents Standard profile
 // ---------------------------------------------------------------------------
+
+const STD_TASK_TRACKING_BLOCK = `<task_tracking>
+
+**时机与操作**（goal 是 session 权威状态的 UI 镜像，不替代 session 状态）：
+
+| 时机 | 操作 | 示例 |
+|------|------|------|
+| Session 创建后 | create_task session goal | \`create_task({ description: "所有 steps completed", subject: "Session: {intent_summary}" })\` |
+| Step 派发时 | create_task step goal | \`create_task({ description: "{step.stage} 完成", subject: "Step {index}: {step.skill}" })\` |
+| Step 完成时 | update_task step goal | \`update_task({ taskId: step_goal_id, status: "completed" })\` |
+| 子目标全完成时 | update_task session goal | \`update_task({ taskId: session_goal_id, status: "completed" })\` |
+| Step 失败时 | update_task step goal | \`update_task({ taskId: step_goal_id, status: "failed" })\` |
+
+</task_tracking>`;
 
 const AGENTS_STANDARD_PROFILE: ConversionProfile = {
   bodyReplacements: [
     [/ralph skills --platform claude\b/g, 'ralph skills --platform agent'],
+    [/<task_tracking>[\s\S]*?<\/task_tracking>/g, STD_TASK_TRACKING_BLOCK],
+    [/\bmaestro run (prepare|skill|brief)\b(?![^\n`]*--platform)/g, 'maestro run $1 --platform agents-standard'],
     [/\bAskUserQuestion\b/g, 'ask_user'],
     [/\bSendMessage\b/g, 'send_message'],
     [/\bExitPlanMode\b/g, 'exit_plan_mode'],
@@ -604,6 +1076,17 @@ const AGENTS_STANDARD_PROFILE: ConversionProfile = {
 // Partial tree builders — skills-only and agents-only
 // ---------------------------------------------------------------------------
 
+/**
+ * Platform suffix for prepare/workflow override files.
+ * e.g. prepare/execute.codex.md takes priority over prepare/execute.md
+ * when --platform codex is used at runtime.
+ */
+export const PLATFORM_SUFFIX: Record<string, string> = {
+  codex: '.codex.md',
+  agy: '.agy.md',
+  pi: '.pi.md',
+};
+
 function buildSkillsOnly(
   claudeDir: string,
   targetSkillsDir: string,
@@ -681,8 +1164,113 @@ function buildAgentsOnly(
 }
 
 // ---------------------------------------------------------------------------
+// Codex TOML agent builder — converts .claude/agents/*.md → .codex/agents/*.toml
+// ---------------------------------------------------------------------------
+
+const WRITE_TOOLS = new Set(['Write', 'Edit', 'Bash', 'Agent', 'Skill']);
+
+function deriveSandboxMode(tools: string[]): string {
+  return tools.some(t => WRITE_TOOLS.has(t)) ? 'workspace-write' : 'read-only';
+}
+
+function escapeToml(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+}
+
+function buildCodexAgentsToml(
+  claudeDir: string,
+  targetAgentsDir: string,
+): BuildStats {
+  const agentsDir = join(claudeDir, 'agents');
+  const overrideDir = join(dirname(claudeDir), '.codex', 'agent-overrides');
+  const stats: BuildStats = { commands: 0, skills: 0, agents: 0, files: 0 };
+
+  if (!existsSync(agentsDir)) return stats;
+
+  for (const entry of readdirSync(agentsDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+    const src = join(agentsDir, entry.name);
+    const raw = readFileSync(src, 'utf8');
+    const { frontmatter, body } = splitFrontmatter(raw);
+
+    const agentName = entry.name.replace(/\.md$/, '');
+    const name = (frontmatter?.name as string ?? agentName)
+      .replace(/[-\s]+/g, '_').toLowerCase();
+    const desc = frontmatter?.description as string ?? '';
+
+    const toolsList = Array.isArray(frontmatter?.['allowed-tools'])
+      ? frontmatter['allowed-tools'] as string[]
+      : typeof frontmatter?.['allowed-tools'] === 'string'
+        ? (frontmatter['allowed-tools'] as string).split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+
+    const sandbox = deriveSandboxMode(toolsList);
+
+    const overriddenBody = applyCodexAgentOverrides(agentName, body, overrideDir);
+    assertNoUnsupportedCodexTaskBoardTokens(agentName, overriddenBody);
+
+    let convertedBody = rewriteAgentCallSitesCodex(overriddenBody);
+    convertedBody = rewriteSkillCallSitesCodex(convertedBody);
+    convertedBody = applyBodyReplacements(convertedBody, CODEX_PROFILE);
+    convertedBody = stripToolTags(convertedBody);
+
+    const tomlName = entry.name.replace(/\.md$/, '');
+    const dest = join(targetAgentsDir, `${tomlName}.toml`);
+    ensureDir(dirname(dest));
+
+    const toml = [
+      `name = "${escapeToml(name)}"`,
+      `description = "${escapeToml(desc)}"`,
+      `sandbox_mode = "${sandbox}"`,
+      '',
+      `developer_instructions = """`,
+      convertedBody.trimEnd(),
+      `"""`,
+      '',
+    ].join('\n');
+
+    writeFileSync(dest, toml, 'utf8');
+    stats.agents++;
+    stats.files++;
+  }
+
+  return stats;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/** Supported platform identifiers for runtime content transformation. */
+export type TargetPlatform = 'claude' | 'codex' | 'agy' | 'agents-standard' | 'pi';
+
+/** Strip [@tag] authoring markers — they're source-only anchors, not LLM content. */
+function stripToolTags(text: string): string {
+  return text.replace(/\[@(?:ask|subagent|skill|msg|task)\]\s*/g, '');
+}
+
+/**
+ * Runtime content transformer — applies platform-specific tool substitution
+ * to raw step/prepare/workflow content without touching the filesystem.
+ * `claude` is identity (strips tags only). Used by `maestro run prepare --platform`.
+ */
+export function transformContentForPlatform(
+  content: string,
+  platform: TargetPlatform,
+): string {
+  switch (platform) {
+    case 'claude':
+      return stripToolTags(content);
+    case 'codex':
+      return stripToolTags(convertTextCodex(content, CODEX_PROFILE, true));
+    case 'agy':
+      return stripToolTags(convertTextAgy(content, AGY_PROFILE, true));
+    case 'agents-standard':
+      return stripToolTags(convertTextStandard(content, AGENTS_STANDARD_PROFILE));
+    case 'pi':
+      return stripToolTags(convertTextPi(content, PI_PROFILE, true));
+  }
+}
 
 export function buildAgyTree(
   claudeDir: string,
@@ -740,6 +1328,171 @@ export function buildAgentsStandardSkills(
 
 /** Build agents-standard agents only — no skills/commands. */
 export function buildAgentsStandardAgents(
+  claudeDir: string,
+  targetDir: string,
+): { files: number } {
+  const stats = buildAgentsOnly(claudeDir, targetDir, AGENTS_STANDARD_PROFILE, convertTextStandard);
+  return { files: stats.files };
+}
+
+// ---------------------------------------------------------------------------
+// Eve-specific conversion and building logic
+// ---------------------------------------------------------------------------
+
+function convertTextEve(content: string): string {
+  const { frontmatter, body } = splitFrontmatter(content);
+  if (!frontmatter) {
+    return body.replace(/^\r?\n/u, '');
+  }
+  const eveData: Record<string, any> = {};
+  if (typeof frontmatter.description === 'string') {
+    eveData.description = frontmatter.description;
+  }
+  if (typeof frontmatter.license === 'string') {
+    eveData.license = frontmatter.license;
+  }
+  if (frontmatter.metadata && typeof frontmatter.metadata === 'object' && !Array.isArray(frontmatter.metadata)) {
+    const metadata: Record<string, string> = {};
+    for (const [k, v] of Object.entries(frontmatter.metadata)) {
+      if (typeof v === 'string') {
+        metadata[k] = v;
+      }
+    }
+    if (Object.keys(metadata).length > 0) {
+      eveData.metadata = metadata;
+    }
+  }
+
+  const keys = Object.keys(eveData);
+  if (keys.length === 0) {
+    return body.replace(/^\r?\n/u, '');
+  }
+
+  const lines: string[] = ['---'];
+  for (const key of keys) {
+    const val = eveData[key];
+    if (typeof val === 'object') {
+      lines.push(`${key}:`);
+      for (const [k, v] of Object.entries(val)) {
+        lines.push(`  ${k}: ${JSON.stringify(v)}`);
+      }
+    } else {
+      lines.push(`${key}: ${JSON.stringify(val)}`);
+    }
+  }
+  lines.push('---', '');
+  return lines.join('\n') + body.replace(/^\r?\n/u, '');
+}
+
+function buildEveSkillsOnly(
+  claudeDir: string,
+  targetSkillsDir: string,
+): BuildStats {
+  const commandsDir = join(claudeDir, 'commands');
+  const skillsDir = join(claudeDir, 'skills');
+  const stats: BuildStats = { commands: 0, skills: 0, agents: 0, files: 0 };
+
+  // 1. commands/*.md → targetSkillsDir/<name>/<name>.md
+  if (existsSync(commandsDir)) {
+    for (const entry of readdirSync(commandsDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+      const name = entry.name.replace(/\.md$/, '');
+      const src = join(commandsDir, entry.name);
+      const destDir = join(targetSkillsDir, name);
+      const dest = join(destDir, `${name}.md`);
+      ensureDir(destDir);
+      const out = convertTextEve(readFileSync(src, 'utf8'));
+      writeFileSync(dest, out, 'utf8');
+      stats.commands++;
+      stats.files++;
+    }
+  }
+
+  // 2. skills/<name>/ → targetSkillsDir/<name>/ (recursive)
+  if (existsSync(skillsDir)) {
+    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const srcRoot = join(skillsDir, entry.name);
+      const destRoot = join(targetSkillsDir, entry.name);
+      for (const fp of walkFiles(srcRoot)) {
+        const rel = relative(srcRoot, fp);
+        const fileBase = basename(fp).toLowerCase();
+        let dest = join(destRoot, rel);
+        if (fileBase === 'skill.md') {
+          dest = join(dirname(dest), `${entry.name}.md`);
+        }
+        ensureDir(dirname(dest));
+        if (fp.endsWith('.md')) {
+          const out = convertTextEve(readFileSync(fp, 'utf8'));
+          writeFileSync(dest, out, 'utf8');
+        } else {
+          writeFileSync(dest, readFileSync(fp));
+        }
+        stats.files++;
+      }
+      stats.skills++;
+    }
+  }
+
+  return stats;
+}
+
+/** Build Codex skills (commands + skills) — subagent model conversion. */
+export function buildCodexSkills(
+  claudeDir: string,
+  targetDir: string,
+): { files: number } {
+  const stats = buildSkillsOnly(claudeDir, targetDir, CODEX_PROFILE, convertTextCodex);
+  return { files: stats.files };
+}
+
+/** Build Codex agents as TOML — subagent model conversion. */
+export function buildCodexAgents(
+  claudeDir: string,
+  targetDir: string,
+): { files: number } {
+  const stats = buildCodexAgentsToml(claudeDir, targetDir);
+  return { files: stats.files };
+}
+
+/** Build Codex full tree (skills + agents). */
+export function buildCodexTree(
+  claudeDir: string,
+  targetSkillsDir: string,
+  targetAgentsDir: string,
+): BuildStats {
+  return buildTree(claudeDir, targetSkillsDir, targetAgentsDir, CODEX_PROFILE, convertTextCodex);
+}
+
+/** Build Pi skills (commands + skills) — teammate subagent model. */
+export function buildPiSkills(
+  claudeDir: string,
+  targetDir: string,
+): { files: number } {
+  const stats = buildSkillsOnly(claudeDir, targetDir, PI_PROFILE, convertTextPi);
+  return { files: stats.files };
+}
+
+/** Build Pi agents — teammate subagent model. */
+export function buildPiAgents(
+  claudeDir: string,
+  targetDir: string,
+): { files: number } {
+  const stats = buildAgentsOnly(claudeDir, targetDir, PI_PROFILE, convertTextPi);
+  return { files: stats.files };
+}
+
+/** Build Eve skills (commands + skills) with frontmatter stripping & flat file naming. */
+export function buildEveSkills(
+  claudeDir: string,
+  targetDir: string,
+): { files: number } {
+  const stats = buildEveSkillsOnly(claudeDir, targetDir);
+  return { files: stats.files };
+}
+
+/** Build Eve agents using standard/neutral converter. */
+export function buildEveAgents(
   claudeDir: string,
   targetDir: string,
 ): { files: number } {

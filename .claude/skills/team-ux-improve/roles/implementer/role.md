@@ -7,17 +7,15 @@ message_types: [state_update]
 
 # Code Implementer
 
-Generate executable fix code with proper state management, event handling, and UI feedback bindings.
-
 ## Phase 2: Task & Design Loading
 
 1. Extract session path from task description
-2. Read design guide: `<session>/artifacts/design-guide.md`
+2. Read design guide: `{run_dir}/outputs/design-guide.md`
 3. Extract implementation tasks from design guide
 4. **Wisdom Input**:
-   - Read `<session>/wisdom/patterns/state-management.md` for state handling patterns
-   - Read `<session>/wisdom/patterns/ui-feedback.md` for UI feedback implementation patterns
-   - Read `<session>/wisdom/principles/general-ux.md` for implementation principles
+   - Read `{run_dir}/work/team/wisdom/patterns/state-management.md` for state handling patterns
+   - Read `{run_dir}/work/team/wisdom/patterns/ui-feedback.md` for UI feedback implementation patterns
+   - Read `{run_dir}/work/team/wisdom/principles/general-ux.md` for implementation principles
    - Load framework-specific conventions if available
    - Apply these patterns and principles when generating code to ensure consistency and quality
 5. **For inner loop**: Load context_accumulator from prior IMPL tasks
@@ -38,7 +36,7 @@ Implementation backend selection:
 
 | Backend | Condition | Method |
 |---------|-----------|--------|
-| CLI | Complex multi-file changes | `maestro delegate --to gemini --mode write` |
+| CLI | Complex multi-file changes | `maestro delegate --to agy --mode write` |
 | Direct | Simple single-file changes | Inline Edit/Write |
 
 ### CLI Implementation (Complex)
@@ -51,7 +49,7 @@ TASK:
   - Update UI bindings for button and error display
 CONTEXT: @src/components/Upload.tsx
 EXPECTED: Modified Upload.tsx with complete implementation
-CONSTRAINTS: Maintain existing code style" --tool gemini --mode write`)
+CONSTRAINTS: Maintain existing code style" --tool agy --mode write`)
 ```
 
 ### Direct Implementation (Simple)
@@ -83,11 +81,11 @@ Validation steps:
 
 ### Context Accumulator Update
 
-Append to context_accumulator and write summary to `<session>/artifacts/fixes/README.md`.
+Append to context_accumulator and write summary to `{run_dir}/outputs/fixes/README.md`.
 
 Share state via team_msg:
 ```
-team_msg(operation="log", session_id=<session-id>, from="implementer",
+team_msg(operation="log", session_id=<run-id>, from="implementer",
          type="state_update", data={
            completed_fixes: <count>,
            modified_files: [<file-list>],
@@ -98,5 +96,5 @@ team_msg(operation="log", session_id=<session-id>, from="implementer",
 ### Wisdom Contribution
 
 If reusable code patterns or snippets created:
-1. Write code snippets to `<session>/wisdom/contributions/implementer-snippets-<timestamp>.md`
+1. Write code snippets to `{run_dir}/work/team/wisdom/contributions/implementer-snippets-<timestamp>.md`
 2. Format: Use case, code snippet with comments, framework compatibility notes

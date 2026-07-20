@@ -6,15 +6,23 @@ import { parseFrontmatter } from './frontmatter-util.js';
 import { parseSpecEntries, parseKnowhowEntries } from './spec-entry-parser.js';
 import {
   adaptCodebaseDocIndex,
+  adaptKnowledgeGraphFromDb,
   adaptIssueRow,
   adaptKnowledgeGraph,
   crossReferenceKgWithDocIndex,
-  loadSessionArchiveEntries,
+  loadRunModeSessionEntries,
   loadVirtualEntries,
   loadVirtualJsonEntries,
+  loadClaudeCodeSessions,
+  loadCodexSessions,
+  cwdToClaudeProjectSlug,
 } from './virtual-wiki-adapters.js';
 import { homedir } from 'node:os';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, createWriteStream, renameSync as renameSyncFs } from 'node:fs';
+import { buildGraph, type WikiGraph } from './graph-analysis.js';
+import { buildInvertedIndex, searchBM25, searchBM25Planned, rerankByPhraseProximity, type InvertedIndex } from './search.js';
+import { applyTimeDecay } from './time-decay.js';
+import type { EmbeddingIndex } from './embedding.js';
 import type {
   WikiEntry,
   WikiFilters,
@@ -25,13 +33,41 @@ import type {
   PersistedWikiIndex,
   PersistedEntry,
 } from './wiki-types.js';
-import { buildGraph, type WikiGraph } from './graph-analysis.js';
-import { buildInvertedIndex, searchBM25, type InvertedIndex } from './search.js';
+import { recallSnapshotSchema, type RecallSnapshot } from './wiki-types.js';
+
+const SEARCH_CACHE_VERSION = 3;
+
+function prefixLinkedEntries(entries: WikiEntry[], idPrefix: string, workspace: string): void {
+  const idMap = new Map(entries.map(entry => [entry.id, `${idPrefix}${entry.id}`]));
+  for (const entry of entries) {
+    entry.id = idMap.get(entry.id)!;
+    entry.related = entry.related.map(id => idMap.get(id) ?? id);
+    if (entry.parent) entry.parent = idMap.get(entry.parent) ?? entry.parent;
+    const kgEdges = entry.ext?.kgEdges;
+    if (Array.isArray(kgEdges)) {
+      entry.ext.kgEdges = kgEdges.map(edge => {
+        if (!edge || typeof edge !== 'object') return edge;
+        const typed = edge as Record<string, unknown>;
+        const target = typeof typed.target === 'string' ? idMap.get(typed.target) ?? typed.target : typed.target;
+        return { ...typed, target };
+      });
+    }
+    entry.source = { ...entry.source, workspace };
+    entry.scope = 'linked';
+  }
+}
+
+function promotedRefToWikiId(ref: string): string | null {
+  const value = ref.trim();
+  if (/^(?:spec|knowhow)-/.test(value)) return value;
+  const match = value.match(/^(spec|knowhow):(.+)$/);
+  return match ? `${match[1]}-${slugify(match[2])}` : null;
+}
 
 export interface LinkedWorkspaceConfig {
   name: string;
   workflowRoot: string;
-  shareTypes: Array<'spec' | 'knowhow' | 'domain' | 'codebase'>;
+  shareTypes: Array<'spec' | 'knowhow' | 'domain' | 'codebase' | 'session'>;
 }
 
 export interface WikiIndexerConfig {
@@ -60,6 +96,10 @@ export class WikiIndexer {
   private cache: WikiIndex | null = null;
   private graphCache: WikiGraph | null = null;
   private searchCache: InvertedIndex | null = null;
+  private embeddingCache: EmbeddingIndex | null = null;
+  private embeddingInflight: Promise<EmbeddingIndex | null> | null = null;
+  private embeddingGeneration = 0;
+  private embeddingAbort: AbortController | null = null;
   private inflight: Promise<WikiIndex> | null = null;
   private mtimeSnapshot: Map<string, number> = new Map();
 
@@ -82,91 +122,236 @@ export class WikiIndexer {
       this.cache = null;
       this.graphCache = null;
       this.searchCache = null;
+      this.embeddingCache = null;
+    }
+    if (await this.tryLoadSearchCache()) {
+      return this.cache!;
     }
     return this.rebuild();
   }
 
-  /**
-   * Quick mtime scan of known source directories. If any file's mtime
-   * changed since the last rebuild, the cache is stale.
-   */
-  private async hasSourceChanges(): Promise<boolean> {
-    if (this.mtimeSnapshot.size === 0) return true;
+  private getSourcePaths(): { singletons: string[]; dirs: string[] } {
     const dirs = [
       join(this.workflowRoot, 'specs'),
       join(this.workflowRoot, 'knowhow'),
       join(this.workflowRoot, 'issues'),
       join(this.workflowRoot, 'domain'),
-      join(this.workflowRoot, 'scratch'),
+      join(this.workflowRoot, 'sessions'),
     ];
-    // Include linked workspace directories in staleness check
     for (const lw of this.linkedWorkspaces) {
       if (lw.shareTypes.has('spec')) dirs.push(join(lw.workflowRoot, 'specs'));
       if (lw.shareTypes.has('knowhow')) dirs.push(join(lw.workflowRoot, 'knowhow'));
       if (lw.shareTypes.has('domain')) dirs.push(join(lw.workflowRoot, 'domain'));
       if (lw.shareTypes.has('codebase')) dirs.push(join(lw.workflowRoot, 'codebase'));
     }
-    const singletons = ['project.md', 'roadmap.md'];
-    for (const s of singletons) {
-      const p = join(this.workflowRoot, s);
-      try {
-        const st = await stat(p);
+
+    // Monitor CLI session directories for new session detection
+    const home = homedir();
+    const projectCwd = dirname(this.workflowRoot);
+    const projectSlug = cwdToClaudeProjectSlug(projectCwd);
+    const claudeProjectDir = join(home, '.claude', 'projects', projectSlug);
+    if (existsSync(claudeProjectDir)) dirs.push(claudeProjectDir);
+    const codexSessionsDir = join(home, '.codex', 'sessions');
+    if (existsSync(codexSessionsDir)) dirs.push(codexSessionsDir);
+
+    const singletons = [
+      join(this.workflowRoot, 'project.md'),
+      join(this.workflowRoot, 'roadmap.md'),
+    ];
+    return { singletons, dirs };
+  }
+
+  private async hasSourceChanges(): Promise<boolean> {
+    if (this.mtimeSnapshot.size === 0) return true;
+    const { singletons, dirs } = this.getSourcePaths();
+    const allPaths = [...singletons, ...dirs];
+    const results = await Promise.allSettled(allPaths.map(p => stat(p)));
+    for (let i = 0; i < allPaths.length; i++) {
+      const p = allPaths[i];
+      const result = results[i];
+      if (result.status === 'fulfilled') {
         const prev = this.mtimeSnapshot.get(p);
-        if (prev === undefined || st.mtimeMs !== prev) return true;
-      } catch {
+        if (prev === undefined || result.value.mtimeMs !== prev) return true;
+      } else {
         if (this.mtimeSnapshot.has(p)) return true;
       }
     }
-    for (const dir of dirs) {
+    // Dir mtime only bumps on add/remove, not in-place edits. For spec/knowhow
+    // dirs, also check max file mtime to detect content edits.
+    const contentDirs = [
+      join(this.workflowRoot, 'specs'),
+      join(this.workflowRoot, 'knowhow'),
+    ];
+    for (const dir of contentDirs) {
       try {
-        const st = await stat(dir);
-        const prev = this.mtimeSnapshot.get(dir);
-        if (prev === undefined || st.mtimeMs !== prev) return true;
-      } catch {
-        if (this.mtimeSnapshot.has(dir)) return true;
-      }
+        const files = readdirSync(dir).filter(f => f.endsWith('.md'));
+        for (const f of files) {
+          const fp = join(dir, f);
+          const st = statSync(fp);
+          const prev = this.mtimeSnapshot.get(fp);
+          if (prev === undefined || st.mtimeMs !== prev) return true;
+        }
+      } catch { /* dir missing is fine */ }
+    }
+    const sessionFiles = this.collectRunModeSourceMtimes();
+    const sessionsRoot = `${join(this.workflowRoot, 'sessions')}${sep}`;
+    const previousSessionFiles = [...this.mtimeSnapshot.keys()].filter(p => p.startsWith(sessionsRoot));
+    if (sessionFiles.size !== previousSessionFiles.length) return true;
+    for (const [path, mtime] of sessionFiles) {
+      if (this.mtimeSnapshot.get(path) !== mtime) return true;
     }
     return false;
   }
 
   private async captureMtimeSnapshot(): Promise<Map<string, number>> {
     const snap = new Map<string, number>();
-    const dirs = [
-      join(this.workflowRoot, 'specs'),
-      join(this.workflowRoot, 'knowhow'),
-      join(this.workflowRoot, 'issues'),
-      join(this.workflowRoot, 'domain'),
-      join(this.workflowRoot, 'scratch'),
-    ];
-    for (const lw of this.linkedWorkspaces) {
-      if (lw.shareTypes.has('spec')) dirs.push(join(lw.workflowRoot, 'specs'));
-      if (lw.shareTypes.has('knowhow')) dirs.push(join(lw.workflowRoot, 'knowhow'));
-      if (lw.shareTypes.has('domain')) dirs.push(join(lw.workflowRoot, 'domain'));
-      if (lw.shareTypes.has('codebase')) dirs.push(join(lw.workflowRoot, 'codebase'));
+    const { singletons, dirs } = this.getSourcePaths();
+    const allPaths = [...singletons, ...dirs];
+    const results = await Promise.allSettled(allPaths.map(p => stat(p)));
+    for (let i = 0; i < allPaths.length; i++) {
+      if (results[i].status === 'fulfilled') {
+        const st = (results[i] as PromiseFulfilledResult<Awaited<ReturnType<typeof stat>>>).value;
+        snap.set(allPaths[i], Number(st.mtimeMs));
+      }
     }
-    const singletons = ['project.md', 'roadmap.md'];
-    for (const s of singletons) {
-      const p = join(this.workflowRoot, s);
-      try { snap.set(p, (await stat(p)).mtimeMs); } catch { /* missing is fine */ }
+    // Capture file-level mtime for spec/knowhow to detect in-place edits
+    for (const sub of ['specs', 'knowhow']) {
+      const dir = join(this.workflowRoot, sub);
+      try {
+        for (const f of readdirSync(dir).filter(n => n.endsWith('.md'))) {
+          const fp = join(dir, f);
+          snap.set(fp, Number(statSync(fp).mtimeMs));
+        }
+      } catch { /* dir missing */ }
     }
-    for (const dir of dirs) {
-      try { snap.set(dir, (await stat(dir)).mtimeMs); } catch { /* missing */ }
-    }
+    for (const [path, mtime] of this.collectRunModeSourceMtimes()) snap.set(path, mtime);
     return snap;
+  }
+
+  private collectRunModeSourceMtimes(): Map<string, number> {
+    const out = new Map<string, number>();
+    const root = join(this.workflowRoot, 'sessions');
+    const visit = (dir: string): void => {
+      let names: string[];
+      try { names = readdirSync(dir); } catch { return; }
+      for (const name of names) {
+        if (name === 'work' || name === 'tmp' || name === 'diagnostics.ndjson' || name === 'events.ndjson') continue;
+        const path = join(dir, name);
+        let st;
+        try { st = statSync(path); } catch { continue; }
+        if (st.isDirectory()) { visit(path); continue; }
+        if (name === 'session.json' || name === 'artifacts.json' || name === 'gates.json' || name === 'run.json' || name === 'report.md' || dir.includes(`${sep}outputs`)) {
+          out.set(path, Number(st.mtimeMs));
+        }
+      }
+    };
+    visit(root);
+    return out;
+  }
+
+  private async tryLoadSearchCache(): Promise<boolean> {
+    const cachePath = join(this.workflowRoot, 'search-cache.json');
+    if (!existsSync(cachePath)) return false;
+
+    try {
+      const raw = await readFile(cachePath, 'utf-8');
+      const cached = JSON.parse(raw);
+      if (cached.version !== SEARCH_CACHE_VERSION || !Array.isArray(cached.entries)) return false;
+
+      const snapshot = new Map<string, number>(cached.mtimeSnapshot);
+      this.mtimeSnapshot = snapshot;
+      if (await this.hasSourceChanges()) {
+        this.mtimeSnapshot = new Map();
+        return false;
+      }
+
+      const entries: WikiEntry[] = cached.entries;
+      const byId: Record<string, WikiEntry> = {};
+      const byType = {
+        project: [], roadmap: [], spec: [], issue: [],
+        knowhow: [], note: [], domain: [],
+      } as Record<WikiNodeType, WikiEntry[]>;
+
+      for (const d of entries) {
+        byId[d.id] = d;
+        byType[d.type].push(d);
+      }
+
+      const backlinks = this.buildBacklinks(entries, byId);
+      this.cache = { entries, byId, byType, backlinks, generatedAt: cached.generatedAt };
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private persistSearchCache(index: WikiIndex): void {
+    let stream: ReturnType<typeof createWriteStream> | null = null;
+    const target = join(this.workflowRoot, 'search-cache.json');
+    const tmpTarget = target + '.tmp';
+    try {
+      stream = createWriteStream(tmpTarget, { encoding: 'utf-8' });
+      
+      stream.on('error', (e) => {
+        if (process.env.MAESTRO_DEBUG === '1') {
+          console.warn('[wiki-indexer] search-cache write failed:', e?.message);
+        }
+        try { stream?.destroy(); } catch { /* ignore */ }
+      });
+
+      stream.write(`{"version":${SEARCH_CACHE_VERSION},"generatedAt":`);
+      stream.write(String(index.generatedAt));
+      stream.write(',"mtimeSnapshot":');
+      stream.write(JSON.stringify([...this.mtimeSnapshot.entries()]));
+      stream.write(',"entries":[');
+      for (let i = 0; i < index.entries.length; i++) {
+        if (i > 0) stream.write(',');
+        const e = index.entries[i];
+        stream.write(JSON.stringify({
+          id: e.id, type: e.type, title: e.title, summary: e.summary,
+          tags: e.tags, status: e.status, created: e.created, updated: e.updated,
+          related: e.related, source: e.source, body: e.body, ext: e.ext,
+          scope: e.scope, category: e.category, specCategory: e.specCategory,
+          createdBy: e.createdBy, sourceRef: e.sourceRef, parent: e.parent,
+        }));
+      }
+      stream.end(']}', () => {
+        try { renameSyncFs(tmpTarget, target); } catch { /* best effort */ }
+      });
+    } catch (e) {
+      if (process.env.MAESTRO_DEBUG === '1') {
+        console.warn('[wiki-indexer] persistSearchCache error:', (e as Error)?.message);
+      }
+      if (stream) {
+        try { stream.destroy(); } catch { /* ignore */ }
+      }
+    }
   }
 
   async rebuild(): Promise<WikiIndex> {
     if (this.inflight) return this.inflight;
     this.inflight = (async () => {
-      const fileEntries = await this.scanFiles();
-      const virtualEntries = await this.scanVirtual();
-      const linkedEntries = await this.scanLinkedWorkspaces();
+      // Parallel: file scan + virtual entries + linked workspaces
+      const [fileEntries, virtualEntries, linkedEntries] = await Promise.all([
+        this.scanFiles(),
+        this.scanVirtual(),
+        this.scanLinkedWorkspaces(),
+      ]);
       const entries = [...fileEntries, ...virtualEntries, ...linkedEntries];
 
-      // Stable collision suffix — use original id for counting so the
-      // third duplicate becomes -3 (not another -2).
-      // Collisions are expected across multi-source JSONL files; warn only
-      // when MAESTRO_DEBUG is set to avoid polluting CLI search output.
+      // Sort entries by id first, then by source priority (file > virtual >
+      // linked) for deterministic collision suffixing — the same logical entry
+      // always gets the same suffixed id regardless of scan order.
+      const sourcePriority = (e: WikiEntry): number =>
+        e.source.workspace ? 2 : e.source.kind === 'virtual' ? 1 : 0;
+      entries.sort((a, b) => a.id.localeCompare(b.id) || sourcePriority(a) - sourcePriority(b));
+
+      const entriesByOriginalId = new Map<string, WikiEntry[]>();
+      for (const entry of entries) {
+        const group = entriesByOriginalId.get(entry.id) ?? [];
+        group.push(entry);
+        entriesByOriginalId.set(entry.id, group);
+      }
       const seen = new Map<string, number>();
       const debugCollisions = process.env.MAESTRO_DEBUG === '1';
       let collisionCount = 0;
@@ -182,6 +367,87 @@ export class WikiIndexer {
           collisionCount++;
         }
         seen.set(original, n + 1);
+      }
+      const resolveCollisionRef = (owner: WikiEntry, target: string): string => {
+        const candidates = entriesByOriginalId.get(target);
+        if (!candidates || candidates.length === 0) return target;
+        if (candidates.length === 1) return candidates[0].id;
+        const sameWorkspace = candidates.filter(candidate => candidate.source.workspace === owner.source.workspace);
+        const sameSource = sameWorkspace.find(candidate => candidate.source.path === owner.source.path);
+        return sameSource?.id ?? sameWorkspace[0]?.id ?? candidates[0].id;
+      };
+      for (const entry of entries) {
+        entry.related = entry.related.map(target => resolveCollisionRef(entry, target));
+        if (entry.parent) entry.parent = resolveCollisionRef(entry, entry.parent);
+        const kgEdges = entry.ext?.kgEdges;
+        if (Array.isArray(kgEdges)) {
+          entry.ext.kgEdges = kgEdges.map(edge => {
+            if (!edge || typeof edge !== 'object') return edge;
+            const typed = edge as Record<string, unknown>;
+            const target = typeof typed.target === 'string'
+              ? resolveCollisionRef(entry, typed.target)
+              : typed.target;
+            return { ...typed, target };
+          });
+        }
+      }
+
+      // Session lifecycle promotion refs are projected by the virtual adapter.
+      // Reconcile both directions only after collision references have settled,
+      // so the promoted target and source session use final deterministic IDs.
+      const entriesByResolvedId = new Map(entries.map(entry => [entry.id, entry]));
+      const resolvePromotedEntry = (owner: WikiEntry, ref: string): WikiEntry | null => {
+        const value = ref.trim();
+        const directId = resolveCollisionRef(owner, value);
+        const direct = entriesByResolvedId.get(directId);
+        if (
+          direct
+          && direct.source.workspace === owner.source.workspace
+          && (direct.type === 'spec' || direct.type === 'knowhow')
+        ) return direct;
+
+        const typedRef = value.match(/^(spec|knowhow):(.+)$/);
+        if (typedRef) {
+          const [, type, payload] = typedRef;
+          const candidates = entries.filter(entry =>
+            entry.type === type
+            && entry.source.workspace === owner.source.workspace
+            && entry.ext?.virtualKind !== 'session'
+            && entry.ext?.virtualKind !== 'session-run'
+            && (entry.sourceRef === payload || entry.id === payload));
+          if (candidates.length > 0) {
+            const sameSource = candidates.find(candidate => candidate.source.path === owner.source.path);
+            return sameSource ?? candidates[0];
+          }
+        }
+
+        const fallbackId = promotedRefToWikiId(value);
+        if (!fallbackId) return null;
+        const fallback = entriesByResolvedId.get(resolveCollisionRef(owner, fallbackId));
+        return fallback
+          && fallback.source.workspace === owner.source.workspace
+          && (fallback.type === 'spec' || fallback.type === 'knowhow')
+          ? fallback
+          : null;
+      };
+      for (const sessionEntry of entries) {
+        if (sessionEntry.ext?.virtualKind !== 'session') continue;
+        const sessionId = sessionEntry.ext.sessionId;
+        const promotedRefs = sessionEntry.ext.promotedRefs;
+        if (typeof sessionId !== 'string' || !Array.isArray(promotedRefs)) continue;
+
+        const sourceSessionId = resolveCollisionRef(sessionEntry, `session-${slugify(sessionId)}`);
+        for (const promotedRef of promotedRefs) {
+          if (typeof promotedRef !== 'string') continue;
+          const promotedEntry = resolvePromotedEntry(sessionEntry, promotedRef);
+          if (!promotedEntry) continue;
+          if (!sessionEntry.related.includes(promotedEntry.id)) {
+            sessionEntry.related.push(promotedEntry.id);
+          }
+          if (!promotedEntry.related.includes(sourceSessionId)) {
+            promotedEntry.related.push(sourceSessionId);
+          }
+        }
       }
       if (collisionCount > 0 && debugCollisions) {
         // eslint-disable-next-line no-console
@@ -220,7 +486,10 @@ export class WikiIndexer {
       this.mtimeSnapshot = await this.captureMtimeSnapshot();
 
       // Persist lightweight index to disk (fire-and-forget).
-      this.persistIndex(index).catch(() => {});
+      this.persistIndex(index).catch((e) => {
+        if (process.env.MAESTRO_DEBUG === '1') console.warn('[wiki-indexer] persistIndex failed:', e?.message);
+      });
+      this.persistSearchCache(index);
 
       return index;
     })();
@@ -236,6 +505,13 @@ export class WikiIndexer {
     this.cache = null;
     this.graphCache = null;
     this.searchCache = null;
+    this.embeddingCache = null;
+    if (this.embeddingAbort) {
+      this.embeddingAbort.abort();
+      this.embeddingAbort = null;
+    }
+    this.embeddingInflight = null;
+    this.embeddingGeneration++;
   }
 
   async query(filters: WikiFilters): Promise<WikiEntry[]> {
@@ -246,13 +522,15 @@ export class WikiIndexer {
     const bm25 = await this.getSearchIndex();
     const ranked = searchBM25(bm25, filters.q);
     const allowed = new Set(base.map((d) => d.id));
-    const out: WikiEntry[] = [];
+    let out: Array<{ entry: WikiEntry; score: number }> = [];
     for (const r of ranked) {
       if (allowed.has(r.docId) && index.byId[r.docId]) {
-        out.push(index.byId[r.docId]);
+        out.push({ entry: index.byId[r.docId], score: r.score });
       }
     }
-    return out;
+    out = rerankByPhraseProximity(out, filters.q);
+    out = applyTimeDecay(out, Date.now());
+    return out.map(o => o.entry);
   }
 
   async groups(filters?: WikiFilters): Promise<Record<WikiNodeType, WikiEntry[]>> {
@@ -285,15 +563,256 @@ export class WikiIndexer {
   }
 
   async searchWithScores(query: string, limit = 50): Promise<Array<{ entry: WikiEntry; score: number }>> {
+    return (await this.searchWithMeta(query, limit)).results;
+  }
+
+  async recallSnapshot(query: string, asOf: string, limit = 50): Promise<RecallSnapshot> {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) throw new Error('Recall snapshot query must not be empty.');
+    const parsedAsOf = new Date(asOf);
+    if (!Number.isFinite(parsedAsOf.getTime()) || parsedAsOf.toISOString() !== asOf) {
+      throw new Error('Recall snapshot as_of must be a canonical ISO timestamp.');
+    }
     const index = await this.get();
     const bm25 = await this.getSearchIndex();
-    const ranked = searchBM25(bm25, query, limit);
-    const out: Array<{ entry: WikiEntry; score: number }> = [];
-    for (const r of ranked) {
+    const ranked = searchBM25Planned(bm25, normalizedQuery, Math.max(0, limit));
+    const candidates = ranked
+      .map(result => ({ result, entry: index.byId[result.docId] }))
+      .filter((item): item is { result: { docId: string; score: number }; entry: WikiEntry } => Boolean(item.entry))
+      .map(({ result, entry }) => ({
+        entry_id: entry.id,
+        score_bp: Math.max(0, Math.round(result.score * 10_000)),
+        raw_bm25: result.score,
+        source_workspace: entry.source.workspace ?? null,
+        workspace_fence: entry.source.workspace ? `linked:${entry.source.workspace}` : 'local',
+        fork_authorized: false as const,
+        resume_authorized: false as const,
+      }))
+      .sort((left, right) => right.score_bp - left.score_bp || left.entry_id.localeCompare(right.entry_id))
+      .slice(0, Math.max(0, limit));
+    return recallSnapshotSchema.parse({
+      schema_version: 'wiki-recall-snapshot/1.0',
+      query: normalizedQuery,
+      as_of: asOf,
+      automatic: false,
+      mutation_authorized: false,
+      scoring: { provider: 'bm25', embedding_weight_bp: 0, tie_break: 'entry_id_asc' },
+      candidates,
+    });
+  }
+
+  async searchWithMeta(query: string, limit = 50, options?: { skipEmbedding?: boolean }): Promise<{
+    results: Array<{ entry: WikiEntry; score: number }>;
+    embeddingUsed: boolean;
+    embeddingDocs: number;
+  }> {
+    const index = await this.get();
+
+    // Parallel: BM25 index build + embedding index load
+    const [bm25, embIdx] = await Promise.all([
+      this.getSearchIndex(),
+      options?.skipEmbedding ? null : this.getEmbeddingIndex(),
+    ]);
+    const internalLimit = Math.ceil(limit * 1.5);
+    const bm25Results = searchBM25Planned(bm25, query, internalLimit);
+
+    if (embIdx && embIdx.docIds.length > 0) {
+      try {
+        const { embedQuery, vectorSearch, vectorSearchZvec, mergeHybrid } = await import('./embedding.js');
+        const qVec = await embedQuery(query);
+        let rawVecResults = await vectorSearchZvec(qVec, this.workflowRoot, internalLimit);
+        if (rawVecResults.length === 0) {
+          rawVecResults = vectorSearch(qVec, embIdx, internalLimit);
+        }
+
+        // Deduplicate chunk results back to parent docId (keep highest score per doc)
+        let vecResults = rawVecResults;
+        if (embIdx.chunkDocIds) {
+          const chunkToParent = new Map<string, string>();
+          for (let i = 0; i < embIdx.docIds.length; i++) {
+            chunkToParent.set(embIdx.docIds[i], embIdx.chunkDocIds[i]);
+          }
+          const bestPerDoc = new Map<string, { docId: string; score: number }>();
+          for (const r of rawVecResults) {
+            const parentId = chunkToParent.get(r.docId) ?? r.docId;
+            const existing = bestPerDoc.get(parentId);
+            if (!existing || r.score > existing.score) {
+              bestPerDoc.set(parentId, { docId: parentId, score: r.score });
+            }
+          }
+          vecResults = Array.from(bestPerDoc.values());
+        }
+
+        const merged = mergeHybrid(bm25Results, vecResults, internalLimit * 2);
+        let out: Array<{ entry: WikiEntry; score: number }> = [];
+        for (const r of merged) {
+          const entry = index.byId[r.docId];
+          if (entry) out.push({ entry, score: r.score });
+        }
+        out = rerankByPhraseProximity(out, query);
+        out = applyTimeDecay(out, Date.now());
+        return { results: out.slice(0, limit), embeddingUsed: true, embeddingDocs: embIdx.docIds.length };
+      } catch (e: unknown) {
+        if (process.env.MAESTRO_DEBUG === '1') {
+          console.error(`[embedding] query failed: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+    }
+
+    let out: Array<{ entry: WikiEntry; score: number }> = [];
+    for (const r of bm25Results.slice(0, internalLimit)) {
       const entry = index.byId[r.docId];
       if (entry) out.push({ entry, score: r.score });
     }
-    return out;
+    out = rerankByPhraseProximity(out, query);
+    out = applyTimeDecay(out, Date.now());
+    return { results: out.slice(0, limit), embeddingUsed: false, embeddingDocs: 0 };
+  }
+
+  async getEmbeddingIndex(): Promise<EmbeddingIndex | null> {
+    if (this.embeddingCache) return this.embeddingCache;
+    if (this.embeddingInflight) return this.embeddingInflight;
+
+    const gen = this.embeddingGeneration;
+    const abort = new AbortController();
+    this.embeddingAbort = abort;
+    this.embeddingInflight = this.loadOrBuildEmbeddings(abort.signal);
+    const result = await this.embeddingInflight;
+    if (this.embeddingGeneration === gen) {
+      this.embeddingInflight = null;
+      this.embeddingAbort = null;
+      this.embeddingCache = result;
+    }
+    return result;
+  }
+
+  private async loadOrBuildEmbeddings(signal?: AbortSignal): Promise<EmbeddingIndex | null> {
+    try {
+      const { isAvailable, getUnavailableReason, loadEmbeddingIndex, buildEmbeddingIndex, saveEmbeddingIndex } = await import('./embedding.js');
+      if (signal?.aborted) return null;
+      if (!await isAvailable()) {
+        const reason = getUnavailableReason?.() ?? 'unknown';
+        if (process.env.MAESTRO_DEBUG === '1') {
+          console.error(`[embedding] unavailable: ${reason}`);
+        }
+        return null;
+      }
+
+      const cached = loadEmbeddingIndex(this.workflowRoot);
+      if (signal?.aborted) return null;
+      const index = await this.get();
+
+      // KG nodes: include high/medium semantic density types, skip low-density bulk
+      const KG_EMBED_NODE_TYPES = new Set(['module', 'class', 'kg-layer', 'kg-tour-step']);
+      const KG_SKIP_NODE_TYPES = new Set(['file', 'function', 'interface', 'type', 'const', 'enum']);
+
+      const docs = index.entries
+        .filter(e => {
+          const vk = e.ext?.virtualKind as string | undefined;
+          if (vk !== 'kg-node' && vk !== 'kg-layer' && vk !== 'kg-tour-step') return true;
+          if (vk === 'kg-layer' || vk === 'kg-tour-step') return true;
+          const nt = e.ext?.nodeType as string | undefined;
+          if (nt && KG_SKIP_NODE_TYPES.has(nt)) return false;
+          return nt ? KG_EMBED_NODE_TYPES.has(nt) : false;
+        })
+        .map(e => {
+          const vk = e.ext?.virtualKind as string | undefined;
+          if (vk === 'kg-node' || vk === 'kg-layer' || vk === 'kg-tour-step') {
+            return this.enrichKgDocForEmbedding(e, index);
+          }
+          return { id: e.id, title: e.title, summary: e.summary, tags: e.tags, body: e.body };
+        });
+
+      const { getModelId, hashDocContent } = await import('./embedding.js');
+      const activeModel = getModelId();
+      const modelMatch = cached && cached.modelId === activeModel;
+      const currentHashes = modelMatch ? docs.map(d => hashDocContent(d)) : undefined;
+
+      if (currentHashes && cached) {
+        // Build per-doc hash map from cached index (handles both chunk-based and legacy formats)
+        const cachedHashMap = new Map<string, string>();
+        if (cached.contentHashes) {
+          if (cached.chunkDocIds) {
+            // Chunk-based index: extract per-doc hash from first chunk of each doc
+            const docSeen = new Set<string>();
+            for (let i = 0; i < cached.chunkDocIds.length; i++) {
+              const pid = cached.chunkDocIds[i];
+              if (!docSeen.has(pid)) {
+                docSeen.add(pid);
+                cachedHashMap.set(pid, cached.contentHashes[i] ?? '');
+              }
+            }
+          } else {
+            // Legacy: docIds are 1:1 with docs
+            for (let i = 0; i < cached.docIds.length; i++) {
+              cachedHashMap.set(cached.docIds[i], cached.contentHashes[i] ?? '');
+            }
+          }
+        }
+        const cachedDocCount = cached.chunkDocIds
+          ? new Set(cached.chunkDocIds).size
+          : cached.docIds.length;
+        const unchanged = cachedDocCount === docs.length
+          && cachedHashMap.size > 0
+          && docs.every((d, i) => cachedHashMap.get(d.id) === currentHashes[i]);
+        if (unchanged) return cached;
+      }
+
+      try {
+        if (signal?.aborted) return cached ?? null;
+        const embIdx = await buildEmbeddingIndex(docs, cached, currentHashes);
+        if (signal?.aborted) return null;
+        await saveEmbeddingIndex(embIdx, this.workflowRoot);
+        return embIdx;
+      } catch (buildErr: unknown) {
+        if (process.env.MAESTRO_DEBUG === '1') {
+          console.error(`[embedding] build failed: ${buildErr instanceof Error ? buildErr.message : buildErr}`);
+        }
+        if (cached) return cached;
+        return null;
+      }
+    } catch (e: unknown) {
+      if (process.env.MAESTRO_DEBUG === '1') {
+        console.error(`[embedding] unavailable: ${e instanceof Error ? e.message : e}`);
+      }
+      return null;
+    }
+  }
+
+  private enrichKgDocForEmbedding(
+    e: WikiEntry,
+    index: WikiIndex,
+  ): { id: string; title: string; summary: string; tags: string[]; body: string } {
+    const parts: string[] = [];
+    const nt = (e.ext?.nodeType as string) || (e.ext?.virtualKind as string) || '';
+    const fp = e.ext?.filePath as string | undefined;
+
+    if (nt) parts.push(`[${nt}]`);
+    parts.push(e.title);
+    if (e.summary) parts.push(e.summary);
+    if (fp) parts.push(`file: ${fp}`);
+
+    const edges = (e.ext?.kgEdges as Array<{ target: string; type: string }>) ?? [];
+    if (edges.length > 0) {
+      const edgeDescs = edges.slice(0, 8).map(edge => {
+        const target = index.byId[edge.target];
+        return target ? `${edge.type} → ${target.title}` : null;
+      }).filter(Boolean);
+      if (edgeDescs.length > 0) parts.push('relations: ' + edgeDescs.join(', '));
+    }
+
+    if (e.tags.length > 0) {
+      const meaningful = e.tags.filter(t => !t.startsWith('kg:') && t !== 'kg');
+      if (meaningful.length > 0) parts.push('tags: ' + meaningful.join(', '));
+    }
+
+    return {
+      id: e.id,
+      title: e.title,
+      summary: e.summary,
+      tags: e.tags,
+      body: parts.join('. '),
+    };
   }
 
   async search(query: string, limit = 50): Promise<WikiEntry[]> {
@@ -341,7 +860,10 @@ export class WikiIndexer {
           const related: string[] = [];
           if (se.ref) {
             const refStem = se.ref.replace(/^knowhow\//, '').replace(/\.md$/, '');
-            const refSlug = refStem.replace(/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            // Derive ref target the same way as the knowhow container id (parseFileEntry
+            // uses `knowhow-${slugify(stem)}`, which keeps the type prefix). Stripping the
+            // prefix here produced target ≠ id → broken links for RCP/REF/DCS/etc.
+            const refSlug = slugify(refStem);
             related.push(`knowhow-${refSlug}`);
           }
           out.push({
@@ -356,7 +878,7 @@ export class WikiIndexer {
             related,
             source: container.source,
             body: se.content,
-            ext: { entryType: se.type, timestamp: se.timestamp, ...(se.ref ? { ref: se.ref } : {}) },
+            ext: { entryType: se.type, timestamp: se.timestamp, ...(se.ref ? { ref: se.ref } : {}), ...(se.confidence ? { confidence: se.confidence } : {}), ...(se.conflictNote ? { conflictNote: se.conflictNote } : {}), ...(se.status ? { status: se.status } : {}), ...(se.supersededBy ? { supersededBy: se.supersededBy } : {}), ...(se.sid ? { sid: se.sid } : {}), ...(se.supersedes ? { supersedes: se.supersedes } : {}) },
             scope,
             category: se.category || container.category,
             specCategory: container.specCategory,
@@ -370,7 +892,7 @@ export class WikiIndexer {
 
     // knowhow/*.md — recursive scan supports both flat and sub-folder layouts
     const knowhowEntries = await this.scanKnowhowDir(join(this.workflowRoot, 'knowhow'));
-    for (const { name, absPath, entry } of knowhowEntries) {
+    for (const { name, entry } of knowhowEntries) {
       if (entry) {
         // Only derive category from file prefix if no frontmatter category
         if (!entry.category) {
@@ -396,7 +918,10 @@ export class WikiIndexer {
           const related: string[] = [];
           if (se.ref) {
             const refStem = se.ref.replace(/^knowhow\//, '').replace(/\.md$/, '');
-            const refSlug = refStem.replace(/^(KNW|TIP|TPL|RCP|REF|DCS|AST|BLP|DOC)-/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            // Derive ref target the same way as the knowhow container id (parseFileEntry
+            // uses `knowhow-${slugify(stem)}`, which keeps the type prefix). Stripping the
+            // prefix here produced target ≠ id → broken links for RCP/REF/DCS/etc.
+            const refSlug = slugify(refStem);
             related.push(`knowhow-${refSlug}`);
           }
           out.push({
@@ -427,10 +952,6 @@ export class WikiIndexer {
     const domainEntries = await this.scanDomain();
     out.push(...domainEntries);
 
-    // scratch/*/*.md — session working documents (lowest search priority via SCRATCH_FIELD_CONFIGS)
-    const scratchEntries = await this.scanScratchDocuments();
-    out.push(...scratchEntries);
-
     return out;
   }
 
@@ -456,38 +977,6 @@ export class WikiIndexer {
   }
 
   /**
-   * Scan .workflow/scratch session directories for .md working documents.
-   * These are indexed as 'note' type with ext.virtualKind='scratch-doc'
-   * so search.ts applies SCRATCH_FIELD_CONFIGS (lowest BM25 weight).
-   */
-  private async scanScratchDocuments(): Promise<WikiEntry[]> {
-    const scratchRoot = join(this.workflowRoot, 'scratch');
-    if (!existsSync(scratchRoot)) return [];
-    const out: WikiEntry[] = [];
-
-    for (const sessionName of await safeReaddir(scratchRoot)) {
-      const sessionDir = join(scratchRoot, sessionName);
-      let dirStat: Awaited<ReturnType<typeof stat>> | null = null;
-      try { dirStat = await stat(sessionDir); } catch { continue; }
-      if (!dirStat.isDirectory()) continue;
-
-      for (const fileName of await safeReaddir(sessionDir)) {
-        if (extname(fileName).toLowerCase() !== '.md') continue;
-        const absPath = join(sessionDir, fileName);
-        const entry = await this.parseFileEntry(absPath, 'note');
-        if (!entry) continue;
-
-        const stem = basename(fileName, extname(fileName));
-        entry.id = `scratch-${slugify(sessionName)}-${slugify(stem)}`;
-        entry.ext = { ...entry.ext, virtualKind: 'scratch-doc', sessionDir: sessionName };
-        entry.category = entry.category || 'scratch';
-        out.push(entry);
-      }
-    }
-    return out;
-  }
-
-  /**
    * Scan .workflow/domain/glossary.json and produce WikiEntry[] for each term.
    */
   private async scanDomain(): Promise<WikiEntry[]> {
@@ -497,7 +986,6 @@ export class WikiIndexer {
       const glossary = JSON.parse(raw);
       if (!Array.isArray(glossary.terms)) return [];
 
-      const now = new Date().toISOString();
       let glossaryStat: Awaited<ReturnType<typeof stat>>;
       try { glossaryStat = await stat(glossaryPath); } catch { return []; }
       const fileDate = new Date(glossaryStat.mtimeMs).toISOString();
@@ -649,42 +1137,64 @@ export class WikiIndexer {
       out.push(...(await loadVirtualJsonEntries(codebaseIndex, adaptCodebaseDocIndex, rel)));
     }
 
-    // Knowledge Graph: .workflow/codebase/knowledge-graph.json → KG nodes/layers/tour
-    // Loaded after doc-index so cross-referencing can link kg-* ↔ codebase-comp-*
-    const kgPath = join(this.workflowRoot, 'codebase', 'knowledge-graph.json');
-    if (existsSync(kgPath) && this.isInsideRoot(kgPath)) {
-      const kgRel = toForwardSlash(relative(this.workflowRoot, kgPath));
-      const kgEntries = await loadVirtualJsonEntries(kgPath, adaptKnowledgeGraph, kgRel);
+    // Knowledge Graph: canonical MaestroGraph SQLite, with legacy JSON fallback.
+    // Loaded after doc-index so cross-referencing can link kg-* ↔ codebase-comp-*.
+    const maestroDbPath = join(this.workflowRoot, 'kg', 'maestro.db');
+    const legacyKgPath = join(this.workflowRoot, 'codebase', 'knowledge-graph.json');
+    if (existsSync(maestroDbPath) && this.isInsideRoot(maestroDbPath)) {
+      const kgRel = toForwardSlash(relative(this.workflowRoot, maestroDbPath));
+      const kgEntries = adaptKnowledgeGraphFromDb(maestroDbPath, kgRel);
+      crossReferenceKgWithDocIndex(kgEntries, out);
+      out.push(...kgEntries);
+    } else if (existsSync(legacyKgPath) && this.isInsideRoot(legacyKgPath)) {
+      const kgRel = toForwardSlash(relative(this.workflowRoot, legacyKgPath));
+      const kgEntries = await loadVirtualJsonEntries(legacyKgPath, adaptKnowledgeGraph, kgRel);
       crossReferenceKgWithDocIndex(kgEntries, out);
       out.push(...kgEntries);
     }
 
-    // Sessions: scan archive.json under scratch/ (sealed) and
-    // milestones/{M}/artifacts/ (archived). Adapter filters out active.
-    // archive.json carries lifecycle + content_refs; context-package.json
-    // is a lazy peek for summary enrichment.
-    out.push(...(await this.scanSessionArchives(join(this.workflowRoot, 'scratch'))));
-    const milestonesRoot = join(this.workflowRoot, 'milestones');
-    if (existsSync(milestonesRoot)) {
-      for (const m of await safeReaddir(milestonesRoot)) {
-        const artifactsDir = join(milestonesRoot, m, 'artifacts');
-        if (!existsSync(artifactsDir)) continue;
-        out.push(...(await this.scanSessionArchives(artifactsDir)));
-      }
-    }
+    // Canonical Session/Run registry. Only sealed/archived Runs are indexed.
+    out.push(...(await this.scanRunModeSessions()));
+
+    // CLI sessions: Claude Code (~/.claude/) and Codex (~/.codex/)
+    out.push(...(await this.scanCliSessions()));
 
     return out;
   }
 
-  private async scanSessionArchives(root: string): Promise<WikiEntry[]> {
+  private async scanCliSessions(): Promise<WikiEntry[]> {
+    const projectCwd = dirname(this.workflowRoot);
+    const home = homedir();
+    const maxAgeDays = 90;
+    const maxFiles = 100;
+
+    // Parallel: Claude Code + Codex session loading
+    const projectSlug = cwdToClaudeProjectSlug(projectCwd);
+    const claudeProjectDir = join(home, '.claude', 'projects', projectSlug);
+    const codexRoot = join(home, '.codex');
+
+    const [claudeEntries, codexEntries] = await Promise.all([
+      existsSync(claudeProjectDir)
+        ? loadClaudeCodeSessions(claudeProjectDir, projectSlug, maxAgeDays, maxFiles).catch(() => [] as WikiEntry[])
+        : [] as WikiEntry[],
+      existsSync(join(codexRoot, 'sessions'))
+        ? loadCodexSessions(codexRoot, projectCwd, maxAgeDays, maxFiles).catch(() => [] as WikiEntry[])
+        : [] as WikiEntry[],
+    ]);
+
+    return [...claudeEntries, ...codexEntries];
+  }
+
+  private async scanRunModeSessions(): Promise<WikiEntry[]> {
+    const root = join(this.workflowRoot, 'sessions');
     if (!existsSync(root)) return [];
     const out: WikiEntry[] = [];
     for (const name of await safeReaddir(root)) {
-      const sessionDir = join(root, name);
-      const arch = join(sessionDir, 'archive.json');
-      if (!existsSync(arch) || !this.isInsideRoot(arch)) continue;
-      const rel = toForwardSlash(relative(this.workflowRoot, arch));
-      out.push(...(await loadSessionArchiveEntries(arch, rel)));
+      if (name === 'index.json') continue;
+      const sessionPath = join(root, name, 'session.json');
+      if (!existsSync(sessionPath) || !this.isInsideRoot(sessionPath)) continue;
+      const rel = toForwardSlash(relative(this.workflowRoot, sessionPath));
+      out.push(...(await loadRunModeSessionEntries(sessionPath, rel)));
     }
     return out;
   }
@@ -747,7 +1257,7 @@ export class WikiIndexer {
             related: [],
             source: { kind: 'file', path: `specs/${name}`, workspace: lw.name },
             body: se.content,
-            ext: { entryType: se.type, timestamp: se.timestamp },
+            ext: { entryType: se.type, timestamp: se.timestamp, ...(se.confidence ? { confidence: se.confidence } : {}), ...(se.conflictNote ? { conflictNote: se.conflictNote } : {}), ...(se.status ? { status: se.status } : {}), ...(se.supersededBy ? { supersededBy: se.supersededBy } : {}), ...(se.sid ? { sid: se.sid } : {}), ...(se.supersedes ? { supersedes: se.supersedes } : {}) },
             scope: 'linked',
             category: se.category || entry.category,
             specCategory: entry.specCategory,
@@ -791,16 +1301,38 @@ export class WikiIndexer {
         }
       }
 
-      const kgPath = join(lw.workflowRoot, 'codebase', 'knowledge-graph.json');
-      if (existsSync(kgPath)) {
-        const kgRel = `codebase/knowledge-graph.json`;
-        const kgEntries = await loadVirtualJsonEntries(kgPath, adaptKnowledgeGraph, kgRel);
-        for (const e of kgEntries) {
-          e.id = `${idPrefix}${e.id}`;
-          e.source = { ...e.source, workspace: lw.name };
-          e.scope = 'linked';
-          out.push(e);
+      const maestroDbPath = join(lw.workflowRoot, 'kg', 'maestro.db');
+      const legacyKgPath = join(lw.workflowRoot, 'codebase', 'knowledge-graph.json');
+      let kgEntries: WikiEntry[] = [];
+      if (existsSync(maestroDbPath)) {
+        kgEntries = adaptKnowledgeGraphFromDb(maestroDbPath, 'kg/maestro.db');
+      } else if (existsSync(legacyKgPath)) {
+        kgEntries = await loadVirtualJsonEntries(legacyKgPath, adaptKnowledgeGraph, 'codebase/knowledge-graph.json');
+      }
+      if (kgEntries.length > 0) {
+        prefixLinkedEntries(kgEntries, idPrefix, lw.name);
+        out.push(...kgEntries);
+      }
+    }
+
+    if (lw.shareTypes.has('session')) {
+      const sessionsRoot = join(lw.workflowRoot, 'sessions');
+      for (const sessionName of await safeReaddir(sessionsRoot)) {
+        const sessionPath = join(sessionsRoot, sessionName, 'session.json');
+        if (!existsSync(sessionPath)) continue;
+        const entries = await loadRunModeSessionEntries(sessionPath, `sessions/${sessionName}/session.json`);
+        prefixLinkedEntries(entries, idPrefix, lw.name);
+        for (const entry of entries) {
+          entry.ext = {
+            ...entry.ext,
+            workspaceFence: `linked:${lw.name}`,
+            sharedVia: 'explicit-session-share',
+            forkAuthorized: false,
+            resumeAuthorized: false,
+          };
+          entry.scope = 'linked';
         }
+        out.push(...entries);
       }
     }
 
@@ -843,6 +1375,9 @@ export class WikiIndexer {
     const status = asStatus(data.status) ?? inferStatus(type);
     const related = normalizeRelated(data.related);
     const ext = extractExt(data);
+    // Surface deprecated into ext.status — the CLI search deprecated-filter
+    // reads ext.status (like spec sub-entries), not the top-level field.
+    if (status === 'deprecated') ext.status = 'deprecated';
 
     const category = asString(data.category) || null;
     const specCategory = asString(data.specCategory) || null;
@@ -974,22 +1509,21 @@ export class WikiIndexer {
     type: WikiNodeType,
   ): Promise<WikiEntry | null> {
     if (!this.isInsideRoot(absPath)) return null;
+    let ls;
     try {
-      const ls = await lstat(absPath);
-      if (ls.isSymbolicLink()) return null;
-      if (!ls.isFile()) return null;
+      ls = await lstat(absPath);
+      if (ls.isSymbolicLink() || !ls.isFile()) return null;
     } catch {
       return null;
     }
 
     let raw: string;
-    let stats;
     try {
       raw = await readFile(absPath, 'utf-8');
-      stats = await stat(absPath);
     } catch {
       return null;
     }
+    const stats = ls;
 
     const { data, content } = parseFrontmatter(raw);
     const fileName = basename(absPath);
@@ -1001,6 +1535,9 @@ export class WikiIndexer {
     const status = asStatus(data.status) ?? inferStatus(type);
     const related = normalizeRelated(data.related);
     const ext = extractExt(data);
+    // Surface deprecated into ext.status — the CLI search deprecated-filter
+    // reads ext.status (like spec sub-entries), not the top-level field.
+    if (status === 'deprecated') ext.status = 'deprecated';
 
     // Enrichment fields from frontmatter
     const category = asString(data.category) || null;
@@ -1042,15 +1579,16 @@ export class WikiIndexer {
     entries: WikiEntry[],
     byId: Record<string, WikiEntry>,
   ): Record<string, string[]> {
-    const bl: Record<string, string[]> = {};
+    const blSets = new Map<string, Set<string>>();
     const titleIndex = new Map<string, string>();
     for (const d of entries) titleIndex.set(d.title.toLowerCase(), d.id);
 
     const push = (target: string, source: string) => {
       const resolved = resolveLink(target, byId, titleIndex);
       if (!resolved) return;
-      if (!bl[resolved]) bl[resolved] = [];
-      if (!bl[resolved].includes(source)) bl[resolved].push(source);
+      let s = blSets.get(resolved);
+      if (!s) { s = new Set(); blSets.set(resolved, s); }
+      s.add(source);
     };
 
     for (const d of entries) {
@@ -1061,6 +1599,8 @@ export class WikiIndexer {
         while ((m = linkRe.exec(d.body))) push(m[1], d.id);
       }
     }
+    const bl: Record<string, string[]> = {};
+    for (const [k, v] of blSets) bl[k] = [...v];
     return bl;
   }
 
@@ -1116,9 +1656,12 @@ function asString(value: unknown): string {
 }
 
 function asStatus(value: unknown): WikiStatus | null {
-  const allowed: WikiStatus[] = ['draft', 'active', 'completed', 'blocked', 'archived'];
-  return typeof value === 'string' && (allowed as string[]).includes(value)
-    ? (value as WikiStatus)
+  if (typeof value !== 'string') return null;
+  // `superseded` (decision lifecycle) is the same terminal state as deprecated.
+  const normalized = value === 'superseded' ? 'deprecated' : value;
+  const allowed: WikiStatus[] = ['draft', 'active', 'completed', 'blocked', 'archived', 'deprecated'];
+  return (allowed as string[]).includes(normalized)
+    ? (normalized as WikiStatus)
     : null;
 }
 

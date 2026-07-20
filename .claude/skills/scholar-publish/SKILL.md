@@ -1,7 +1,9 @@
 ---
 name: scholar-publish
+disable-model-invocation: true
 description: Post-acceptance conference preparation workflow covering presentation slides, academic posters, and promotion content. Triggers on "scholar publish", "conference preparation", "prepare presentation", "create poster", "write promotion", "post-acceptance".
 allowed-tools: AskUserQuestion(*), TodoWrite(*), Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*)
+session-mode: none
 ---
 
 # Scholar Publish
@@ -11,7 +13,7 @@ Post-acceptance conference preparation workflow that helps researchers create pr
 ## Pre-load (before execution)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for project context
-2. **Specs**: `maestro spec load --category coding` — load coding conventions
+2. **Specs**: `maestro load --type spec --category coding` — load coding conventions
 3. **Wiki knowledge**: `maestro search "academic writing research paper" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 

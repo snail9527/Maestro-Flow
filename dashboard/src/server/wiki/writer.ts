@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFile, writeFile, unlink, mkdir, lstat, stat } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 
@@ -134,10 +134,16 @@ export class WikiWriter {
 
     this.indexer.invalidate(targetPath);
     const index = await this.indexer.rebuild();
-    const id = `${req.type}-${req.slug}`;
-    const entry = index.byId[id];
+    let expectedId: string;
+    if (req.type === 'spec') {
+      expectedId = `spec:project:${req.slug}`;
+    } else {
+      const prefix = categoryToPrefix(req.category).toLowerCase();
+      expectedId = `knowhow-${prefix}-${req.slug}`;
+    }
+    const entry = index.byId[expectedId] ?? index.byId[`${req.type}-${req.slug}`];
     if (!entry) {
-      throw new WikiWriteError('NOT_FOUND', `created entry not indexed: ${id}`);
+      throw new WikiWriteError('NOT_FOUND', `created entry not indexed: ${expectedId}`);
     }
     return entry;
   }
@@ -269,10 +275,13 @@ export class WikiWriter {
       ? `${req.category},${kwStr}`
       : kwStr;
     const entryTag = this.isKnowhowPath(absPath) ? 'knowhow-entry' : 'spec-entry';
-    const categoryAttr = req.category ? ` category="${req.category}"` : '';
-    const titleAttr = ` title="${entryTitle}"`;
-    const descAttr = req.description ? ` description="${req.description}"` : '';
-    const entryBlock = `\n<${entryTag}${categoryAttr} keywords="${effectiveKws}" date="${date}"${titleAttr}${descAttr}>\n\n### ${entryTitle}\n\n${req.content.trim()}\n\n</${entryTag}>\n`;
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const sid = `S-${date.replace(/-/g, '')}-${randomBytes(2).toString('hex').slice(0, 4)}`;
+    const categoryAttr = req.category ? ` category="${esc(req.category)}"` : '';
+    const sidAttr = ` sid="${sid}"`;
+    const titleAttr = ` title="${esc(entryTitle)}"`;
+    const descAttr = req.description ? ` description="${esc(req.description)}"` : '';
+    const entryBlock = `\n<${entryTag}${categoryAttr} keywords="${esc(effectiveKws)}" date="${date}"${sidAttr}${titleAttr}${descAttr}>\n\n### ${entryTitle}\n\n${req.content.trim()}\n\n</${entryTag}>\n`;
 
     return this.withLock(absPath, async () => {
       let existing: string;

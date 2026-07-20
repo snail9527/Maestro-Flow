@@ -8,10 +8,13 @@
 // ---------------------------------------------------------------------------
 
 import type { Command } from 'commander';
-import { exec } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { exec, execSync, spawn } from 'node:child_process';
+import { existsSync, writeFileSync, mkdirSync, unlinkSync, readdirSync, rmSync, lstatSync, readlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { getPackageVersion } from '../utils/get-version.js';
 import { getAllManifests } from '../core/manifest.js';
+import { manifestToProfile } from '../core/install-profile.js';
 import { loadMigrations, planMigrations, runPendingMigrations } from '../utils/migration-registry.js';
 import { applyNotices, planNotices, printNoticePlan } from '../utils/update-notices.js';
 
@@ -22,7 +25,6 @@ import { applyNotices, planNotices, printNoticePlan } from '../utils/update-noti
 const PACKAGE_NAME = 'maestro-flow';
 const REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
 const FETCH_TIMEOUT_MS = 8000;
-const VIEW_SERVER_PORT = 3001;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,6 +63,23 @@ function compareSemver(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * Detect if the global maestro-flow install is an npm-link symlink.
+ * Returns the link target (source directory) or null.
+ */
+function getLinkedSourceDir(): string | null {
+  try {
+    const globalPrefix = execSync('npm prefix -g', { encoding: 'utf8' }).trim();
+    const pkgDir = join(globalPrefix, 'node_modules', PACKAGE_NAME);
+    if (!existsSync(pkgDir)) return null;
+    const stat = lstatSync(pkgDir);
+    if (!stat.isSymbolicLink()) return null;
+    return readlinkSync(pkgDir);
+  } catch {
+    return null;
+  }
+}
+
 function execAsync(cmd: string): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     exec(cmd, { timeout: 120_000 }, (err, stdout, stderr) => {
@@ -74,9 +93,8 @@ function execAsync(cmd: string): Promise<{ stdout: string; stderr: string }> {
 // Pre-update: stop view server
 // ---------------------------------------------------------------------------
 
-/**
- * Check if the view server is running.
- */
+const VIEW_SERVER_PORT = 3001;
+
 async function checkViewServer(): Promise<{ status: string; workspace?: string } | null> {
   try {
     const res = await fetch(`http://127.0.0.1:${VIEW_SERVER_PORT}/api/health`, {
@@ -89,17 +107,12 @@ async function checkViewServer(): Promise<{ status: string; workspace?: string }
   }
 }
 
-/**
- * Stop the view server if running to prevent file locks during npm install.
- * Uses 2-stage approach: graceful API shutdown → force kill by port.
- */
 async function stopViewServer(): Promise<boolean> {
   const health = await checkViewServer();
   if (!health) return false;
 
   console.error('  Stopping view server to avoid file locks...');
 
-  // Stage 1: graceful API shutdown
   try {
     await fetch(`http://127.0.0.1:${VIEW_SERVER_PORT}/api/shutdown`, {
       method: 'POST',
@@ -115,7 +128,6 @@ async function stopViewServer(): Promise<boolean> {
     return true;
   }
 
-  // Stage 2: force kill by port
   try {
     if (process.platform === 'win32') {
       const { stdout } = await execAsync(`netstat -ano | findstr :${VIEW_SERVER_PORT}`);
@@ -142,7 +154,7 @@ async function stopViewServer(): Promise<boolean> {
     await new Promise(r => setTimeout(r, 500));
     console.error('  View server stopped.');
   } catch {
-    console.error('  Warning: could not stop view server. If update fails, run `maestro stop` first.');
+    console.error('  Warning: could not stop view server. Run `maestro stop` manually if update fails.');
   }
 
   return true;
@@ -153,9 +165,16 @@ async function stopViewServer(): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 /**
- * After npm install, exec the NEW version of maestro to reinstall
- * previously installed workflow components. This ensures new-version
- * code and assets are used (current process still runs old code).
+ * After npm install, export each manifest as a profile JSON and hand it
+ * to the NEW version of maestro via `install --import --upgrade`.
+ *
+ * Using a profile file instead of CLI args avoids:
+ *   - Windows command-line length limits (~8192 chars)
+ *   - Shell escaping issues with paths
+ *   - Loss of custom hook selections (only level was passed before)
+ *
+ * The `--upgrade` flag tells the new binary to merge newly added
+ * default-selected components into the existing selection.
  */
 async function reinstallWorkflows(version: string): Promise<void> {
   const manifests = getAllManifests();
@@ -166,37 +185,79 @@ async function reinstallWorkflows(version: string): Promise<void> {
 
   // Deduplicate by scope + targetPath (latest manifest wins)
   const seen = new Set<string>();
-  const deduped: { scope: string; targetPath: string; hookLevel: string; selectedComponentIds?: string[] }[] = [];
+  const deduped: typeof manifests = [];
   for (const m of manifests) {
     const key = `${m.scope}:${m.targetPath}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    deduped.push({ scope: m.scope, targetPath: m.targetPath, hookLevel: m.hookLevel ?? 'none', selectedComponentIds: m.selectedComponentIds });
+    deduped.push(m);
   }
 
-  for (const { scope, targetPath, hookLevel, selectedComponentIds } of deduped) {
-    const hooksArg = hookLevel !== 'none' ? ` --hooks ${hookLevel}` : '';
-    const componentsArg = selectedComponentIds?.length ? ` --components ${selectedComponentIds.join(',')}` : '';
-    if (scope === 'global') {
-      try {
-        await execAsync(`maestro install --force --global${hooksArg}${componentsArg}`);
-        console.error(`  [+] Global components reinstalled (v${version})`);
-      } catch (err) {
-        console.error(`  [x] Global reinstall failed: ${err instanceof Error ? err.message : err}`);
-      }
+  const tmpDir = join(tmpdir(), 'maestro-reinstall');
+  if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
+
+  for (const m of deduped) {
+    if (m.scope === 'project' && !existsSync(m.targetPath)) {
+      console.error(`  [-] Skipped ${m.targetPath} (directory not found)`);
+      continue;
+    }
+
+    const profile = manifestToProfile(m);
+    const profilePath = join(tmpDir, `reinstall-${m.id}.json`);
+    writeFileSync(profilePath, JSON.stringify(profile, null, 2), 'utf-8');
+
+    const args = ['install', '--import', profilePath, '--upgrade'];
+    if (m.scope === 'global') {
+      args.push('--global');
     } else {
-      if (!existsSync(targetPath)) {
-        console.error(`  [-] Skipped ${targetPath} (directory not found)`);
-        continue;
-      }
-      try {
-        await execAsync(`maestro install --force --path "${targetPath}"${hooksArg}${componentsArg}`);
-        console.error(`  [+] Project reinstalled: ${targetPath}`);
-      } catch (err) {
-        console.error(`  [x] Project reinstall failed (${targetPath}): ${err instanceof Error ? err.message : err}`);
-      }
+      args.push('--path', m.targetPath);
+    }
+
+    const label = m.scope === 'global' ? 'Global' : m.targetPath;
+    try {
+      await spawnAsync('maestro', args);
+      console.error(`  [+] ${label} reinstalled (v${version})`);
+      try { unlinkSync(profilePath); } catch { /* ignore */ }
+    } catch (err) {
+      console.error(`  [x] ${label} reinstall failed: ${err instanceof Error ? err.message : err}`);
+      console.error(`      Profile saved: ${profilePath}`);
     }
   }
+
+  // Clean up empty temp dir
+  try {
+    if (readdirSync(tmpDir).length === 0) rmSync(tmpDir);
+  } catch { /* ignore */ }
+}
+
+/**
+ * Re-register native plugin if any manifest has plugin.claude or plugin.codex.
+ * Calls the NEW binary's `maestro plugin install` so it picks up new skills.
+ */
+async function reinstallPlugin(): Promise<void> {
+  const manifests = getAllManifests();
+  const hasPlugin = manifests.some(m => m.plugin?.claude || m.plugin?.codex);
+  if (!hasPlugin) return;
+
+  console.error('');
+  console.error('  Re-registering native plugin...');
+
+  try {
+    const args: string[] = ['plugin', 'install'];
+    await spawnAsync('maestro', args);
+    console.error('  [+] Plugin re-registered');
+  } catch (err) {
+    console.error(`  [x] Plugin re-registration failed: ${err instanceof Error ? err.message : err}`);
+    console.error('      Run `maestro plugin install` manually.');
+  }
+}
+
+function spawnAsync(cmd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: 'inherit', shell: true });
+    child.on('exit', code => code === 0 ? resolve() : reject(new Error(`exit code ${code}`)));
+    child.on('error', reject);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -394,36 +455,79 @@ export function registerUpdateCommand(program: Command): void {
         return;
       }
 
-      console.error('');
-      console.error(`  Installing ${PACKAGE_NAME}@${latest.version}...`);
-
-      // --- Pre-update: stop view server to prevent file locks ---
+      const linkedDir = getLinkedSourceDir();
       const viewServerWasRunning = await stopViewServer();
 
       console.error('');
 
-      try {
-        const { stdout, stderr } = await execAsync(`npm install -g ${PACKAGE_NAME}@${latest.version}`);
-        if (stdout.trim()) console.error(stdout.trim());
-        if (stderr.trim()) console.error(stderr.trim());
+      if (linkedDir) {
+        console.error(`  Linked install detected → ${linkedDir}`);
+        console.error(`  Updating via git pull + rebuild...`);
         console.error('');
-        console.error('  Update complete!');
-      } catch (err) {
-        console.error('  Installation failed.');
-        if (err instanceof Error) {
-          console.error(`  ${err.message}`);
+
+        try {
+          const { stdout: pullOut, stderr: pullErr } = await execAsync(`git -C "${linkedDir}" pull --ff-only`);
+          if (pullOut.trim()) console.error(pullOut.trim());
+          if (pullErr.trim()) console.error(pullErr.trim());
+        } catch (err) {
+          console.error('  git pull failed.');
+          if (err instanceof Error) console.error(`  ${err.message}`);
+          console.error('');
+          console.error(`  You can try manually: cd ${linkedDir} && git pull && npm run build`);
+          if (viewServerWasRunning) {
+            console.error('  Warning: view server was stopped — restart it manually if needed.');
+          }
+          console.error('');
+          return;
         }
-        console.error('');
-        console.error(`  You can try manually: npm install -g ${PACKAGE_NAME}@${latest.version}`);
-        if (viewServerWasRunning) {
-          console.error('  Run `maestro view` to restart the dashboard.');
+
+        try {
+          console.error('');
+          console.error('  Rebuilding...');
+          const { stdout: buildOut, stderr: buildErr } = await execAsync(`npm run build --prefix "${linkedDir}"`);
+          if (buildOut.trim()) console.error(buildOut.trim());
+          if (buildErr.trim()) console.error(buildErr.trim());
+          console.error('');
+          console.error('  Update complete!');
+        } catch (err) {
+          console.error('  Build failed.');
+          if (err instanceof Error) console.error(`  ${err.message}`);
+          console.error('');
+          console.error(`  You can try manually: cd ${linkedDir} && npm run build`);
+          if (viewServerWasRunning) {
+            console.error('  Warning: view server was stopped — restart it manually if needed.');
+          }
+          console.error('');
+          return;
         }
+      } else {
+        console.error(`  Installing ${PACKAGE_NAME}@${latest.version}...`);
         console.error('');
-        return;
+
+        try {
+          const { stdout, stderr } = await execAsync(`npm install -g ${PACKAGE_NAME}@${latest.version}`);
+          if (stdout.trim()) console.error(stdout.trim());
+          if (stderr.trim()) console.error(stderr.trim());
+          console.error('');
+          console.error('  Update complete!');
+        } catch (err) {
+          console.error('  Installation failed.');
+          if (err instanceof Error) console.error(`  ${err.message}`);
+          console.error('');
+          console.error(`  You can try manually: npm install -g ${PACKAGE_NAME}@${latest.version}`);
+          if (viewServerWasRunning) {
+            console.error('  Warning: view server was stopped — restart it manually if needed.');
+          }
+          console.error('');
+          return;
+        }
       }
 
       // --- Post-update: reinstall workflow components ---
       await reinstallWorkflows(latest.version);
+
+      // --- Post-update: re-register native plugin if previously installed ---
+      await reinstallPlugin();
 
       // --- Post-update: apply version-keyed notices via new binary ---
       // (runs the new binary so its notice registry is the source of truth)
@@ -434,7 +538,7 @@ export function registerUpdateCommand(program: Command): void {
 
       if (viewServerWasRunning) {
         console.error('');
-        console.error('  Run `maestro view` to restart the dashboard.');
+        console.error('  Note: view server was stopped for the update — restart it manually if needed.');
       }
 
       console.error('');

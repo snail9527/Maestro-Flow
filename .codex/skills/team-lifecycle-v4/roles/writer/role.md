@@ -2,16 +2,11 @@
 role: writer
 prefix: DRAFT
 inner_loop: true
-discuss_rounds: [DISCUSS-002]
-message_types:
-  success: draft_ready
-  revision: draft_revision
-  error: error
+discuss_rounds: "[DISCUSS-002]"
+message_types: 
 ---
 
 # Writer
-
-Template-driven document generation with progressive dependency loading.
 
 ## Identity
 - Tag: [writer] | Prefix: DRAFT-*
@@ -50,29 +45,21 @@ Template-driven document generation with progressive dependency loading.
 
 ### Inputs
 - Template from routing table
-- blueprint-config.json from <session>/spec/
-- discovery-context.json from <session>/spec/
+- blueprint-config.json from {run_dir}/outputs/spec/
+- discovery-context.json from {run_dir}/outputs/spec/
 - Prior decisions from context_accumulator (inner loop)
-- Discussion feedback from <session>/discussions/ (if exists)
-- Read `tasks.json` to get upstream task status
-- Read `discoveries/*.json` to load upstream discoveries and context
+- Discussion feedback from {run_dir}/evidence/discussions/ (if exists)
 
 ## Phase 3: Document Generation
 
 CLI generation:
 ```
-exec_command({
-  cmd: `maestro delegate "PURPOSE: Generate <doc-type> document following template
-TASK: * Load template * Apply spec config and discovery context * Integrate prior feedback * Generate all sections
+Bash({ command: `maestro delegate "PURPOSE: Generate <doc-type> document following template
+TASK: • Load template • Apply spec config and discovery context • Integrate prior feedback • Generate all sections
 MODE: write
-CONTEXT: @<session>/spec/*.json @<template-path>
+CONTEXT: @{run_dir}/outputs/spec/*.json @<template-path>
 EXPECTED: Document at <output-path> with YAML frontmatter, all sections, cross-references
-CONSTRAINTS: Follow document standards" --role implement --mode write --cd <session>`,
-  yield_time_ms: 30000,
-  max_output_tokens: 6000
-})
-// ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
-// NEVER skip — document must be fully written before validation
+CONSTRAINTS: Follow document standards" --tool agy --mode write --cd {run_dir}/work/team`, run_in_background: false })
 ```
 
 ## Phase 4: Validation
@@ -87,40 +74,12 @@ CONSTRAINTS: Follow document standards" --role implement --mode write --cd <sess
 ### Validation Routing
 | Doc Type | Method |
 |----------|--------|
-| product-brief | Self-validate -> report |
+| product-brief | Self-validate → report |
 | requirements | Self-validate + DISCUSS-002 |
-| architecture | Self-validate -> report |
-| epics | Self-validate -> report |
+| architecture | Self-validate → report |
+| epics | Self-validate → report |
 
-### Reporting
-
-1. Write discovery to `discoveries/<task_id>.json`:
-   ```json
-   {
-     "task_id": "DRAFT-001",
-     "status": "task_complete",
-     "ref": "<session>/spec/<doc-type>.md",
-     "findings": {
-       "doc_type": "<doc-type>",
-       "validation_status": "pass",
-       "discuss_verdict": "<verdict or null>",
-       "output_path": "<path>"
-     },
-     "data": {
-       "quality_self_score": 85,
-       "sections_completed": ["..."],
-       "cross_references_valid": true
-     }
-   }
-   ```
-2. Report via `report_agent_job_result`:
-   ```
-   report_agent_job_result({
-     id: "DRAFT-001",
-     status: "completed",
-     findings: { doc_type, validation_status, discuss_verdict, output_path }
-   })
-   ```
+Report: doc type, validation status, discuss verdict (PRD only), output path.
 
 ## Error Handling
 

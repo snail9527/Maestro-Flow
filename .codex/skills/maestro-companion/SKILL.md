@@ -1,485 +1,281 @@
 ---
 name: maestro-companion
-description: "Knowledge companion — load context, record companion doc, capture insights, route to skills"
-argument-hint: "[before|note|after|route] [--task <description>] [--type <task_type>] [--category <cat>]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
+disable-model-invocation: false
+description: Quick execution for small tasks (≤1-2 files, no artifact handoff) —
+  minimal run lifecycle (create + complete only) with evidence recording. Can
+  read/write/run any tool, but scoped to tasks completable in a few actions. Not
+  for multi-step workflows or tasks needing downstream gates
+argument-hint: <intent> [--note <text>] [--promote] [-y]
+allowed-tools:
+  - Bash
+  - Edit
+  - Glob
+  - Grep
+  - Read
+  - Write
+  - followup_task
+  - interrupt_agent
+  - list_agents
+  - request_user_input
+  - send_message
+  - spawn_agent
+  - spawn_agents_on_csv
+  - wait_agent
+session-mode: run
+contract:
+  discovery: self-described
+  consumes: []
+  produces: []
+version: 0.5.53
 ---
 
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+@~/.maestro/workflows/codex-run-mode.md
+</required_reading>
+
 <purpose>
-Task companion command — pairs with any task to provide knowledge context loading,
-structured companion document recording, insight capture, and skill routing.
+Minimal-run execution channel. Full LLM capability (read/write files, run commands, search code, edit code) with minimal protocol overhead: one `run create` + one `run complete`, continuous recording to `{run_dir}/evidence/companion-log.md`.
 
-Does not create sessions or modify workflow state. Pure side-car utility.
+Use when:
+- Intent is mechanically clear — user knows exactly what to change, no design decisions or multi-angle analysis needed (file count is irrelevant; a 20-file rename is still lightweight)
+- No typed artifact needs to be consumed by a downstream step
+- No gate/verdict needs to be recorded for lifecycle tracking
+- Task does not require pre-task thinking (prepare) or structured brief to execute correctly
 
-Four modes:
-- **before** — Pre-task: load spec + knowhow index + codebase index, create companion doc
-- **note** — Mid-task: append a structured entry to the active companion doc
-- **after** — Post-task: review companion doc, promote entries to spec/knowhow, suggest next steps
-- **route** — Routing: recommend next skill/command based on intent
+Also provides companion utilities: structured note recording (--note) and insight promotion (--promote).
 
-No arguments → auto-detect: uncommitted changes → `after`, else → `before`.
+This command can be invoked directly by the user or routed to from `/maestro-next` when complexity is assessed as lightweight.
 </purpose>
 
 <context>
-$ARGUMENTS — mode + optional flags.
-
-```bash
-$maestro-companion
-$maestro-companion "before --task 'implement auth module' --type implement"
-$maestro-companion "before --task 'fix login bug' --type debug --category coding"
-$maestro-companion "note 'decided to use bcrypt over argon2'"
-$maestro-companion "note --file src/auth.ts 'changed token validation logic'"
-$maestro-companion "after"
-$maestro-companion "route what should I do next"
-```
-
-**Mode detection priority:**
-1. Explicit `before` / `note` / `after` / `route`
-2. Intent text that is not a mode keyword → `route`
-3. No arguments → auto-detect (`git status` has changes → `after`, else → `before`)
+$ARGUMENTS — intent text + optional flags.
 
 **Flags:**
-- `--task <description>` — Current task description (for targeted knowledge loading and doc title)
-- `--type <task_type>` — Task type for field template selection (see task types below)
-- `--category <cat>` — Spec category filter: coding / arch / test / review / debug / learning / ui
 
-**Task types** (determines which recording sections are active):
+| Flag | Effect |
+|------|--------|
+| `-y` / `--yes` | Skip confirmation, execute directly |
+| `--note <text>` | Append a structured note to the active run's evidence log |
+| `--promote` | Interactively promote run insights to spec/knowhow |
 
-| Type | Description | Key sections |
-|------|-------------|--------------|
-| `implement` | Feature development, code writing | working_files, dependencies, decisions, tests_affected |
-| `debug` | Bug investigation, root cause analysis | symptoms, hypotheses, evidence, root_cause, fix_applied |
-| `analyze` | Code/architecture/performance analysis | scope, findings, risks, recommendations |
-| `design` | Architecture/UI/API design | constraints, alternatives, trade_offs, chosen_approach |
-| `plan` | Task decomposition, roadmap planning | goals, breakdown, estimates, dependencies |
-| `review` | Code review, PR review | files_reviewed, findings, severity_counts, verdict |
-| `test` | Test writing, UAT, coverage expansion | coverage_before, coverage_after, gaps, test_files |
-| `refactor` | Code restructuring, tech debt | affected_modules, before_after, breaking_changes |
-| `learn` | Codebase exploration, knowledge building | questions, answers, mental_model, references |
-| `general` | Default / unclassified | (all universal sections) |
-
-Auto-detection: if `--type` not provided, infer from `--task` description keywords.
-
-**Companion document:**
-- Path: `.workflow/.scratchpad/companion-{YYYYMMDD-HHmmss}.md`
-- Active doc tracking: `.workflow/.scratchpad/.companion-active` (stores path of current companion doc)
-- Format: YAML frontmatter (rich metadata) + typed sections + timestamped entries
+**Mode detection (priority order):**
+1. `--note` → S_NOTE (append note to active companion log)
+2. `--promote` → S_PROMOTE (review + promote insights)
+3. Intent text present → S_CTX → S_EXEC → S_SEAL
+4. No arguments → ask for intent via request_user_input
 </context>
 
-<execution>
+<invariants>
+1. **Minimal-run lifecycle** — single Run in a chainless Session. Only `run create` + `run complete` lifecycle verbs apply. No prepare/brief/check or artifact gates (consumes/produces/gates all empty); required command arguments are still validated by runtime
+2. **--note is append-only** — never overwrite or reorder existing entries
+3. **--promote delegates** — spec/knowhow promotion routes through `maestro-spec add` / `maestro-manage knowledge capture`, never writes directly
+4. **Evidence is non-formal** — `{run_dir}/evidence/companion-log.md` never enters gates or artifact registry
+5. **Full execution capability** — companion can do anything the LLM can do. It is NOT limited to knowledge loading or read-only operations
+6. **No auto-orchestration** — companion never creates chains or dispatches sub-orchestrators. It executes directly
+</invariants>
 
-## S_BEFORE — Knowledge Loading + Companion Doc Creation
+<state_machine>
 
-### Step 1: Load Specs
+<states>
+S_PARSE   — Parse arguments, extract flags, detect mode
+S_NOTE    — Append structured note to active companion doc
+S_PROMOTE — Review companion/run outputs, promote insights to spec/knowhow
+S_CTX     — Create minimal run, load context, open evidence log
+S_EXEC    — Execute the task directly; record each meaningful step
+S_SEAL    — `run complete`, summarize outcome, offer optional promote
+</states>
 
-Run `maestro spec load` with appropriate flags:
-- With `--category`: `maestro spec load --category <cat>`
-- With `--task`: `maestro spec load --keyword <extracted_keyword>`
-- No flags: `maestro spec load --category coding`
+<transitions>
 
-Display loaded rules summary (entry count + key rule names).
+S_PARSE:
+  → S_NOTE     WHEN: --note flag
+  → S_PROMOTE  WHEN: --promote flag
+  → S_CTX      WHEN: intent present OR -y
+  → S_PARSE    WHEN: no intent (1 clarify round via request_user_input)
 
-### Step 2: Browse Knowhow Index
+S_NOTE:
+  → END        DO: A_NOTE
 
-Run `maestro knowhow list --store workflow`. With `--task`, also run `maestro search "<task_keyword>" --type knowhow`. Display available entries (ID + title). Hint: `maestro wiki load <id>` for details.
+S_PROMOTE:
+  → END        DO: A_PROMOTE
 
-### Step 3: Check Codebase Index
+S_CTX:
+  → S_EXEC     DO: A_CTX
 
-Check if `.workflow/codebase/doc-index.json` exists.
-- Exists → display "Codebase docs ready, last updated: {timestamp}"
-- Missing → suggest `$manage-codebase-rebuild`
-- Stale (>7 days) → suggest `$manage-codebase-refresh`
+S_EXEC:
+  → S_EXEC     WHEN: task has more actions remaining    DO: execute next action + A_RECORD
+  → S_SEAL     WHEN: task complete                      DO: A_RECORD (final entry)
 
-### Step 4: Create Companion Document
+S_SEAL:
+  → END        DO: A_SEAL
 
-Create `.workflow/.scratchpad/` if needed. Resolve task type from `--type` flag or infer from `--task` keywords.
+</transitions>
 
-Write companion doc with full field template:
+<actions>
 
+### A_CTX
+
+Entry point. Minimal-run: create + complete only, skip prepare/brief/check.
+
+1. **Create minimal run** (chainless single-step session):
+   ```bash
+   maestro run create companion --session YYYYMMDD-companion-<topic> --intent "<intent>" --arg "<intent>" --workflow-root .
+   ```
+   `--intent` preserves the goal as Session metadata; `--arg "<intent>"` supplies Companion's required `<intent>` command argument. Returns: `run_id`, `run_dir`. No chain or artifact gates; required command arguments remain runtime-validated.
+
+2. **Load context** (best-effort, non-blocking):
+   ```bash
+   maestro search "<intent keywords>" --type spec --type knowhow
+   ```
+   Load top 2-3 relevant entries. If nothing found, proceed without context.
+
+3. **Initialize evidence log** at `{run_dir}/evidence/companion-log.md`:
+   ```markdown
+   # Companion Log: {intent summary}
+   > run_id: {run_id} | session: {session_id}
+
+   ## Context
+   - {spec/knowhow entries loaded, or "none"}
+
+   ## Work Log
+   ```
+
+4. Proceed to S_EXEC.
+
+### A_RECORD
+
+Append a timestamped entry to `{run_dir}/evidence/companion-log.md` under `## Work Log`. Called after each meaningful action during S_EXEC.
+
+**Entry format:**
 ```markdown
----
-# === Identity ===
-task: "{task_description or 'Untitled task'}"
-task_type: "{resolved type}"
-created: "{ISO timestamp}"
-status: active
-
-# === Context Loaded ===
-specs_loaded: "{category or 'coding'}"
-specs_count: {N}
-knowhow_searched: "{keyword or 'none'}"
-knowhow_available: {M}
-codebase_index: "{ready|missing|stale}"
-branch: "{current git branch}"
-phase: "{current phase from state.json or 'none'}"
-milestone: "{current milestone from state.json or 'none'}"
-
-# === Scope ===
-working_files: []
-dependencies: []
-related_artifacts: []
-
-# === Outcome (populated by after mode) ===
-outcome: ""
-files_changed: []
-promoted_specs: 0
-promoted_knowhow: 0
-follow_up: []
-completed: ""
----
-
-# Companion Doc — {task_description}
-
-> `$maestro-companion "note '<content>'"` — add entries
-> `$maestro-companion after` — review, promote, close
-
-## Context
-
-{Type-specific context section}
-
-## Entries
-
-## Summary
+### {HH:MM} — {action summary}
+{what was done, what was found, what changed}
+{files touched: path1, path2 (if any)}
 ```
 
-**Type-specific context templates** (written into `## Context`):
+**Recording rules:**
+- One entry per meaningful action (file edit, command run, discovery, decision)
+- Trivial reads (single file lookup) can be batched into one entry
+- Never overwrite or reorder existing entries (invariant 2)
+- Keep entries concise: 1-5 lines each, focus on outcome not process
+- Evidence dir is non-formal: never enters gates or artifact registry
 
-**implement:**
-```markdown
-### Working Files
-| File | Role | Status |
-|------|------|--------|
+### A_SEAL
 
-### Dependencies
-- (modules, APIs, or services this task depends on)
+Wrap up the companion run:
 
-### Decisions
-| # | Decision | Rationale | Alternatives Considered |
-|---|----------|-----------|------------------------|
+1. **Append outcome** to `{run_dir}/evidence/companion-log.md`:
+   ```markdown
+   ## Outcome
+   **Status:** done | partial
+   **Summary:** {1-2 sentence result}
+   **Artifacts:** {files created/modified, or "none"}
+   **Follow-up:** {suggested next step if any, or "none"}
+   ```
 
-### Tests Affected
-- (test files that need creation or update)
-```
+2. **Complete the run**:
+   ```bash
+   maestro run complete <run_id> --verdict done --workflow-root .
+   ```
 
-**debug:**
-```markdown
-### Symptoms
-- (observable behavior vs expected behavior)
+3. **Optional promote offer** — if the work produced reusable insights (patterns, decisions, pitfalls):
+   - Suggest: `/maestro-spec add <category> "title" "content"` or `/manage-knowhow-capture`
+   - Only suggest, never auto-execute (invariant 3)
 
-### Hypotheses
-| # | Hypothesis | Status | Evidence |
-|---|-----------|--------|----------|
+4. Display completion summary to user:
+   ```
+   Companion done. Run: {run_id} | Evidence: {run_dir}/evidence/companion-log.md
+   Outcome: {summary}
+   {promote suggestion if applicable}
+   ```
 
-### Evidence Trail
-| Time | Source | Type | Finding |
-|------|--------|------|---------|
+### A_NOTE
 
-### Root Cause
-- (populated when identified)
+Append a structured note to the active run's evidence log.
 
-### Fix Applied
-- (description of fix, files changed)
-```
+1. Locate active companion run:
+   ```bash
+   maestro run recall companion --json
+   ```
+   If no active run, create one via A_CTX (intent = "note recording").
 
-**analyze:**
-```markdown
-### Scope
-- (what is being analyzed and boundaries)
+2. Append to `{run_dir}/evidence/companion-log.md`:
+   ```markdown
+   ### {HH:MM} — Note
+   {note text from --note argument}
+   ```
 
-### Findings
-| # | Finding | Severity | Location |
-|---|---------|----------|----------|
+3. Confirm: `Note recorded → {run_dir}/evidence/companion-log.md`
 
-### Risks
-- (identified risks or concerns)
+### A_PROMOTE
 
-### Recommendations
-- (actionable recommendations)
-```
+Review companion/run outputs and promote insights to spec/knowhow.
 
-**design:**
-```markdown
-### Constraints
-- (hard limits, requirements, compatibility needs)
+1. Read the latest companion log(s) from recent runs:
+   ```bash
+   maestro run recall companion --json
+   ```
+   Read `{run_dir}/evidence/companion-log.md` for the most recent completed run.
 
-### Alternatives
-| # | Approach | Pros | Cons |
-|---|----------|------|------|
+2. Identify promotable insights:
+   - Patterns discovered during execution
+   - Architectural decisions made
+   - Pitfalls encountered and workarounds found
+   - Reusable solutions
 
-### Trade-offs
-- (key trade-off decisions and rationale)
+3. For each insight, present to user via request_user_input:
+   - **Promote to spec** → suggest `/maestro-spec add <category> "title" "content" --keywords ...`
+   - **Promote to knowhow** → suggest `/manage-knowhow-capture`
+   - **Skip** → no action
 
-### Chosen Approach
-- (selected design with justification)
-```
+4. Never write directly — always delegate to the appropriate command (invariant 3).
 
-**plan:**
-```markdown
-### Goals
-- (what success looks like)
+</actions>
 
-### Breakdown
-| # | Task | Estimate | Depends On | Status |
-|---|------|----------|------------|--------|
+</state_machine>
 
-### Dependencies
-- (external dependencies, blockers, prerequisites)
-```
+<routing_guidance>
 
-**review:**
-```markdown
-### Files Reviewed
-| File | Lines | Findings |
-|------|-------|----------|
+### When /maestro-next routes here
 
-### Findings
-| # | Severity | Category | File:Line | Description |
-|---|----------|----------|-----------|-------------|
+`/maestro-next` assesses complexity at its S_RANK state. When all lightweight signals hold, it routes to this command:
 
-### Verdict
-- (pass / pass-with-concerns / fail)
-```
+**Lightweight signals (all must hold):**
+- Intent is mechanically clear — user knows exactly what to change, no design decisions needed (file count irrelevant)
+- No typed artifact needs to be consumed by a downstream step
+- No gate/verdict needs to be recorded for lifecycle tracking
+- Task does not require pre-task thinking (prepare) or structured brief to execute correctly
 
-**test:**
-```markdown
-### Coverage
-- Before: {%}
-- After: {%}
-- Target: {%}
+**Routing preference:** prefer the lightest channel that satisfies the task. When in doubt, ask the user rather than auto-upgrading to Standard.
 
-### Test Files
-| File | Type | Tests Added | Status |
-|------|------|------------|--------|
-
-### Gaps
-- (uncovered paths or scenarios)
-```
-
-**refactor:**
-```markdown
-### Affected Modules
-- (modules being restructured)
-
-### Before / After
-| Aspect | Before | After |
-|--------|--------|-------|
-
-### Breaking Changes
-- (API or behavior changes that affect consumers)
-```
-
-**learn:**
-```markdown
-### Questions
-| # | Question | Answered | Source |
-|---|----------|----------|--------|
-
-### Mental Model
-- (evolving understanding of how it works)
-
-### References
-- (files, docs, wiki entries consulted)
-```
-
-**general:**
-```markdown
-### Notes
-- (general working notes)
-```
-
-Write the companion doc path to `.workflow/.scratchpad/.companion-active`.
-
-### Step 5: Output Summary Card
-
-```
-Knowledge context loaded
-  Spec:     {N} rules ({category})
-  Knowhow:  {M} entries available
-  Codebase: {status}
-  Doc:      {companion_doc_path} [{task_type}]
-
-Mid-task commands:
-  $maestro-companion "note 'finding or decision'"
-  $maestro-companion "note --file src/auth.ts 'changed validation'"
-  $spec-load "--keyword <keyword>"
-```
-
----
-
-## S_NOTE — Append Structured Entry to Companion Doc
-
-### Step 1: Locate Active Companion Doc
-
-Read `.workflow/.scratchpad/.companion-active` to get the doc path.
-If missing or file not found → create a new companion doc (same as Step 4 above, minimal — no spec/knowhow loading).
-
-### Step 2: Parse Entry Content and Flags
-
-Parse $ARGUMENTS after `note` keyword:
-- `--file <path>` — associate entry with a specific file (appended to frontmatter `working_files`)
-- `--severity <level>` — for findings: critical / high / medium / low
-- Remaining text = entry content
-
-### Step 3: Classify Entry Type
-
-Auto-classify from content signals:
-
-| Content signal | Type tag |
-|---------------|----------|
-| "decided/decision/chose/picked/went with" | `decision` |
-| "pattern/convention/rule/always/never/must" | `spec-candidate` |
-| "pitfall/gotcha/careful/warning/trap/beware" | `pitfall` |
-| "learned/realized/discovered/understood/turns out" | `insight` |
-| "hypothesis/suspect/might be/could be" | `hypothesis` |
-| "found bug/root cause/because of/caused by" | `evidence` |
-| "risk/concern/worry/might break" | `risk` |
-| "todo/need to/should also/follow up/remaining" | `todo` |
-| "question/why does/how does/unclear" | `question` |
-| "blocked/stuck/can't/impossible" | `blocker` |
-| Default | `note` |
-
-### Step 4: Append Entry
-
-Append to the companion doc under `## Entries`:
-
-```markdown
-### [{type}] {HH:mm} — {first line of content}
-
-{full content}
-
-{if --file: **File:** `{path}`}
-{if --severity: **Severity:** {level}}
-```
-
-### Step 5: Update Frontmatter and Context Tables
-
-- If `--file` provided and not already in `working_files` → append to `working_files`
-- If type is `decision` → also append row to `### Decisions` table (if implement/design type doc)
-- If type is `hypothesis` → also append row to `### Hypotheses` table (if debug type doc)
-- If type is `evidence` → also append row to `### Evidence Trail` table (if debug type doc)
-- If type is `risk` → also append to `### Risks` list (if analyze/design type doc)
-- If type is `question` → also append row to `### Questions` table (if learn type doc)
-
-### Step 6: Confirm
-
-```
-[{type}] entry added to companion doc
-  $maestro-companion "note '...'"  — add more
-  $maestro-companion after         — review & promote
-```
-
----
-
-## S_AFTER — Review + Populate Outcome + Promote + Route
-
-### Step 1: Load Companion Doc
-
-Read `.workflow/.scratchpad/.companion-active` → read the companion doc.
-If no active doc or doc is empty → skip to Step 4 (accumulation reminder).
-
-### Step 2: Populate Outcome Fields
-
-Collect task outcome data:
+### Invocation forms
 
 ```bash
-git diff --name-only
+# Direct invocation
+/maestro-companion "fix the typo in README line 42"
+/maestro-companion "what does the parseConfig function do?"
+
+# Routed from maestro-next (lightweight verdict)
+/maestro-next "quick lookup: where is the auth middleware?"
+  → maestro-next displays: "Channel: companion → /maestro-companion \"where is the auth middleware?\""
+
+# Note recording
+/maestro-companion --note "discovered that config.yaml overrides env vars"
+
+# Promote insights
+/maestro-companion --promote
 ```
 
-Update frontmatter:
-- `files_changed` — from git diff
-- `completed` — current ISO timestamp
-- `status` — `completed`
-
-Display entry summary:
-```
-Companion doc review — {task_type}
-  Entries:    {total} ({by type breakdown})
-  Files:      {files_changed count} changed
-  Duration:   {elapsed since created}
-
-Promotable entries:
-  {list of decision/spec-candidate/pitfall/insight entries}
-```
-
-### Step 3: Promote Entries
-
-If promotable entries exist, ask user:
-
-- Option 1: "Promote to spec" — short coding/arch/test constraint
-- Option 2: "Promote to knowhow" — detailed recipe/template/decision/tip
-- Option 3: "Promote both" — spec index entry + knowhow document
-- Option 4: "Skip — nothing to promote"
-
-**Routing by selection:**
-
-| Selection | Action |
-|-----------|--------|
-| Spec | `$spec-add` — guide user through category + content |
-| Knowhow | `$manage-knowhow-capture` — guide through type + content |
-| Both | `spec-add` first, then `manage-knowhow-capture` |
-| Skip | Proceed to Step 4 |
-
-Update frontmatter: `promoted_specs`, `promoted_knowhow` counts.
-Extract any `todo` entries → write to `follow_up` in frontmatter.
-Clear `.workflow/.scratchpad/.companion-active`.
-
-### Step 4: Output Accumulation Reminder + Routing
-
-```
-Knowledge accumulation reminders:
-  Reusable pattern found?        $spec-add "<category> 'title' 'content' --description 'summary'"
-  Solved a complex problem?      $manage-knowhow-capture "recipe 'description'"
-  Made an architecture decision? $manage-knowhow-capture "decision 'description'"
-  Discovered a useful trick?     $manage-knowhow-capture "tip 'content'"
-
-Next steps:
-  $maestro-next          — recommend next command
-  $maestro "<intent>"    — route intent to full workflow
-  $manage-status         — view project dashboard
-```
-
----
-
-## S_ROUTE — Skill Routing
-
-### Step 1: Parse Intent
-
-Extract intent text from $ARGUMENTS after removing the `route` keyword.
-
-### Step 2: Delegate to maestro-next
-
-```
-$maestro-next "<intent_text>"
-```
-
-Reuses maestro-next routing table and scoring logic to recommend the best single command.
-
-</execution>
+</routing_guidance>
 
 <error_codes>
+
 | Code | Severity | Condition | Recovery |
 |------|----------|-----------|----------|
-| W001 | warning | `.workflow/specs/` not initialized | Suggest `$spec-setup` |
-| W002 | warning | `.workflow/knowhow/` is empty | Normal, skip knowhow index |
-| W003 | warning | `.workflow/codebase/` does not exist | Suggest `$manage-codebase-rebuild` |
-| W004 | warning | No active companion doc found (note/after mode) | Create new doc or skip |
-</error_codes>
+| E001 | error | Intent empty after clarification | Provide intent |
+| E002 | error | `run create companion` fails | Check maestro CLI installation |
+| E003 | error | No active run found for --note | Auto-creates a new companion run |
+| W001 | warning | Task exceeds lightweight scope mid-execution | Complete current task, suggest /maestro-next for follow-up |
 
-<success_criteria>
-- [ ] Mode correctly detected (before/note/after/route)
-- [ ] Task type resolved from --type flag or inferred from --task keywords
-- [ ] before: spec + knowhow + codebase indexes loaded or hints given
-- [ ] before: companion doc created with full YAML frontmatter (identity + context + scope + outcome)
-- [ ] before: type-specific context template written (matching task_type)
-- [ ] before: active doc path written to `.companion-active`
-- [ ] note: active companion doc located and entry appended with type tag
-- [ ] note: entry type auto-classified from content signals (11 type tags)
-- [ ] note: --file flag updates working_files in frontmatter
-- [ ] note: typed entries cross-posted to matching context tables
-- [ ] after: outcome fields populated (files_changed, completed, status)
-- [ ] after: promotable entries identified and routed to spec-add or manage-knowhow-capture
-- [ ] after: todo entries extracted to follow_up field
-- [ ] after: companion doc marked completed, active pointer cleared
-- [ ] route: intent correctly forwarded to maestro-next
-- [ ] No session created, no state.json modified
-</success_criteria>
+</error_codes>

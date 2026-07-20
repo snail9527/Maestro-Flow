@@ -13,7 +13,13 @@ import {
   getAllManifests,
   type Manifest,
 } from '../core/manifest.js';
-import { uninstallManifest, type UninstallResult } from './install-backend.js';
+import {
+  uninstallManifest,
+  scanFallbackTargets,
+  performFallbackCleanup,
+  getPackageRoot,
+  type UninstallResult,
+} from './install-backend.js';
 import { runUninstallFlow } from '../tui/uninstall-ui/index.js';
 import { t } from '../i18n/index.js';
 
@@ -53,7 +59,45 @@ export function registerUninstallCommand(program: Command): void {
       const manifests = getAllManifests();
 
       if (manifests.length === 0) {
-        console.error('No installations found.');
+        // Fallback: scan for orphaned files when manifests are missing
+        const scan = scanFallbackTargets('global', '');
+        if (scan.totalFiles === 0 && !scan.hooksFound && !scan.claudeMcpFound && !scan.codexMcpFound) {
+          console.error('No installations found.');
+          return;
+        }
+
+        console.error('No manifests found, but maestro files detected (orphaned install):');
+        if (scan.totalFiles > 0) {
+          console.error(`  Files: ${scan.totalFiles} across ${scan.directories.length} directories`);
+          for (const d of scan.directories.slice(0, 8)) {
+            console.error(`    ${d.path} (${d.fileCount} files)`);
+          }
+          if (scan.directories.length > 8) {
+            console.error(`    ... and ${scan.directories.length - 8} more directories`);
+          }
+        }
+        if (scan.hooksFound) console.error('  Hooks: maestro hooks in settings');
+        if (scan.statuslineFound) console.error('  Statusline: maestro statusline in settings');
+        if (scan.claudeMcpFound) console.error('  MCP: claude maestro-tools registered');
+        if (scan.codexMcpFound) console.error('  MCP: codex maestro-tools registered');
+
+        if (!opts.yes) {
+          try {
+            const ok = await confirm({
+              message: 'Remove all detected maestro files and config?',
+              default: false,
+            });
+            if (!ok) { console.error('Cancelled.'); return; }
+          } catch (err) {
+            if (err instanceof ExitPromptError) { console.error('Cancelled.'); return; }
+            throw err;
+          }
+        }
+
+        const pkgRoot = getPackageRoot();
+        const r = performFallbackCleanup('global', '', pkgRoot);
+        console.error(`\n  ${formatResult(r)}`);
+        console.error('\nDone (fallback cleanup).');
         return;
       }
 
@@ -75,12 +119,20 @@ export function registerUninstallCommand(program: Command): void {
           }
         }
 
+        let successCount = 0;
+        let failCount = 0;
         for (const m of manifests) {
           console.error(`\n${formatManifest(m)}`);
-          const r = uninstallManifest(m);
-          console.error(`  ${formatResult(r)}`);
+          try {
+            const r = uninstallManifest(m);
+            console.error(`  ${formatResult(r)}`);
+            successCount++;
+          } catch (err) {
+            failCount++;
+            console.error(`  ✗ Failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
-        console.error('\nDone.');
+        console.error('\nDone.' + (failCount > 0 ? ` (${successCount} succeeded, ${failCount} failed)` : ''));
         return;
       }
 

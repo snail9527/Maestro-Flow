@@ -1,5 +1,5 @@
 /**
- * Domain Schema — runtime validation for glossary.json
+ * Domain Schema — runtime validation for glossary.yaml (or .json fallback)
  */
 
 // ============================================================================

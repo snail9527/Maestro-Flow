@@ -156,6 +156,11 @@ export function HooksConfig({
           );
         })}
       </Box>
+      {isInPresetZone && descMap[HOOK_LEVELS[cursor]] && (
+        <Box marginLeft={2}>
+          <Text color={C.neutral}>{descMap[HOOK_LEVELS[cursor]]}</Text>
+        </Box>
+      )}
 
       {/* Individual hooks — grouped by event */}
       <Box flexDirection="column" marginTop={SP.sectionGap}>

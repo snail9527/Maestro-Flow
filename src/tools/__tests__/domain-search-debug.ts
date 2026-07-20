@@ -6,7 +6,9 @@ describe('domain search integration', () => {
   it('finds domain entries in WikiIndexer', async () => {
     const idx = new WikiIndexer({ workflowRoot: resolve('.workflow') });
     const { existsSync } = await import('node:fs');
-    const glossaryPath = resolve('.workflow', 'domain', 'glossary.json');
+    const glossaryYaml = resolve('.workflow', 'domain', 'glossary.yaml');
+    const glossaryJson = resolve('.workflow', 'domain', 'glossary.json');
+    const glossaryPath = existsSync(glossaryYaml) ? glossaryYaml : glossaryJson;
     console.log('Glossary path:', glossaryPath);
     console.log('Glossary exists:', existsSync(glossaryPath));
     const index = await idx.get();

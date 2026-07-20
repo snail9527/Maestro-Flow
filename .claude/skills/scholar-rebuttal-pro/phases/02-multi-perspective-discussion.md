@@ -1,11 +1,8 @@
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # Phase 2: Multi-Perspective Discussion
-
-> **📌 COMPACT SENTINEL [Phase 2: multi-perspective-discussion]**
-> This phase contains 4 execution steps (Step 2.1 — 2.4).
-> If you can read this sentinel but cannot find the full Step protocol below, context has been compressed.
-> Recovery: `Read("phases/02-multi-perspective-discussion.md")`
-
-Simulate discussion from author, reviewer, and domain expert perspectives to develop consensus strategies for responding to reviewer comments.
 
 ## Objective
 
@@ -68,7 +65,7 @@ const reviewAnalysis = <from Phase 1 output>
 const commentCategories = <from Phase 1 output>
 
 // Read review-analysis.json with error handling
-const analysisPath = ".workflow/.scratchpad/review-analysis.json"
+const analysisPath = "{run_dir}/outputs/review-analysis.json"
 const analysisResult = safeReadJSON(analysisPath, "Phase 2");
 
 if (!analysisResult.success) {
@@ -100,12 +97,12 @@ Review Analysis Summary:
 > 2. Full protocol (Step 2.X — 2.4) is in active memory, not just sentinel
 > If only sentinel remains → `Read("phases/02-multi-perspective-discussion.md")` now.
 
-Use Gemini CLI to simulate three perspectives discussing each major issue:
+Use Agy CLI to simulate three perspectives discussing each major issue:
 
 ```bash
 # For each major issue, run multi-perspective analysis
 for issue in majorIssues:
-  ccw cli -p "PURPOSE: Simulate multi-perspective discussion on reviewer comment to develop robust response strategy
+  maestro delegate "PURPOSE: Simulate multi-perspective discussion on reviewer comment to develop robust response strategy
 
 PERSPECTIVES:
 1. Author Perspective: How can we most effectively respond to this concern? What evidence do we have? What experiments can we add?
@@ -148,7 +145,7 @@ EXPECTED: JSON with {
     'priority': '...',
     'sourceStrategyId': 0
   }
-}" --tool gemini --mode analysis --rule analysis-review-architecture
+}" --to agy --mode analysis --rule analysis-review-architecture
 ```
 
 **Alternative: Use team-ultra-analyze skill**
@@ -315,7 +312,7 @@ ${result.expertValidation.map((v, i) => `
 `
 }
 
-Write(".workflow/.scratchpad/discussion-log.md", discussionLog)
+Write("{run_dir}/outputs/discussion-log.md", discussionLog)
 ```
 
 **2. Consensus Strategies (consensus-strategies.json)**
@@ -346,7 +343,7 @@ const consensusStrategies = {
 }
 
 try {
-  Write(".workflow/.scratchpad/consensus-strategies.json", JSON.stringify(consensusStrategies, null, 2))
+  Write("{run_dir}/outputs/consensus-strategies.json", JSON.stringify(consensusStrategies, null, 2))
 } catch (error) {
   console.error(`[Phase 2] Failed to write consensus-strategies.json:`, error.message);
   TodoWrite([
@@ -376,7 +373,7 @@ if (!workflowPreferences.autoYes) {
 
   if (confirm["Confirm"] === "Revise") {
     // Allow user to edit consensus-strategies.json
-    console.log("Please edit .workflow/.scratchpad/consensus-strategies.json and re-run this phase")
+    console.log("Please edit {run_dir}/outputs/consensus-strategies.json and re-run this phase")
     return
   }
 }
@@ -386,8 +383,8 @@ if (!workflowPreferences.autoYes) {
 
 - **Variable**: `discussionConsensus` (aggregated discussion results)
 - **Variable**: `strategicRecommendations` (consensus strategies for each issue)
-- **File**: `.workflow/.scratchpad/discussion-log.md` (full discussion transcript)
-- **File**: `.workflow/.scratchpad/consensus-strategies.json` (structured strategies)
+- **File**: `{run_dir}/outputs/discussion-log.md` (full discussion transcript)
+- **File**: `{run_dir}/outputs/consensus-strategies.json` (structured strategies)
 - **TodoWrite**: Mark Phase 2 completed, Phase 3 in_progress
 
 ## Next Phase

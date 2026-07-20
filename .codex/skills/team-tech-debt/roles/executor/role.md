@@ -2,20 +2,18 @@
 role: executor
 prefix: TDFIX
 inner_loop: true
-message_types: [state_update]
+message_types: "[state_update]"
 ---
 
 # Tech Debt Executor
-
-Debt cleanup executor. Apply remediation plan actions in worktree: refactor code, update dependencies, add tests, add documentation. Batch-delegate to CLI tools, self-validate after each batch.
 
 ## Phase 2: Load Remediation Plan
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Session path | task description (regex: `session:\s*(.+)`) | Yes |
-| .msg/meta.json | <session>/.msg/meta.json | Yes |
-| Remediation plan | <session>/plan/remediation-plan.json | Yes |
+| .msg/meta.json | {run_dir}/work/team/.msg/meta.json | Yes |
+| Remediation plan | {run_dir}/outputs/plan/remediation-plan.json | Yes |
 | Worktree info | meta.json:worktree.path, worktree.branch | Yes |
 | Context accumulator | From prior TDFIX tasks (inner loop) | Yes (inner loop) |
 
@@ -36,22 +34,18 @@ For each batch, use CLI tool for implementation:
 
 **Per-batch delegation**:
 
-```
-exec_command({
-  cmd: `maestro delegate "PURPOSE: Apply tech debt fixes in batch; success = all items fixed without breaking changes
+```bash
+maestro delegate "PURPOSE: Apply tech debt fixes in batch; success = all items fixed without breaking changes
 TASK: <batch-type-specific-tasks>
 MODE: write
 CONTEXT: @<worktree-path>/**/* | Memory: Remediation plan context
 EXPECTED: Code changes that fix debt items, maintain backward compatibility, pass existing tests
 CONSTRAINTS: Minimal changes only | No new features | No suppressions | Read files before modifying
 Batch type: <refactor|update-deps|add-tests|add-docs|restructure>
-Items: <list-of-items-with-file-paths-and-descriptions>" --role implement --mode write --cd "<worktree-path>"`,
-  yield_time_ms: 30000,
-  max_output_tokens: 6000
-})
-// ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
-// NEVER skip — must wait for batch fix to complete before next batch or validation
+Items: <list-of-items-with-file-paths-and-descriptions>" --tool agy --mode write --cd "<worktree-path>"
 ```
+
+Wait for CLI completion before proceeding to next batch.
 
 **Fix Results Tracking**:
 
@@ -75,6 +69,6 @@ All commands in worktree:
 | Syntax | `tsc --noEmit` or `python -m py_compile` | No new errors |
 | Lint | `eslint --no-error-on-unmatched-pattern` | No new errors |
 
-Write `<session>/fixes/fix-log.json` with fix results. Update .msg/meta.json with `fix_results`.
+Write `{run_dir}/outputs/fixes/fix-log.json` with fix results. Update .msg/meta.json with `fix_results`.
 
 Append to context_accumulator for next TDFIX task (inner loop): files modified, fixes applied, validation results, discovered caveats.

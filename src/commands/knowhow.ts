@@ -8,34 +8,17 @@
 
 import type { Command } from 'commander';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { readdirSync } from 'node:fs';
-
-const CATEGORIES = ['session', 'tip', 'template', 'recipe', 'reference', 'decision', 'asset', 'blueprint', 'document'] as const;
-const PREFIX_MAP: Record<string, string> = {
-  session: 'KNW', tip: 'TIP', template: 'TPL',
-  recipe: 'RCP', reference: 'REF', decision: 'DCS',
-  asset: 'AST', blueprint: 'BLP', document: 'DOC',
-};
-
-function getKnowhowDir(): string {
-  return resolve('.workflow/knowhow');
-}
-
-function slugify(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-}
-
-function parseFrontmatter(raw: string): { data: Record<string, string>; body: string } {
-  const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
-  if (!match) return { data: {}, body: raw };
-  const data: Record<string, string> = {};
-  for (const line of match[1].split('\n')) {
-    const kv = line.match(/^(\w[\w\s]*?):\s*(.*)$/);
-    if (kv) data[kv[1].trim()] = kv[2].trim();
-  }
-  return { data, body: raw.slice(match[0].length) };
-}
+import {
+  KNOWHOW_CATEGORIES as CATEGORIES,
+  KNOWHOW_PREFIX_MAP as PREFIX_MAP,
+  slugify,
+  escapeYamlValue,
+  parseFrontmatter,
+  getKnowhowDir,
+  knowhowFileToWikiId,
+} from '../utils/frontmatter.js';
 
 export function registerKnowhowCommand(program: Command): void {
   const knowhow = program
@@ -59,6 +42,7 @@ export function registerKnowhowCommand(program: Command): void {
     .option('--code-paths <paths>', '[asset/blueprint] Comma-separated code paths')
     .option('--category <category>', 'Spec category for agent discovery (coding, arch, test, debug, review, learning)')
     .option('--spec-category <cat>', 'Spec category for agent injection (coding|arch|debug|test|review|learning|ui)')
+    .option('--tool', 'Mark this knowhow entry as a tool')
     .action(async (opts) => {
       const type = opts.type as string;
       if (!CATEGORIES.includes(type as any)) {
@@ -109,7 +93,7 @@ export function registerKnowhowCommand(program: Command): void {
         : `${prefix}-${ts}-${pad(now.getHours())}${pad(now.getMinutes())}.md`;
 
       const { writeFileSync } = await import('node:fs');
-      const fmLines = ['---', `title: ${opts.title}`, `type: ${type}`, `created: ${now.toISOString()}`];
+      const fmLines = ['---', `title: ${escapeYamlValue(opts.title)}`, `type: ${type}`, `created: ${now.toISOString()}`];
       if (tags.length > 0) {
         fmLines.push('keywords:');
         for (const t of tags) fmLines.push(`  - ${t}`);
@@ -125,11 +109,13 @@ export function registerKnowhowCommand(program: Command): void {
         fmLines.push('codePaths:');
         for (const p of paths) fmLines.push(`  - ${p}`);
       }
+      if (opts.tool) {
+        fmLines.push('tool: true');
+      }
       fmLines.push('---', '', body);
 
       writeFileSync(join(dir, filename), fmLines.join('\n'), 'utf-8');
-      const idSuffix = slug || `${pad(now.getHours())}${pad(now.getMinutes())}`;
-      console.log(`Created: knowhow-${slugify(ts)}-${idSuffix}`);
+      console.log(`Created: ${knowhowFileToWikiId(filename)}`);
       console.log(`  Type: ${type}`);
       console.log(`  File: knowhow/${filename}`);
     });
@@ -157,7 +143,7 @@ export function registerKnowhowCommand(program: Command): void {
         const prefix = name.match(/^([A-Z]+)-\d{8}/)?.[1] ?? '';
         const typeCat = Object.entries(PREFIX_MAP).find(([, p]) => p === prefix)?.[0] ?? '';
         entries.push({
-          id: `knowhow-${slugify(name.replace(/^...-/, '').replace('.md', ''))}`,
+          id: knowhowFileToWikiId(name),
           filename: name,
           title: data.title || 'Untitled',
           type: typeCat || data.type || '',

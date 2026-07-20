@@ -1,11 +1,13 @@
-# Phase 1: Review Parsing & Classification
 
-Parse reviewer comments, classify by type (Major/Minor/Typo/Misunderstanding), extract key concerns using Gemini CLI semantic analysis.
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
+# Phase 1: Review Parsing & Classification
 
 ## Objective
 
 - Parse reviewer comments structure from file or inline text
-- Classify comments using Gemini CLI semantic analysis
+- Classify comments using Agy CLI semantic analysis
 - Extract sentiment and key concerns for each comment
 - Generate structured review-analysis.json
 
@@ -62,18 +64,9 @@ const conferenceType = workflowPreferences.conferenceType
 // Read review comments with error handling
 let reviewText
 try {
-  if (reviewCommentsPath.endsWith('.txt') || reviewCommentsPath.endsWith('.md')) {
+  if (reviewCommentsPath.endsWith('.txt') || reviewCommentsPath.endsWith('.md') || reviewCommentsPath.endsWith('.pdf')) {
+    // Read handles PDF natively (use pages parameter for PDFs over 10 pages)
     reviewText = Read(reviewCommentsPath)
-  } else if (reviewCommentsPath.endsWith('.pdf')) {
-    // Convert PDF to text first
-    const convertResult = Bash({ 
-      command: `ccws pdf-convert "${reviewCommentsPath}"`, 
-      description: "Convert PDF to markdown" 
-    })
-    if (convertResult.exitCode !== 0) {
-      throw new Error(`PDF conversion failed: ${convertResult.stderr}`)
-    }
-    reviewText = Read(reviewCommentsPath.replace('.pdf', '.md'))
   } else {
     // Inline text
     reviewText = reviewCommentsPath
@@ -88,10 +81,10 @@ try {
 }
 ```
 
-### Step 1.2: Parse and Classify with Gemini CLI
+### Step 1.2: Parse and Classify with Agy CLI
 
 ```bash
-ccw cli -p "PURPOSE: Parse and classify reviewer comments by type and severity
+maestro delegate "PURPOSE: Parse and classify reviewer comments by type and severity
 
 TASK:
 • Parse comment structure (identify individual comments, reviewer IDs)
@@ -120,7 +113,7 @@ EXPECTED: JSON with {
     'typoCount': N,
     'misunderstandingCount': N
   }
-}" --tool gemini --mode analysis --rule analysis-analyze-technical-document
+}" --to agy --mode analysis --rule analysis-analyze-technical-document
 ```
 
 ### Step 1.3: Generate Classification Report
@@ -162,7 +155,7 @@ if (!parseResult.success) {
 
 // Write review-analysis.json with error handling
 try {
-  Write(".workflow/.scratchpad/review-analysis.json", JSON.stringify(classificationResult, null, 2))
+  Write("{run_dir}/outputs/review-analysis.json", JSON.stringify(classificationResult, null, 2))
 } catch (error) {
   console.error(`[Phase 1] Failed to write review-analysis.json:`, error.message);
   TodoWrite([
@@ -207,7 +200,7 @@ for (const comment of classificationResult.comments) {
 }
 
 try {
-  Write(".workflow/.scratchpad/comment-classification.md", report)
+  Write("{run_dir}/outputs/comment-classification.md", report)
 } catch (error) {
   console.error(`[Phase 1] Failed to write comment-classification.md:`, error.message);
   // Non-critical, continue
@@ -218,8 +211,8 @@ try {
 
 - **Variable**: `reviewAnalysis` (parsed classification result)
 - **Variable**: `commentCategories` (summary of categories)
-- **File**: `.workflow/.scratchpad/review-analysis.json`
-- **File**: `.workflow/.scratchpad/comment-classification.md`
+- **File**: `{run_dir}/outputs/review-analysis.json`
+- **File**: `{run_dir}/outputs/comment-classification.md`
 - **TodoWrite**: Mark Phase 1 completed, Phase 2 in_progress
 
 ## Next Phase

@@ -1,10 +1,8 @@
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 # Coordinator - Ultra Analyze Team
-
-**Role**: coordinator
-**Type**: Orchestrator
-**Team**: ultra-analyze
-
-Orchestrates the analysis pipeline: topic clarification, pipeline mode selection, task dispatch, discussion loop management, and final synthesis. Spawns team-worker agents for all worker roles.
 
 ## Boundaries
 
@@ -64,7 +62,7 @@ For callback/check/resume/complete: load `@commands/monitor.md` and execute matc
 ### Router Implementation
 
 1. **Load session context** (if exists):
-   - Scan `.workflow/.team/UAN-*/.msg/meta.json` for active/paused sessions
+   - Scan `{run_dir}/work/team/.msg/meta.json` for active/paused sessions
    - If found, extract session folder path, status, and `pipeline_mode`
 
 2. **Parse $ARGUMENTS** for detection keywords:
@@ -82,7 +80,7 @@ For callback/check/resume/complete: load `@commands/monitor.md` and execute matc
 
 Triggered when an active/paused session is detected on coordinator entry.
 
-1. Load session.json from detected session folder
+1. Load team-session.json from detected session folder
 2. Audit task list: `TaskList()`
 3. Reconcile session state vs task status:
 
@@ -117,23 +115,23 @@ TEXT-LEVEL ONLY. No source code reading.
 4. Create session folder structure:
 
 ```
-.workflow/.team/UAN-{slug}-{date}/
+{run_dir}/work/team/
 +-- .msg/messages.jsonl
 +-- .msg/meta.json
-+-- discussion.md
++-- {run_dir}/evidence/discussion.md
 +-- explorations/
-+-- analyses/
-+-- discussions/
++-- {run_dir}/outputs/analyses/
++-- {run_dir}/evidence/discussions/
 +-- wisdom/
     +-- learnings.md, decisions.md, conventions.md, issues.md
 ```
 
-5. Write session.json with mode, requirement, timestamp
+5. Write team-session.json with mode, requirement, timestamp
 6. Initialize .msg/meta.json with pipeline metadata via team_msg:
 ```typescript
 mcp__maestro__team_msg({
   operation: "log",
-  session_id: "<session-id>",
+  session_id: "<run-id>",
   from: "coordinator",
   type: "state_update",
   summary: "Session initialized",
@@ -146,6 +144,18 @@ mcp__maestro__team_msg({
 })
 ```
 7. Call `TeamCreate({ team_name: "ultra-analyze" })`
+
+### Run Lifecycle Integration
+
+After session folder creation and before role-spec generation:
+
+1. **Resolve Run** (birth-packet first): if the dispatch context already carries `run_id` / `run_dir` (injected by an orchestrator), store them in `team-session.json` and skip create — a second create mints an empty duplicate Run. Otherwise: `maestro run create team-ultra-analyze --session <slug> --intent "<task summary>"`
+   - Slug format: `YYYYMMDD-team-ultra-analyze-<topic>` (ASCII, ≤64 chars)
+   - Store returned `run_id` and `run_dir` in `team-session.json`:
+     ```json
+     "run": { "run_id": "<id>", "run_dir": "<path>" }
+     ```
+2. **Resume**: Read `team-session.json.run.run_id` → `maestro run check <run_id>` (idempotent). If status=sealed, create a new run and update the field. If `run.run_id` is missing, resolve in order: birth-packet injection, then `<session>/artifacts/`; if all are absent, fail closed — report session corruption and do NOT create a new Run.
 
 ---
 
@@ -206,10 +216,10 @@ Before reporting, gracefully shut down all active teammates. This is a **multi-t
 
 | Deliverable | Path |
 |-------------|------|
-| Explorations | <session>/explorations/*.json |
-| Analyses | <session>/analyses/*.json |
-| Discussion | <session>/discussion.md |
-| Conclusions | <session>/conclusions.json |
+| Explorations | {run_dir}/work/team/explorations/*.json |
+| Analyses | {run_dir}/outputs/analyses/*.json |
+| Discussion | {run_dir}/evidence/discussion.md |
+| Conclusions | {run_dir}/outputs/conclusions.json |
 
 3. Include discussion summaries and decision trail
 4. Output pipeline summary: task count, duration, mode
@@ -242,6 +252,6 @@ AskUserQuestion({
 | Teammate unresponsive | Send follow-up, 2x -> respawn |
 | Explorer finds nothing | Continue with limited context, note limitation |
 | Discussion loop stuck >5 rounds | Force synthesis, offer continuation |
-| CLI unavailable | Fallback chain: gemini -> codex -> claude |
+| CLI unavailable | Fallback chain: agy -> codex -> claude |
 | User timeout in discussion | Save state, show resume command |
 | Session folder conflict | Append timestamp suffix |

@@ -2,15 +2,10 @@
 role: generator
 prefix: TESTGEN
 inner_loop: true
-message_types:
-  success: tests_generated
-  revision: tests_revised
-  error: error
+message_types: 
 ---
 
 # Test Generator
-
-Generate test code by layer (L1 unit / L2 integration / L3 E2E). Acts as the Generator in the Generator-Critic loop. Supports revision mode for GC loop iterations.
 
 ## Phase 2: Context Loading
 
@@ -18,15 +13,15 @@ Generate test code by layer (L1 unit / L2 integration / L3 E2E). Acts as the Gen
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| Test strategy | <session>/strategy/test-strategy.md | Yes |
-| .msg/meta.json | <session>/wisdom/.msg/meta.json | No |
+| Test strategy | {run_dir}/outputs/strategy/test-strategy.md | Yes |
+| .msg/meta.json | {run_dir}/work/team/wisdom/.msg/meta.json | No |
 
 1. Extract session path and layer from task description
 2. Load test specs: Run `maestro spec load --category test` for test framework conventions and coverage targets
 3. Read test strategy:
 
 ```
-Read("<session>/strategy/test-strategy.md")
+Read("{run_dir}/outputs/strategy/test-strategy.md")
 ```
 
 3. Read source files to test (from strategy priority_files, limit 20)
@@ -56,35 +51,32 @@ For revision mode:
 | > 5 files | Batch: group by module, one agent per batch |
 
 **Direct generation** (per source file):
-1. Generate test path: `<session>/tests/<layer>/<test-file>`
+1. Generate test path: `{run_dir}/outputs/tests/<layer>/<test-file>`
 2. Generate test code: happy path, edge cases, error handling
 3. Write test file
 
 **CLI delegation** (medium/high complexity):
 
 ```
-exec_command({
-  cmd: `maestro delegate "PURPOSE: Generate <layer> tests using <framework> to achieve coverage target; success = all priority files covered with quality tests
+Bash({
+  command: `maestro delegate "PURPOSE: Generate <layer> tests using <framework> to achieve coverage target; success = all priority files covered with quality tests
 TASK: • Analyze source files • Generate test cases (happy path, edge cases, errors) • Write test files with proper structure • Ensure import resolution
 MODE: write
-CONTEXT: @<source-files> @<session>/strategy/test-strategy.md | Memory: Framework: <framework>, Layer: <layer>, Round: <round>
+CONTEXT: @<source-files> @{run_dir}/outputs/strategy/test-strategy.md | Memory: Framework: <framework>, Layer: <layer>, Round: <round>
 <if-revision: Previous failures: <failure-details>
 Effective patterns: <patterns-from-meta>>
-EXPECTED: Test files in <session>/tests/<layer>/ with: proper test structure, comprehensive coverage, correct imports, framework conventions
+EXPECTED: Test files in {run_dir}/outputs/tests/<layer>/ with: proper test structure, comprehensive coverage, correct imports, framework conventions
 CONSTRAINTS: Follow test strategy priorities | Use framework best practices | <layer>-appropriate assertions
 Source files to test:
-<file-list-with-content>" --role implement --mode write --cd <session>`,
-  yield_time_ms: 30000,
-  max_output_tokens: 6000
+<file-list-with-content>" --tool agy --mode write --cd {run_dir}/work/team`,
+  run_in_background: false
 })
-// ⚠️ If session_id returned → poll write_stdin until completion (see @~/.maestro/workflows/delegate-protocol.codex.md)
-// NEVER skip — must wait for test files to be generated before verification
 ```
 
 **Output verification**:
 
 ```
-Glob("<session>/tests/<layer>/**/*")
+Glob("{run_dir}/outputs/tests/<layer>/**/*")
 ```
 
 ## Phase 4: Self-Validation & State Update
@@ -97,5 +89,5 @@ Glob("<session>/tests/<layer>/**/*")
 | File count | Count generated files | Report issue |
 | Import resolution | Check broken imports | Fix import paths |
 
-Update `<session>/wisdom/.msg/meta.json` under `generator` namespace:
+Update `{run_dir}/work/team/wisdom/.msg/meta.json` under `generator` namespace:
 - Merge `{ "generator": { test_files, layer, round, is_revision } }`

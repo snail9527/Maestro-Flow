@@ -3,7 +3,7 @@ role: planner
 prefix: PLAN
 inner_loop: true
 cli_tools:
-  - gemini --mode analysis
+  - agy --mode analysis
 message_types:
   success: plan_ready
   progress: plan_progress
@@ -12,16 +12,14 @@ message_types:
 
 # Planner
 
-Research and plan creation per roadmap phase. Gathers codebase context via CLI exploration, then generates wave-based execution plans with convergence criteria via CLI planning tool.
-
 ## Phase 2: Context Loading + Research
 
 | Input | Source | Required |
 |-------|--------|----------|
-| roadmap.md | <session>/roadmap.md | Yes |
-| config.json | <session>/config.json | Yes |
-| Prior summaries | <session>/phase-{1..N-1}/summary-*.md | No |
-| Wisdom | <session>/wisdom/ | No |
+| roadmap.md | {run_dir}/outputs/roadmap.md | Yes |
+| config.json | {run_dir}/work/team/config.json | Yes |
+| Prior summaries | {run_dir}/outputs/phase-{1..N-1}/summary-*.md | No |
+| Wisdom | {run_dir}/work/team/wisdom/ | No |
 
 1. Read roadmap.md, extract phase goal, requirements (REQ-IDs), success criteria
 2. Read config.json for depth setting (quick/standard/comprehensive)
@@ -35,18 +33,18 @@ Research and plan creation per roadmap phase. Gathers codebase context via CLI e
    MODE: analysis
    CONTEXT: @**/* | Memory: Phase goal: ${phaseGoal}
    EXPECTED: Structured exploration results with file lists, patterns, risks
-   CONSTRAINTS: Read-only analysis" --tool gemini --mode analysis`,
+   CONSTRAINTS: Read-only analysis" --tool agy --mode analysis`,
      run_in_background: false
    })
    ```
    - Target: files needing modification, patterns, dependencies, test infrastructure, risks
-6. If depth=comprehensive: run Gemini CLI analysis (`--mode analysis --rule analysis-analyze-code-patterns`)
-7. Write `<session>/phase-{N}/context.md` combining roadmap requirements + exploration results
+6. If depth=comprehensive: run Agy CLI analysis (`--mode analysis --rule analysis-analyze-code-patterns`)
+7. Write `{run_dir}/outputs/phase-{N}/context.md` combining roadmap requirements + exploration results
 
 ## Phase 3: Plan Creation
 
 1. Load context.md from Phase 2
-2. Create output directory: `<session>/phase-{N}/.task/`
+2. Create output directory: `{run_dir}/outputs/phase-{N}/.task/`
 3. Delegate to CLI planning tool with:
    ```
    Bash({
@@ -55,7 +53,7 @@ Research and plan creation per roadmap phase. Gathers codebase context via CLI e
    MODE: write
    CONTEXT: @${contextMd} | Memory: ${priorSummaries}
    EXPECTED: IMPL_PLAN.md + IMPL-*.json files + TODO_LIST.md
-   CONSTRAINTS: <= 10 tasks | Valid DAG | Measurable convergence criteria" --tool gemini --mode write`,
+   CONSTRAINTS: <= 10 tasks | Valid DAG | Measurable convergence criteria" --tool agy --mode write`,
      run_in_background: false
    })
    ```

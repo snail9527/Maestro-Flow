@@ -4,6 +4,7 @@ export const en: LocaleStrings = {
   install: {
     // Progress step labels
     stepMode: 'Mode',
+    stepPlatforms: 'Platforms',
     stepMenu: 'Menu',
     stepConfirm: 'Confirm',
     stepInstall: 'Install',
@@ -12,7 +13,7 @@ export const en: LocaleStrings = {
     // Footer hints
     footerMode: '[G]lobal  [P]roject  [Enter] Next  [Esc] Exit',
     footerHub: '[Space/1-5] Toggle  [Enter] Configure/Install  [Esc] Back',
-    footerComponents: '[Space] Toggle  [1-9] Quick  [A]ll  [N]one  [Enter] Done  [Esc] Back',
+    footerComponents: '[Space] Toggle  [1-9] Quick  [A]ll  [N]one  [D]efaults  [Enter] Done  [Esc] Back',
     footerHooks: '[1-4] Select level  [Enter] Done  [Esc] Back',
     footerMcp: '[y/n] Enable  [1-6] Toggle tool  [Enter] Done  [Esc] Back',
     footerStatusline: '[y/n] Toggle  [Enter] Done  [Esc] Back',
@@ -38,10 +39,16 @@ export const en: LocaleStrings = {
     hubTools: '{count} tools',
 
     // Grouped Hub
+    groupPlatforms: 'Platforms',
+    groupAddons: 'Options',
     groupCore: 'Core',
     groupClaude: 'Claude Code',
     groupCodex: 'Codex',
     groupOther: 'Other Tools',
+    groupHooks: 'Hooks',
+    groupMcp: 'MCP Server',
+    groupAppearance: 'Appearance',
+    groupEmbedding: 'Embedding',
     hubScope: 'Scope:',
     hubGlobal: 'Global',
     hubProject: 'Project',
@@ -159,7 +166,7 @@ export const en: LocaleStrings = {
     codexHooksLevelDescriptions: {
       none: 'No hooks',
       minimal: 'Session context (SessionStart)',
-      standard: '+ spec/keyword-injector + skill-context + delegate-monitor + coordinator/team/telemetry(Stop) + preflight/spec guards',
+      standard: '+ UserPromptSubmit spec/keyword/KG context + skill-context + delegate-monitor + coordinator/team/telemetry(Stop) + preflight/spec guards',
       full: '+ workflow-guard (PreToolUse, Bash only) + prompt-guard (UserPromptSubmit)',
     },
     codexHooksWinWarning: 'Warning: Codex hooks are not yet supported on Windows.',

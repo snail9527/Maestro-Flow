@@ -1,13 +1,11 @@
 # Command: converge
 
-Phase 4 execution guide. Run after `aco.py converged` returns `true`.
-
 ## Workflow
 
 ### Step 1: Call aco.py report
 
 ```
-Bash: python <skill_root>/scripts/aco.py --session <session> report
+Bash: python <skill_root>/scripts/aco.py --session {run_dir}/work/team report
 ```
 
 Parse stdout JSON. Expected:
@@ -22,7 +20,7 @@ Parse stdout JSON. Expected:
 }
 ```
 
-Save full report to `<session>/artifacts/swarm-report.json` (raw data for analyst).
+Save full report to `{run_dir}/outputs/swarm-report.json` (raw data for analyst).
 
 ### Step 2: Spawn analyst worker
 
@@ -37,15 +35,15 @@ Agent({
 role: analyst
 role_spec: <skill_root>/roles/analyst/role.md
 session: <session_path>
-session_id: <session_id>
+session_id: <run-id>
 team_name: swarm
 requirement: synthesize swarm results into human-readable best-solution.md
 inner_loop: false
 
 ## Context
-Report data: <session>/artifacts/swarm-report.json
-Best solution: <session>/best.json
-All trails: <session>/trails/*.jsonl
+Report data: {run_dir}/outputs/swarm-report.json
+Best solution: {run_dir}/work/team/best.json
+All trails: {run_dir}/work/team/trails/*.jsonl
 Original objective: <config.ant_prompt.objective>
 
 ## Progress Milestones
@@ -58,9 +56,19 @@ STOP. Resume on analyst callback.
 
 ### Step 3: On analyst callback
 
-Verify `<session>/artifacts/best-solution.md` exists.
+Verify `{run_dir}/outputs/best-solution.md` exists.
 
 If missing -> AskUserQuestion (skip synthesis / retry analyst).
+
+### Step 3.5: Run lifecycle completion
+
+```
+  +- Run lifecycle completion:
+  |   - Read run_id from team-session.json.run.run_id
+  |   - Write {run_dir}/report.md with frontmatter (verdict/summary/concerns)
+  |   - Run `maestro run complete <run_id>`
+  |   - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
+```
 
 ### Step 4: Build completion summary
 
@@ -83,8 +91,8 @@ If missing -> AskUserQuestion (skip synthesis / retry analyst).
 [coordinator]   iter 1: <e1>  iter 2: <e2>  iter 3: <e3>  ...
 [coordinator]
 [coordinator] Deliverables:
-[coordinator]   - artifacts/best-solution.md (analyst synthesis)
-[coordinator]   - artifacts/swarm-report.json (raw data)
+[coordinator]   - {run_dir}/outputs/best-solution.md (analyst synthesis)
+[coordinator]   - {run_dir}/outputs/swarm-report.json (raw data)
 [coordinator]   - best.json (canonical best)
 [coordinator]   - trails/*.jsonl (full exploration log)
 [coordinator]

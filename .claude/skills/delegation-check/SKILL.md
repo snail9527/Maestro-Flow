@@ -1,7 +1,9 @@
 ---
 name: delegation-check
+disable-model-invocation: true
 description: Check workflow delegation prompts against agent role definitions for content separation violations. Detects conflicts, duplication, boundary leaks, and missing contracts. Triggers on "check delegation", "delegation conflict", "prompt vs role check".
 allowed-tools: Read, Glob, Grep, Bash, AskUserQuestion
+session-mode: none
 ---
 
 <purpose>
@@ -19,7 +21,7 @@ Invoked when user requests "check delegation", "delegation conflict", "prompt vs
 ## Pre-load (before execution)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for project context
-2. **Specs**: `maestro spec load --category coding` — load coding conventions
+2. **Specs**: `maestro load --type spec --category coding` — load coding conventions
 3. **Wiki knowledge**: `maestro search "skill design optimization" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 
@@ -55,8 +57,8 @@ For each command file in scope:
 **2a. Extract Agent() calls from commands:**
 
 ```bash
-# Search both Agent() (current) and Task() (legacy GSD) patterns
-grep -n "Agent(\|Task(" "$COMMAND_FILE"
+# Search both Agent() (current) and the legacy GSD Task syntax
+grep -n "Agent(\|Task[(]" "$COMMAND_FILE"
 grep -n "subagent_type" "$COMMAND_FILE"
 ```
 

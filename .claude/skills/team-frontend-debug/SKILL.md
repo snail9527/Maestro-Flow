@@ -1,8 +1,14 @@
 ---
 name: team-frontend-debug
+disable-model-invocation: true
 description: Frontend debugging team using Chrome DevTools MCP. Dual-mode — feature-list testing or bug-report debugging. Triggers on "team-frontend-debug", "frontend debug".
 allowed-tools: TeamCreate(*), TeamDelete(*), SendMessage(*), TaskCreate(*), TaskUpdate(*), TaskList(*), TaskGet(*), Agent(*), AskUserQuestion(*), Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*), mcp__maestro__team_msg(*), mcp__chrome-devtools__*(*)
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Frontend Debug Team
 
@@ -54,8 +60,8 @@ Skill(skill="team-frontend-debug", args="feature list or bug description")
 ## Pre-load (coordinator, before dispatch)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for module boundaries
-2. **Specs (debug)**: `maestro spec load --category debug` — load debug constraints as shared context
-3. **Specs (ui)**: `maestro spec load --category ui` — load ui constraints as shared context
+2. **Specs (debug)**: `maestro load --type spec --category debug` — load debug constraints as shared context
+3. **Specs (ui)**: `maestro load --type spec --category ui` — load ui constraints as shared context
 4. **Wiki knowledge**: `maestro search "frontend debug devtools" --json` — top 5 entries as prior context
 5. All optional — proceed without if unavailable
 ## Role Router
@@ -67,9 +73,9 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `TFD`
-- **Session path**: `.workflow/.team/TFD-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 
 ## Workspace Resolution
 
@@ -122,14 +128,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: <team-name>
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -176,10 +182,10 @@ AskUserQuestion({
 ## Session Directory
 
 ```
-.workflow/.team/TFD-<slug>-<date>/
+{run_dir}/work/team/
 ├── team-session.json           # Session state + role registry
-├── evidence/                   # Screenshots, snapshots, network logs
-├── artifacts/                  # Test reports, RCA reports, patches, verification reports
+├── {run_dir}/evidence/evidence/                   # Screenshots, snapshots, network logs
+├── {run_dir}/outputs/          # Run deliverables: test reports, RCA reports, patches, verification reports
 ├── wisdom/                     # Cross-task debug knowledge
 └── .msg/                       # Team message bus
 ```

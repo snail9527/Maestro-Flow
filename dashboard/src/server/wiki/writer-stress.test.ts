@@ -90,7 +90,7 @@ describe('WikiWriter security — path traversal', () => {
     ).rejects.toThrow(WikiWriteError);
   });
 
-  it('knowhow writes to knowhow/KNW-slug.md', async () => {
+  it('knowhow writes to knowhow/DOC-slug.md (default category)', async () => {
     const indexer = new WikiIndexer({ workflowRoot: tmpRoot });
     const writer = new WikiWriter(tmpRoot, indexer);
     const entry = await writer.create({
@@ -99,7 +99,7 @@ describe('WikiWriter security — path traversal', () => {
       title: 'Auth Lessons',
       body: 'learned',
     });
-    expect(entry.source.path).toBe('knowhow/KNW-auth-lessons.md');
+    expect(entry.source.path).toBe('knowhow/DOC-auth-lessons.md');
   });
 
   it('note writes to knowhow/TIP-slug.md', async () => {
@@ -133,7 +133,7 @@ describe('WikiWriter security — symlink rejection', () => {
     const indexer = new WikiIndexer({ workflowRoot: tmpRoot });
     const writer = new WikiWriter(tmpRoot, indexer);
     await expect(
-      writer.update('spec-linked', { body: 'hijacked' }),
+      writer.update('spec:project:linked', { body: 'hijacked' }),
     ).rejects.toThrow(WikiWriteError);
 
     // Ensure the outside file was NOT mutated
@@ -182,7 +182,7 @@ describe('WikiWriter concurrency', () => {
     // hash on disk changes, so the remaining 4 must see CONFLICT.
     const results = await Promise.allSettled(
       Array.from({ length: 5 }, (_, i) =>
-        writer.update('knowhow-s', {
+        writer.update('knowhow-knw-s', {
           body: `v${i + 1}`,
           expectedHash: initialHash,
         }),
@@ -204,10 +204,10 @@ describe('WikiWriter concurrency', () => {
     const indexer = new WikiIndexer({ workflowRoot: tmpRoot });
     const writer = new WikiWriter(tmpRoot, indexer);
     await expect(
-      writer.update('spec-s', { body: 'overwritten' }),
+      writer.update('spec:project:s', { body: 'overwritten' }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     // Frontmatter-only updates should still work
-    const updated = await writer.update('spec-s', { title: 'New Title' });
+    const updated = await writer.update('spec:project:s', { title: 'New Title' });
     expect(updated.title).toBe('New Title');
   });
 
@@ -221,20 +221,20 @@ describe('WikiWriter concurrency', () => {
       title: 'Initial',
       body: '# body',
     });
-    expect(created.id).toBe('knowhow-rt');
+    expect(created.id).toBe('knowhow-doc-rt');
 
-    const updated = await writer.update('knowhow-rt', {
+    const updated = await writer.update('knowhow-doc-rt', {
       title: 'Updated',
       body: '# updated',
     });
     expect(updated.title).toBe('Updated');
 
-    await writer.remove('knowhow-rt');
+    await writer.remove('knowhow-doc-rt');
     const index = await indexer.get();
-    expect(index.byId['knowhow-rt']).toBeUndefined();
+    expect(index.byId['knowhow-doc-rt']).toBeUndefined();
 
     // File should be gone from disk too
-    await expect(stat(join(tmpRoot, 'knowhow', 'KNW-rt.md'))).rejects.toThrow();
+    await expect(stat(join(tmpRoot, 'knowhow', 'DOC-rt.md'))).rejects.toThrow();
   });
 
   it('create with frontmatter serializes arrays and strings correctly', async () => {
@@ -258,7 +258,7 @@ describe('WikiWriter concurrency', () => {
     await seed('specs/s.md', `---\ntitle: Old\n---\n# Old\noriginal body`);
     const indexer = new WikiIndexer({ workflowRoot: tmpRoot });
     const writer = new WikiWriter(tmpRoot, indexer);
-    const updated = await writer.update('spec-s', { title: 'New Title' });
+    const updated = await writer.update('spec:project:s', { title: 'New Title' });
     expect(updated.title).toBe('New Title');
     expect(updated.body).toContain('original body');
   });

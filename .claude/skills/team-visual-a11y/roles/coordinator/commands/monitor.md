@@ -1,7 +1,5 @@
 # Monitor Pipeline
 
-Event-driven pipeline coordination. Beat model: coordinator wake -> process -> spawn -> STOP.
-
 ## Constants
 
 - SPAWN_MODE: background
@@ -83,8 +81,8 @@ Worker completed. Process and advance.
      - Parse re-audit reports for remaining issues
      - Apply targeted fixes for color and focus issues
    CONTEXT:
-     - Session: <session-folder>
-     - Upstream artifacts: re-audit/color-audit-002.md, re-audit/focus-audit-002.md" })
+     - Session: {run_dir}/work/team
+     - Upstream artifacts: {run_dir}/outputs/re-audit/color-audit-002.md, {run_dir}/outputs/re-audit/focus-audit-002.md" })
    TaskUpdate({ taskId: "FIX-002", addBlockedBy: ["COLOR-002", "FOCUS-002"], owner: "fix-implementer" })
    ```
    Then create new re-audit tasks blocked by FIX-002. Increment gc_state.round.
@@ -138,7 +136,7 @@ Pipeline Status (<pipeline-mode>):
 
 Fan-in: 2/3 audits complete
 GC Rounds: 0/2
-Session: <session-id>
+Session: <run-id>
 Commands: 'resume' to advance | 'check' to refresh
 ```
 
@@ -174,14 +172,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: visual-a11y
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -216,7 +214,12 @@ Pipeline done. Generate report and completion action.
 | full | All 7 tasks (+ any GC fix tasks) completed |
 
 1. If any tasks not completed -> handleSpawnNext
-2. If all completed -> transition to coordinator Phase 5
+2. Run lifecycle completion (before transitioning to Phase 5):
+   - Read run_id from `team-session.json.run.run_id`
+   - Write `{run_dir}/report.md` with frontmatter (verdict/summary/concerns)
+   - Run `maestro run complete <run_id>`
+   - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
+3. If all completed -> transition to coordinator Phase 5
 
 ## handleAdapt
 

@@ -1,158 +1,127 @@
 ---
 name: maestro-fork
-description: Create or sync milestone worktree for parallel dev
-argument-hint: "-m <milestone-number> [--base <branch>] [--sync]"
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, request_user_input
+disable-model-invocation: true
+description: Create or sync session worktree for parallel dev
+argument-hint: --session <session_id> [--base <branch>] [--sync]
+allowed-tools:
+  - Bash
+  - Edit
+  - Glob
+  - Grep
+  - Read
+  - Write
+  - followup_task
+  - interrupt_agent
+  - list_agents
+  - request_user_input
+  - send_message
+  - spawn_agent
+  - spawn_agents_on_csv
+  - wait_agent
+session-mode: run
+contract:
+  discovery: self-described
+  consumes: []
+  produces: []
+version: 0.5.53
 ---
 
-<purpose>
-Create a git worktree for an entire milestone, enabling inter-milestone parallel development.
-The worktree scope is milestone-level — all scratch artifacts for that milestone are owned by
-the worktree. Since `.workflow/` is gitignored, this command explicitly copies project context
-and milestone scratch artifacts into the worktree.
-
-Also supports `--sync` mode to pull latest main into an active worktree.
-
-Produces `.workflow/worktrees.json` registry in the main worktree and `.workflow/worktree-scope.json` marker in the worktree, and writes a scoped `state.json` inside the worktree containing only the forked milestone's artifacts.
-</purpose>
-
 <required_reading>
-@~/.maestro/workflows/fork.md
+@~/.maestro/workflows/run-mode.md
+@~/.maestro/workflows/codex-run-mode.md
 </required_reading>
 
+<purpose>
+Create or sync a session-level git worktree for parallel development.
+Supports `--sync` mode to pull latest main changes into an active worktree.
+</purpose>
+
 <deferred_reading>
-- [worktrees.json](~/.maestro/templates/worktrees.json) — read when initializing or updating worktree registry
-- [worktree-scope.json](~/.maestro/templates/worktree-scope.json) — read when creating worktree scope marker
+- [worktrees.json](~/.maestro/templates/worktrees.json) — read when updating registry
+- [worktree-scope.json](~/.maestro/templates/worktree-scope.json) — read when writing scope marker
 </deferred_reading>
 
 <context>
-$ARGUMENTS — milestone number and optional flags.
+$ARGUMENTS -- session ID (or slug) and optional flags.
 
-**Modes:**
-| Mode | Trigger | Behavior |
-|------|---------|----------|
-| Fork | `-m 2` or `2` | Create worktree for milestone 2 |
-| Sync | `-m 2 --sync` | Sync existing worktree with main |
-
-**Flags:**
-- `-m <N>` or bare `<N>`: Milestone number
-- `--base <branch>`: Override base branch (default: HEAD)
-- `--sync`: Pull main into existing worktree, re-copy shared artifacts
-
-**Worktree layout:**
-```
-.worktrees/m{N}-{slug}/
-├── .workflow/
-│   ├── worktree-scope.json     (milestone scope marker)
-│   ├── state.json              (scoped — this milestone's artifacts only)
-│   ├── project.md, roadmap.md, config.json, specs/  (read-only copies)
-│   └── scratch/                (milestone's existing + new artifacts)
-└── <source code>
-```
-
-**Artifact scoping:**
-Fork copies scratch artifacts belonging to the target milestone (filtered from `state.json.artifacts[]` where `milestone == target`). New work creates scratch artifacts normally, registered in the worktree's local `state.json`.
+Modes (`Fork` / `Sync`), flags (`--session`, `--base`, `--sync`), session resolution, worktree layout, and artifact scoping are defined in workflow `fork.md`.
 </context>
 
 <execution>
 Follow '~/.maestro/workflows/fork.md' completely.
 
-**Fork flow:**
-1. Validate: initialized, roadmap exists, not inside worktree, milestone not forked
-2. Resolve milestone: `state.json.milestones[N-1]`
-3. Create worktree: `git worktree add -b milestone/{slug} .worktrees/m{N}-{slug} HEAD`
-4. Copy `.workflow/`: shared files + milestone scratch artifacts
-5. Write `worktree-scope.json` with milestone scope
-6. Write scoped `state.json` (this milestone's artifacts only)
-7. Update main: `worktrees.json` registry, mark milestone `"forked"`
+Fork and sync algorithm steps are defined in workflow `fork.md`.
 
-**Sync flow:**
-1. Find worktree from `worktrees.json`
-2. `cd worktree && git merge main`
-3. Re-copy shared files (project.md, roadmap.md, config.json, specs/)
+### Gates (MANDATORY, BLOCKING)
 
-**Registry: `worktrees.json`** (`.workflow/worktrees.json` in main worktree):
+**Fork mode:**
 
-Initialize if not exists: `{ "version": "1.0", "worktrees": [], "fork_sessions": [] }`
+**GATE 1: Validation → Worktree Creation**
+- REQUIRED: Session resolved from `state.json.sessions[]` by session_id or intent slug.
+- REQUIRED: No existing active worktree for this session (E008).
+- REQUIRED: Not running inside a worktree (E003).
+- BLOCKED if: session not found (E006), already forked (E008), or running inside worktree (E003).
 
-On fork, append to `worktrees[]`:
-```json
-{
-  "milestone_num": "{milestoneNum}",
-  "milestone": "{milestoneName}",
-  "slug": "{milestoneSlug}",
-  "branch": "milestone/{milestoneSlug}",
-  "path": "{worktreeRoot}/m{milestoneNum}-{milestoneSlug}",
-  "base_commit": "{baseCommit}",
-  "status": "active",
-  "created_at": "{UTC8_ISO}",
-  "owned_phases": ["{ownedPhaseNumbers}"],
-  "fork_session": "{forkSessionId}"
-}
-```
+**GATE 2: Worktree Creation → Artifact Copy**
+- REQUIRED: Git worktree created with branch (`session/{slug}`).
+- REQUIRED: Shared `.workflow/` files copied (project.md, config.json, specs/).
+- BLOCKED if missing: worktree creation failed or shared files not copied — do not proceed to artifact scoping.
 
-Append to `fork_sessions[]`:
-```json
-{
-  "session_id": "fork-{UTC8_compact_timestamp}",
-  "created_at": "{UTC8_ISO}",
-  "milestone_num": "{milestoneNum}",
-  "milestone": "{milestoneName}",
-  "base_branch": "{baseBranch}",
-  "base_commit": "{baseCommit}"
-}
-```
+**GATE 3: Artifact Copy → Completion**
+- REQUIRED: request_user_input confirmation before registry writes — show session scope, worktree path, and state entries to be written. User must confirm or abort.
+- REQUIRED: `worktree-scope.json` written with session scope (after confirmation).
+- REQUIRED: Scoped `state.json` written (only this session's data) (after confirmation).
+- REQUIRED: `worktrees.json` registry updated in main worktree (after confirmation).
+- BLOCKED if missing: scope marker, scoped state, or registry update absent — worktree is unusable without these.
 
-**Scope marker: `worktree-scope.json`** (`{wtPath}/.workflow/worktree-scope.json`):
-```json
-{
-  "worktree": true,
-  "milestone_num": "{milestoneNum}",
-  "milestone": "{milestoneName}",
-  "owned_phases": ["{ownedPhaseNumbers}"],
-  "phase_dependencies": "{phaseDeps}",
-  "main_worktree": "{resolve(cwd)}",
-  "branch": "milestone/{milestoneSlug}",
-  "base_commit": "{baseCommit}",
-  "created_at": "{UTC8_ISO}"
-}
-```
+**Sync mode:**
 
-Presence of `worktree-scope.json` signals "inside a worktree" — used by E003 validation to prevent nested forks.
+**GATE: Sync → Completion**
+- REQUIRED: Git merge main into worktree branch completed.
+- REQUIRED: Shared artifacts re-copied.
+- BLOCKED if: merge has unresolved conflicts or shared artifacts failed to copy.
 
-**Next steps:**
-- Fork → `cd {wt.path} && $maestro-analyze`
-- Sync → resume work in worktree
 </execution>
 
-<invariants>
-**Artifact verification** — worktree-scope.json, scoped state.json, and worktrees.json registry update MUST all complete. If any missing: DO NOT report completion.
-</invariants>
+<completion>
+### Next-step routing
+
+| Condition | Suggestion |
+|-----------|-----------|
+| Fork complete | `cd {wt.path}` then step `analyze` (`maestro run prepare --platform codex analyze` + `maestro run create analyze --session YYYYMMDD-analyze-{topic} --intent "{goal}"`) |
+| Fork + automated | `maestro delegate "run full lifecycle for session" --cd {wt.path} --mode write` |
+| Fork + status check | Recommend `/maestro-manage status` |
+| Sync complete | Resume work in worktree |
+| Sync conflicts found | Resolve manually, then retry |
+</completion>
 
 <error_codes>
 | Code | Severity | Condition | Recovery |
 |------|----------|-----------|----------|
-| E001 | error | Project not initialized | Run maestro-init |
-| E002 | error | No roadmap found | Run maestro-roadmap |
+| E001 | error | Project not initialized | Run maestro-init first |
+| E002 | error | No roadmap found | Run step `roadmap` first (`maestro run prepare --platform codex roadmap` + `maestro run create roadmap --session YYYYMMDD-roadmap-{topic} --intent "{goal}"`) |
 | E003 | error | Running inside a worktree | Run from main worktree |
-| E004 | error | No milestone number | Provide `-m <N>` |
-| E006 | error | Milestone out of range | Check available milestones |
-| E008 | error | Milestone already has active worktree | Merge or cleanup first |
+| E004 | error | No session ID provided | Provide `--session <session_id>` |
+| E005 | error | No sessions defined in state.json | Run step `roadmap` first (`maestro run prepare --platform codex roadmap` + `maestro run create roadmap --session YYYYMMDD-roadmap-{topic} --intent "{goal}"`) |
+| E006 | error | Session not found in state.json.sessions[] | Check available sessions |
+| E007 | error | No active worktree for session (--sync) | Check worktrees.json |
+| E008 | error | Session already has active worktree | Merge or cleanup first |
 </error_codes>
 
 <success_criteria>
 Fork mode:
-- [ ] Milestone resolved from state.json.milestones[]
-- [ ] Git worktree created with branch `milestone/{slug}`
-- [ ] Shared `.workflow/` files copied (project.md, roadmap.md, config.json, specs/)
-- [ ] Milestone scratch artifacts copied (filtered from artifact registry)
-- [ ] `worktree-scope.json` written with milestone scope
-- [ ] Scoped `state.json` written (this milestone's artifacts only)
+- [ ] Session resolved from state.json.sessions[]
+- [ ] Git worktree created with branch (`session/{slug}`)
+- [ ] Shared `.workflow/` files copied (project.md, config.json, specs/)
+- [ ] Session Run artifacts copied (filtered from artifact registry)
+- [ ] `worktree-scope.json` written with session scope
+- [ ] Scoped `state.json` written (only this session's data)
 - [ ] `worktrees.json` registry updated in main worktree
-- [ ] Milestone marked `"forked"` in main state.json
+- [ ] Session lifecycle recorded (`session.json.lifecycle.forked_from`)
+- [ ] Summary displayed with next-step commands
 
 Sync mode:
 - [ ] Git merge main into worktree branch
-- [ ] Shared artifacts re-copied
+- [ ] Shared artifacts re-copied (project.md, config.json, specs/)
 - [ ] Conflicts reported if any
 </success_criteria>

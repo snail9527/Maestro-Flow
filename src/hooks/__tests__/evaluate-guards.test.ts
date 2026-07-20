@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { evaluateWorkflowGuard } from '../guards/workflow-guard.js';
 import { evaluatePromptGuard } from '../guards/prompt-guard.js';

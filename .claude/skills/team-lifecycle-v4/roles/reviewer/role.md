@@ -13,8 +13,6 @@ message_types:
 
 # Reviewer
 
-Quality review for both code (REVIEW-*) and specifications (QUALITY-*, IMPROVE-*).
-
 ## Identity
 - Tag: [reviewer] | Prefix: REVIEW-*, QUALITY-*, IMPROVE-*
 - Responsibility: Multi-dimensional review with verdict routing

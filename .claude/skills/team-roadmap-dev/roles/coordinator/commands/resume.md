@@ -1,7 +1,5 @@
 # Command: resume
 
-Resume a paused roadmap-dev session from its saved state. Reads pause coordinates from state.md and re-enters the monitor loop at the exact phase and step where execution was paused.
-
 ## Purpose
 
 Restore execution context from a paused session and continue the monitor loop. This is the coordinator's mechanism for resuming long-running projects across sessions.
@@ -15,14 +13,14 @@ Restore execution context from a paused session and continue the monitor loop. T
 
 | Parameter | Source | Description |
 |-----------|--------|-------------|
-| `sessionFolder` | From --resume argument | Session artifact directory to resume |
+| `sessionFolder` | From --resume argument | Canonical `{run_dir}` root to resume |
 
 ## Execution Steps
 
 ### Step 1: Validate Session State
 
 ```javascript
-const stateContent = Read(`${sessionFolder}/state.md`)
+const stateContent = Read(`${sessionFolder}/work/team/state.md`)
 
 // Check for paused status
 if (!stateContent.includes('Status: paused')) {
@@ -43,8 +41,8 @@ const gapIteration = parseInt(stateContent.match(/Gap Iteration: (\d+)/)?.[1] ||
 ### Step 2: Load Session Context
 
 ```javascript
-const roadmap = Read(`${sessionFolder}/roadmap.md`)
-const config = JSON.parse(Read(`${sessionFolder}/config.json`))
+const roadmap = Read(`${sessionFolder}/outputs/roadmap.md`)
+const config = JSON.parse(Read(`${sessionFolder}/work/team/config.json`))
 
 // Load project context
 const projectTech = JSON.parse(Read('.workflow/project-tech.json'))
@@ -55,7 +53,7 @@ const projectTech = JSON.parse(Read('.workflow/project-tech.json'))
 ```javascript
 const timestamp = new Date().toISOString().slice(0, 19)
 
-Edit(`${sessionFolder}/state.md`, {
+Edit(`${sessionFolder}/work/team/state.md`, {
   old_string: `- Status: paused`,
   new_string: `- Status: in_progress
 - Resumed At: ${timestamp}
@@ -70,7 +68,7 @@ mcp__maestro__team_msg({
   operation: "log", session_id: sessionId,
   from: "coordinator", to: "all",
   type: "phase_started",
-  data: { ref: `${sessionFolder}/state.md` }
+  data: { ref: `${sessionFolder}/work/team/state.md` }
 })
 ```
 
@@ -123,7 +121,7 @@ switch (pausedStep) {
 
 | Artifact | Path | Description |
 |----------|------|-------------|
-| state.md | `{sessionFolder}/state.md` | Updated with resumed status |
+| state.md | `{sessionFolder}/work/team/state.md` | Updated with resumed status |
 
 ## Error Handling
 

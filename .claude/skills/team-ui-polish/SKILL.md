@@ -1,8 +1,14 @@
 ---
 name: team-ui-polish
+disable-model-invocation: true
 description: Unified team skill for UI polish. Auto-discover and fix UI design issues using Impeccable design standards. Anti-AI-slop detection, color/typography/spacing quality, motion, interaction states, visual hierarchy. Uses team-worker agent architecture. Triggers on "team ui polish", "ui polish", "design polish".
 allowed-tools: Agent, AskUserQuestion, Read, Write, Edit, Bash, Glob, Grep, TaskList, TaskGet, TaskUpdate, TaskCreate, TeamCreate, TeamDelete, SendMessage, mcp__maestro__read_file, mcp__maestro__write_file, mcp__maestro__edit_file, mcp__maestro__team_msg, mcp__chrome-devtools__evaluate_script, mcp__chrome-devtools__take_screenshot, mcp__chrome-devtools__navigate_page, mcp__chrome-devtools__resize_page
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team UI Polish
 
@@ -44,8 +50,8 @@ Skill(skill="team-ui-polish", args="task description")
 ## Pre-load (coordinator, before dispatch)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for module boundaries
-2. **Specs (ui)**: `maestro spec load --category ui` — load ui constraints as shared context
-3. **Specs (coding)**: `maestro spec load --category coding` — load coding constraints as shared context
+2. **Specs (ui)**: `maestro load --type spec --category ui` — load ui constraints as shared context
+3. **Specs (coding)**: `maestro load --type spec --category coding` — load coding constraints as shared context
 4. **Wiki knowledge**: `maestro search "UI polish design quality" --json` — top 5 entries as prior context
 5. All optional — proceed without if unavailable
 ## Role Router
@@ -57,9 +63,9 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `UIP`
-- **Session path**: `.workflow/.team/UIP-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 - **Max GC rounds**: 2
 
 ## Worker Spawn Template
@@ -76,14 +82,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: ui-polish
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -112,19 +118,19 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 ## Session Directory
 
 ```
-.workflow/.team/UIP-<slug>-<date>/
+{run_dir}/work/team/
 +-- .msg/
 |   +-- messages.jsonl         # Team message bus
 |   +-- meta.json              # Pipeline config + GC state
-+-- scan/                      # Scanner output
++-- {run_dir}/outputs/scan/                      # Scanner output
 |   +-- scan-report.md
-+-- diagnosis/                 # Diagnostician output
++-- {run_dir}/outputs/diagnosis/                 # Diagnostician output
 |   +-- diagnosis-report.md
-+-- optimization/              # Optimizer output
++-- {run_dir}/outputs/optimization/              # Optimizer output
 |   +-- fix-log.md
-+-- verification/              # Verifier output
++-- {run_dir}/outputs/verification/              # Verifier output
 |   +-- verify-report.md
-+-- evidence/                  # Screenshots (before/after)
++-- {run_dir}/evidence/evidence/                  # Screenshots (before/after)
 |   +-- *.png
 +-- wisdom/                    # Cross-task knowledge
 ```

@@ -1,7 +1,7 @@
 {
   "name": "maestro-flow",
-  "version": "0.5.33",
-  "description": "Workflow orchestration CLI with MCP endpoint support and extensible architecture",
+  "version": "0.5.53",
+  "description": "Intent-driven workflow orchestration for multi-agent AI development with adaptive lifecycle engine and self-reinforcing knowledge graph",
   "type": "module",
   "imports": {
     "#maestro-dashboard/agents/*": "./dashboard/dist-server/dashboard/src/server/agents/*",
@@ -22,6 +22,7 @@
     "dist",
     "shared",
     "templates",
+    "prepare",
     "workflows",
     "chains",
     ".claude/commands",
@@ -29,6 +30,7 @@
     ".claude/skills",
     ".claude/CLAUDE.md",
     ".codex/agents",
+    ".codex/agent-overrides",
     ".codex/skills",
     ".agy/agents",
     ".agy/skills",
@@ -44,22 +46,35 @@
     "dev": "tsc --watch",
     "start": "node bin/maestro.js",
     "mcp": "node bin/maestro-mcp.js",
+    "test": "vitest run",
+    "test:kg": "vitest run src/graph",
     "lint": "tsc --noEmit",
+    "lint:session-run": "node scripts/lint-invocation-policy.mjs && node scripts/lint-session-run-prompts.mjs && node scripts/lint-session-run-mirrors.mjs",
+    "lint:invocation-policy": "node scripts/lint-invocation-policy.mjs",
+    "sync:invocation-policy": "node scripts/sync-invocation-policy.mjs && node scripts/sync-invocation-policy.mjs --check",
+    "sync:codex-skills": "node scripts/sync-codex-run-mode.mjs --write && node scripts/sync-codex-run-mode.mjs --check && node scripts/lint-session-run-mirrors.mjs",
+    "sync:docs-reference": "node scripts/sync-docs-reference.mjs",
+    "check:docs-reference": "node scripts/sync-docs-reference.mjs --check",
+    "check:session-run-contract-parity": "node scripts/check-session-run-contract-parity.mjs",
+    "check:session-run-release-machine": "node scripts/check-session-run-release-machine.mjs",
+    "lint:codex-skills": "node scripts/lint-session-run-mirrors.mjs",
+    "lint:codex-agents": "node scripts/sync-codex-agents.mjs --check",
+    "migrate:session-run-prompts": "node scripts/migrate-session-run-prompts.mjs --write",
     "clean": "rm -rf dist",
-    "build:mirrors": "node scripts/convert-claude-to-agy.mjs && node scripts/build-agents-standard.mjs",
-    "prepublishOnly": "npm run build && npm run build:mirrors"
+    "build:mirrors": "node scripts/lint-session-run-prompts.mjs && node scripts/convert-claude-to-agy.mjs && node scripts/build-agents-standard.mjs && node scripts/sync-codex-run-mode.mjs --write && node scripts/sync-codex-run-mode.mjs --check && node scripts/sync-codex-agents.mjs --check && node scripts/lint-session-run-mirrors.mjs",
+    "prepublishOnly": "node scripts/lint-invocation-policy.mjs && node scripts/lint-session-run-prompts.mjs && npm run check:docs-reference && npm run check:session-run-contract-parity && npm run build && npm run check:session-run-release-machine && npm run build:mirrors"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.19.0"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.77",
     "@hono/node-server": "^1.14.0",
+    "@huggingface/transformers": "^3.8.1",
     "@inkjs/ui": "^2.0.0",
     "@inquirer/prompts": "^8.3.2",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "argon2": "^0.44.0",
-    "better-sqlite3": "^12.10.0",
     "chokidar": "^4.0.0",
     "commander": "^13.1.0",
     "drizzle-orm": "^0.45.2",
@@ -71,15 +86,20 @@
     "ink-spinner": "^5.0.0",
     "marked": "^15.0.0",
     "node-cron": "^4.2.1",
+    "openai": "^6.44.0",
     "pg": "^8.20.0",
     "react": "^19.0.0",
     "tree-sitter-wasms": "^0.1.13",
+    "undici": "^8.5.0",
     "web-tree-sitter": "^0.25.3",
     "ws": "^8.19.0",
+    "yaml": "^2.9.0",
     "zod": "^4.0.0"
   },
+  "optionalDependencies": {
+    "@zvec/zvec": "^0.5.0"
+  },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.2.14",

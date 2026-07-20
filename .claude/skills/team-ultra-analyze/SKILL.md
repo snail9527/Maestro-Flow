@@ -1,8 +1,14 @@
 ---
 name: team-ultra-analyze
+disable-model-invocation: true
 description: Deep collaborative analysis team skill. Multi-role investigation with coordinator-driven synthesis. Triggers on "team ultra-analyze", "team analyze".
 allowed-tools: TeamCreate(*), TeamDelete(*), SendMessage(*), TaskCreate(*), TaskUpdate(*), TaskList(*), TaskGet(*), Agent(*), AskUserQuestion(*), Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*), mcp__maestro__team_msg(*)
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team Ultra Analyze
 
@@ -52,7 +58,7 @@ Pipeline (Quick mode):
 ## Pre-load (coordinator, before dispatch)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for module boundaries
-2. **Specs (arch)**: `maestro spec load --category arch` — load arch constraints as shared context
+2. **Specs (arch)**: `maestro load --type spec --category arch` — load arch constraints as shared context
 3. **Wiki knowledge**: `maestro search "analysis investigation deep-dive" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 ## Role Router
@@ -64,10 +70,10 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `UAN`
-- **Session path**: `.workflow/.team/UAN-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **Team name**: `ultra-analyze`
 - **CLI tools**: `maestro delegate --mode analysis` (read-only), `maestro delegate --mode write` (modifications)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 
 ## Worker Spawn Template
 
@@ -83,15 +89,15 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: ultra-analyze
 requirement: <topic-description>
 agent_name: <agent-name>
 inner_loop: false
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -111,19 +117,19 @@ Execute built-in Phase 1 (task discovery, owner=<agent-name>) -> role Phase 2-4 
 ## Session Directory
 
 ```
-.workflow/.team/UAN-{slug}-{YYYY-MM-DD}/
+{run_dir}/work/team/
 +-- .msg/messages.jsonl          # Message bus log
 +-- .msg/meta.json               # Session metadata + cross-role state
-+-- discussion.md                # Understanding evolution and discussion timeline
++-- {run_dir}/evidence/discussion.md                # Understanding evolution and discussion timeline
 +-- explorations/                # Explorer output
 |   +-- exploration-001.json
 |   +-- exploration-002.json
-+-- analyses/                    # Analyst output
++-- {run_dir}/outputs/analyses/                    # Analyst output
 |   +-- analysis-001.json
 |   +-- analysis-002.json
-+-- discussions/                 # Discussant output
++-- {run_dir}/evidence/discussions/                 # Discussant output
 |   +-- discussion-round-001.json
-+-- conclusions.json             # Synthesizer output
++-- {run_dir}/outputs/conclusions.json             # Synthesizer output
 +-- wisdom/                      # Cross-task knowledge
 |   +-- learnings.md
 |   +-- decisions.md
@@ -167,7 +173,7 @@ AskUserQuestion({
 | Unknown --role value | Error with role registry list |
 | Role file not found | Error with expected path (roles/{name}/role.md) |
 | Discussion loop stuck >5 rounds | Force synthesis, offer continuation |
-| CLI tool unavailable | Fallback chain: gemini -> codex -> manual analysis |
+| CLI tool unavailable | Fallback chain: agy -> codex -> manual analysis |
 | Explorer agent fails | Continue with available context, note limitation |
 | Fast-advance conflict | Coordinator reconciles on next callback |
 | Completion action fails | Default to Keep Active |

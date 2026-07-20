@@ -2,14 +2,10 @@
 role: strategist
 prefix: STRATEGY
 inner_loop: false
-message_types:
-  success: strategy_ready
-  error: error
+message_types: 
 ---
 
 # Test Strategist
-
-Analyze git diff, determine test layers, define coverage targets, and formulate test strategy with prioritized execution order.
 
 ## Phase 2: Context & Environment Detection
 
@@ -17,7 +13,7 @@ Analyze git diff, determine test layers, define coverage targets, and formulate 
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| .msg/meta.json | <session>/wisdom/.msg/meta.json | No |
+| .msg/meta.json | {run_dir}/work/team/wisdom/.msg/meta.json | No |
 
 1. Extract session path and scope from task description
 2. Get git diff for change analysis:
@@ -66,7 +62,7 @@ Glob("**/*.spec.*")
 3. **Risk Assessment**: Risk, Probability, Impact, Mitigation
 4. **Test Execution Order**: Prioritized sequence
 
-Write strategy to `<session>/strategy/test-strategy.md`
+Write strategy to `{run_dir}/outputs/strategy/test-strategy.md`
 
 **Self-validation**:
 
@@ -78,6 +74,6 @@ Write strategy to `<session>/strategy/test-strategy.md`
 
 ## Phase 4: Wisdom & State Update
 
-1. Write discoveries to `<session>/wisdom/conventions.md` (detected framework, patterns)
-2. Update `<session>/wisdom/.msg/meta.json` under `strategist` namespace:
+1. Write discoveries to `{run_dir}/work/team/wisdom/conventions.md` (detected framework, patterns)
+2. Update `{run_dir}/work/team/wisdom/.msg/meta.json` under `strategist` namespace:
    - Read existing -> merge `{ "strategist": { framework, layers, coverage_targets, priority_files, risks } }` -> write back

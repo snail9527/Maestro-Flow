@@ -1,7 +1,5 @@
 # Monitor Pipeline
 
-Event-driven pipeline coordination. Beat model: coordinator wake -> process -> spawn -> STOP.
-
 ## Constants
 
 - SPAWN_MODE: background
@@ -87,13 +85,13 @@ Include in status output:
 
 ```
 Pipeline Status (standard):
-  [DONE]  SCAN-001    (scanner)     -> artifacts/scan-report.md
-  [DONE]  DIAG-001    (diagnoser)   -> artifacts/diagnosis.md
+  [DONE]  SCAN-001    (scanner)     -> {run_dir}/outputs/scan-report.md
+  [DONE]  DIAG-001    (diagnoser)   -> {run_dir}/outputs/diagnosis.md
   [RUN]   DESIGN-001  (designer)    -> designing solutions...
   [WAIT]  IMPL-001    (implementer) -> blocked by DESIGN-001
   [WAIT]  TEST-001    (tester)      -> blocked by IMPL-001
 
-Session: <session-id>
+Session: <run-id>
 Commands: 'resume' to advance | 'check' to refresh
 ```
 
@@ -129,14 +127,14 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: ~  or <project>/.claude/skills/team-ux-improve/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: ux-improve
 requirement: <task-description>
 inner_loop: <true|false>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries (context loaded -> core work done -> verification).
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -166,6 +164,14 @@ Pipeline done. Generate report and completion action.
 
 1. Verify all tasks (including any fix-verify iterations) have status "completed"
 2. If any tasks not completed -> handleSpawnNext
+
+  +- Run lifecycle completion:
+  |   - Read run_id from team-session.json.run.run_id
+  |   - Write {run_dir}/report.md with frontmatter (verdict/summary/concerns)
+  |   - Run `maestro run complete <run_id>`
+  |   - If complete fails: fix the blocking gate and retry once; still failing -> do NOT archive/clean - keep the team active (status=paused) and report the blocking gate
+  |
+
 3. If all completed -> transition to coordinator Phase 5
 
 ## handleAdapt

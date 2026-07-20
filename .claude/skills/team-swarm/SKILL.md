@@ -1,8 +1,14 @@
 ---
 name: team-swarm
+disable-model-invocation: true
 description: Swarm intelligence team skill — ACO-driven multi-agent exploration with hybrid LLM coordinator + Python optimization controller. Coordinator generates swarm-config from user task, then runs K iterations of N parallel ants guided by pheromone state. Universal task space via config (nodes + scoring rule). Triggers on "team swarm", "swarm intelligence", "蚁群".
 allowed-tools: TeamCreate(*), TeamDelete(*), SendMessage(*), TaskCreate(*), TaskUpdate(*), TaskList(*), TaskGet(*), Agent(*), AskUserQuestion(*), Read(*), Write(*), Edit(*), Bash(*), Glob(*), Grep(*), mcp__maestro__team_msg(*)
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode-lite.md
+</required_reading>
 
 # Team Swarm
 
@@ -56,10 +62,10 @@ Parse `$ARGUMENTS`:
 ## Shared Constants
 
 - **Session prefix**: `TS`
-- **Session path**: `.workflow/.team/TS-<slug>-<date>/`
+- **Session path**: `{run_dir}/work/team/`
 - **Team name**: `swarm`
 - **Script root**: `<skill_root>/scripts/aco.py` (Python 3.10+)
-- **Message bus**: `mcp__maestro__team_msg(session_id=<session-id>, ...)`
+- **Message bus**: `mcp__maestro__team_msg(session_id=<run-id>, ...)`
 
 ## Worker Spawn Template
 
@@ -75,8 +81,8 @@ Agent({
   prompt: `## Role Assignment
 role: <role>
 role_spec: <skill_root>/roles/<role>/role.md
-session: <session-folder>
-session_id: <session-id>
+session: {run_dir}/work/team
+session_id: <run-id>
 team_name: swarm
 requirement: <task-description>
 inner_loop: false
@@ -85,7 +91,7 @@ inner_loop: false
 <assignment JSON from aco.py select>
 
 ## Progress Milestones
-session_id: <session-id>
+session_id: <run-id>
 Report progress via team_msg at natural phase boundaries.
 Report blockers immediately via team_msg type="blocker".
 Report completion via team_msg type="task_complete" after final SendMessage.
@@ -125,7 +131,7 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 ## Session Directory
 
 ```
-.workflow/.team/TS-<slug>-<date>/
+{run_dir}/work/team/
 ├── team-session.json           # Session state
 ├── swarm-config.json           # User-facing config (Phase 1 output)
 ├── role-binding.json           # Worker role_spec path map
@@ -136,7 +142,7 @@ Execute built-in Phase 1 (task discovery) -> role Phase 2-4 -> built-in Phase 5 
 │   └── history/<iter>.json     # Per-iter snapshot
 ├── trails/<iter>.jsonl         # Per-iter all-ant paths + scores
 ├── scores/iter-<iter>-scores.json  # Scorer output (if mode == llm)
-├── artifacts/
+├── {run_dir}/outputs/          # Formal deliverables
 │   ├── ant-<iter>-<id>.json    # Per-ant schema-locked output
 │   ├── swarm-report.json       # Phase 4 full report dump
 │   └── best-solution.md        # Analyst final synthesis

@@ -1,3 +1,4 @@
+<!-- session-mode: none -->
 # Maestro
 
 - **Coding Philosophy**: @~/.maestro/workflows/coding-philosophy.md
@@ -9,37 +10,158 @@
 
 **Strictly follow the cli-tools.json configuration**
 
+## Explore
+
+Route code search by the Query Rules table (Knowledge System below) — it is the single source for tool selection. `maestro explore` is the default for usage sweeps and pattern scans: prefer it over Glob and broad Grep/Read, call it and stop to wait for results.
+
+```bash
+maestro explore "FIND: <target + condition>\nSCOPE: <paths>" [more prompts...] [options]
+```
+
+Lightweight read-only codebase search. 1 prompt = 1 agent. Not for write-mode/long sessions — use `delegate`.
+
+| Option | Description |
+|--------|-------------|
+| `-e, --endpoint <names>` | Endpoint name(s), comma-separated |
+| `--all` | Fan out each prompt to all endpoints |
+| `--json` | Output results as JSON |
+
+长尾选项（`--max-turns`、`-f`、`--cd`）见 `maestro explore --help`。
+
+### Context Injection
+
+Explore agent 无项目认知，调用前注入上下文：
+
+| 注入项 | 写入字段 | 内容 |
+|--------|----------|------|
+| 结构 | SCOPE | 相关目录的具体路径（非通配泛扫） |
+| 领域 | SCOPE | `maestro search` 已返回的关键文件路径 |
+| 约束 | ATTENTION | 框架、语言、命名惯例 |
+
+```
+FIND: authentication middleware that validates JWT tokens
+SCOPE: src/middleware/, src/auth/, src/api/routes/
+ATTENTION: Express.js, middleware files named *.middleware.ts
+```
+
+### Prompt Structure
+
+**FIND + SCOPE 为最低标准。** 每个字段一句陈述句，禁止嵌套条件。
+
+| Field | Required | Rule |
+|-------|----------|------|
+| `FIND` | **Yes** | 可判定的具体目标（什么 + 判定条件） |
+| `SCOPE` | **Yes** | 明确路径或 glob，禁止 `**/*` 泛扫 |
+| `EXCLUDE` | No | 要跳过的文件类型或目录 |
+| `ATTENTION` | No | 框架、命名惯例、已知陷阱 |
+| `EXPECTED` | Recommended | 输出格式：`file:line` 列表 / 摘要 / JSON |
+
+```
+FIND: Functions that call db.query() with string concatenation instead of $1/$2
+SCOPE: src/db/**/*.ts, src/api/**/*.ts
+EXCLUDE: **/*.test.ts
+EXPECTED: file:line list with the SQL string
+```
+
+### Cross-Search
+
+对重要搜索，用 2-3 个不同角度的 prompt 并发，结果由 Claude 交叉验证。
+
+**按角度拆分，不按关键词拆分：**
+
+| 角度 | Prompt A | Prompt B |
+|------|----------|----------|
+| 定义 vs 调用 | 找函数定义 | 找调用点 |
+| 正例 vs 反例 | 找正确用法 | 找遗漏用法 |
+| 入口 vs 实现 | 找 export/路由 | 找内部逻辑 |
+| 按文件类型 | .ts 中的用法 | .vue 中的用法 |
+
+**结果置信度：**
+- 双命中 → 高置信，直接使用
+- 单命中 → 用 Grep/Read 二次确认
+- 零命中 → 换角度重搜或目标不存在
+
+### Execution
+
+Multi-prompt — background；single lookup — foreground：
+
+```
+Bash({ command: "maestro explore \"p1\" \"p2\" --json", run_in_background: true })
+Bash({ command: "maestro explore \"FIND: ...\nSCOPE: ...\"" })
+```
+
+Session: `maestro explore show` / `maestro explore output <id>`
+
 ## Knowledge System
 
-**ALWAYS search before acting.** Never assume context is pre-loaded.
+**Gate rule**: run `maestro search` + `maestro load` BEFORE reading code or editing files. 空结果 ≠ 免检：返回 hint 时先执行 hint 再重试；确认无既有知识后照常推进，任务结束按 Record 补录。
 
-### Search Commands
+**Re-search triggers**（任务中重新检索，换关键词不重复旧 query）：进入新模块/子系统边界；同一问题修复失败 2 次；架构/方案决策前。
 
-| Layer | Command | Purpose |
-|-------|---------|---------|
-| **1. Unified** | `maestro search "<query>" [--type spec\|knowhow\|issue] [--category <cat>]` | All knowledge types |
-| **2. Domain rules** | `maestro spec load --category <cat> [--keyword <kw>]` | Load rules before coding |
-| **3. Code structure** | `maestro kg search <symbol>` / `maestro kg context <node>` | Dependencies, call chains |
+```bash
+maestro search "<query>" [--type <type>] [--category <cat>] [--kind <kind>] [--code] [--kg]
+maestro load --type <type> [--list] [--category <cat>] [--keyword <word>] [--id <id>]
+```
 
+**--type**: `spec`, `knowhow`, `domain`, `issue`, `session`, `scratch`, `note`, `project`, `roadmap`
+**--category** (spec only): `coding`, `arch`, `debug`, `test`, `review`, `learning`, `ui`
+**--kind**: sealed run 产物 kind 过滤（如 `diagnosis`, `review-findings`, `lessons`），仅 wiki 结果
 
-### Proactive Search — ALWAYS Execute
+### Query Rules
 
-**L0 — Every task, no exceptions:**
-- `maestro search "<feature/module keywords>"`
+1-3 core keywords per query — multiple short queries beat one long one.
+Separate concepts from symbols. Add `--kg` for full-source.
 
-**L1 — Unfamiliar code:**
-- `maestro kg search "<symbol>"`
-- `maestro kg context <file-or-symbol>`
+| Target | Tool |
+|--------|------|
+| Known symbol → definition/signature | `maestro search "<Symbol>" --code` (file:line, no agent cost) |
+| Concept / knowledge / conventions | `maestro search "<keywords>"` |
+| Debug 症状 / review 教训（沉淀产物） | `maestro search "<关键词>" --kind diagnosis` / `--kind lessons` |
+| Usage sweep / pattern scan | `maestro explore` |
+| Exact regex / line content | Grep |
 
-**L2 — Architecture / debugging / refactoring / tests:**
-- `maestro search --type spec --category arch`
-- `maestro kg callers <fn>` / `maestro kg callees <fn>` (注意: `--json` 返回 `{node, callers/callees: [...]}` 对象，非数组)
-- `maestro search --type spec --category test "<module>"`
-- `maestro kg search "<module>" --code`
+**Association follow-through** — 命中后沿关联走一跳，优于重发大 query：
+
+- 命中分块条目（id 带 `-NNN` 尾缀）→ `maestro load --type knowhow --id <父条目id>` 取全文
+- 顺藤摸瓜（谁引用它 / 它引用谁）→ `maestro wiki backlinks <id>` / `maestro wiki forward <id>`
+- 规则演化脉络 → `maestro spec history <sid>`
+
+Zero code hits with a hint (e.g. `code index not initialized`) → run the hinted command, then retry — don't abandon code search.
+
+```bash
+# ❌ keyword dump
+maestro search "topology display frontend DetailedTopologySVG elk"
+
+# ✅ targeted
+maestro search "topology layout"
+maestro search "DetailedTopologySVG" --code
+maestro load --type spec --category coding
+```
 
 ### Record
 
-- **Spec** → `/spec-add <category> "title" "content" --keywords kw1,kw2 --description "summary"`
-- **Knowhow** → `/manage-knowhow-capture` (use `--spec-category <cat>` to bridge into agent injection)
+| What | Command |
+|------|---------|
+| Spec | `/maestro-spec add <category> "title" "content" --keywords kw1,kw2 --description "summary"` |
+| Knowhow | `/maestro-manage knowledge capture` (`--spec-category <cat>` for agent injection) |
 
 Category routing: decisions→`arch`, patterns→`coding`, pitfalls→`debug`/`learning`, rules→`review`, tests→`test`.
+入口分工：slash 命令走引导式工作流；`maestro spec add` CLI 直写（supersede 流程用 `--json` 拿 sid）。
+`session-mode: run` 命令在 `maestro run check` 全绿时会收到 finish 收口清单（handoff、补录、冲突标注、verdict）——逐项执行，不跳过。
+
+### Supersession & Conflict (dual-track)
+
+新知识与旧条目的关系分两种,语义不同、操作不同:
+
+| 关系 | 场景 | 命令 | 效果 |
+|------|------|------|------|
+| **supersede** | 新规则替代旧规则（演化） | `maestro spec supersede <old-sid> --by <new-sid>` | 旧条目 `deprecated`（search/load 排除），演化链保留 |
+| **conflict** | 两条规则均有道理（争议） | `maestro spec conflict mark <file> <line> --note "<reason>"` | 旧条目 `contested`（search ×0.5，`[CONTESTED]` 标注，仍注入），人裁决 — resolution 走 `/maestro-manage knowledge audit` |
+
+supersede 流程：`maestro spec add ... --json`（→ new-sid）→ `spec supersede <old-sid> --by <new-sid>`，`spec history <sid>` 查看演化链。
+
+**三正交轴**: `confidence`（人/审计裁定）⊥ `status`（active/deprecated 生命周期）⊥ time-decay（自动新鲜度）。不要混用。
+
+### Health & Maintenance
+
+`maestro spec health` — 生命周期统计 + 悬空/循环 supersedes 校验 + 新鲜度。低频维护（`backfill-sid` 回填 sid、`history <sid>` 演化链、`search --include-deprecated`）见 `maestro spec --help`。

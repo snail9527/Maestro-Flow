@@ -47,16 +47,6 @@
 
 ---
 
-### `maestro-quick` — 快速任务
-
-**Usage:** `/maestro-quick [description] [--full] [--discuss]`
-
-快速执行单个任务，跳过规划阶段，同时保持原子提交和验证等工作流质量保证
-
-**Flags:** [description] (任务描述) · --full (包含所有代理) · --discuss (执行前讨论)
-
----
-
 ### `maestro-brainstorm` — 头脑风暴
 
 **Usage:** `/maestro-brainstorm [topic|role-name] [--yes] [--count N] [--session ID] [--update] [--skip-questions] [--include-questions] [--style-skill PKG]`
@@ -193,13 +183,13 @@
 
 ---
 
-### `maestro-companion` — 知识伴侣
+### `maestro-companion` — 轻量执行伴侣
 
-**Usage:** `/maestro-companion [before|note|after|route] [--task <description>] [--type <task_type>] [--category <cat>]`
+**Usage:** `/maestro-companion <intent> [--note <text>] [--promote] [-y]`
 
-知识伴侣工具：加载上下文、记录伴侣文档、捕获洞察、路由到技能。四种模式：before（预任务加载）、note（中任务记录）、after（后任务复盘）、route（意图路由）。纯 side-car，不创建 session
+轻量任务直接执行入口：创建最小 Run，直接完成明确任务，持续记录非正式 evidence log，最后完成 Run。
 
-**Flags:** [before|note|after|route] (模式) · --task <description> (任务描述) · --type <task_type> (任务类型) · --category <cat> (分类过滤)
+**Flags:** <intent> (任务描述) · --note <text> (追加记录) · --promote (提升洞察) · -y (跳过确认)
 
 ---
 
@@ -230,16 +220,6 @@
 闭环决策引擎：读取项目状态 → 推断位置 → 构建自适应链 → 委托执行。与 maestro-ralph-execute 互调形成自延续工作循环。支持 ralph（自适应链）和 maestro（静态链）两类 session。决策节点自动评估质量门
 
 **Flags:** <intent> (意图文本) · -y (自动模式) · status (显示进度) · continue (恢复执行)
-
----
-
-### `maestro-ralph-beta` — 自运行循环
-
-**Usage:** `/maestro-ralph-beta <intent> [-y] | continue | status`
-
-自运行循环控制器：单一 skill 完成 build/tick/decide 一体化。每次调用按 session 状态路由，执行一个 tick，然后自调用直到全部 completion_confirmed 或暂停。双平台支持（Claude + Codex）
-
-**Flags:** <intent> (意图文本) · -y (自动模式) · continue (恢复) · status (显示进度)
 
 ---
 
@@ -374,7 +354,7 @@ Load specs by role: primary role doc in full + cross-file entries with matching 
 
 **Usage:** `/maestro-tools-register <description>`
 
-Codify reusable business processes as tool specs (e.g. payment reconciliation, OAuth integration, E2E verification). Register during planning, after execution, before testing, or during retrospective. Auto-discovered by agents via spec load and spec-injector.
+Codify reusable business processes as tool specs (e.g. payment reconciliation, OAuth integration, E2E verification). Register during planning, after execution, before testing, or during retrospective. Auto-discovered by agents via maestro-spec load and spec-injector.
 
 **Modes:** extract (from code/docs) · generate (from description) · optimize (improve existing)
 

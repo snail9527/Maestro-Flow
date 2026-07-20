@@ -1,14 +1,10 @@
 # Analyze Task
 
-Parse plan-and-execute input -> detect input type -> determine execution method -> assess scope.
-
-**CONSTRAINT**: Text-level analysis only. NO source code reading, NO codebase exploration.
-
 ## Signal Detection
 
 | Input Pattern | Type | Action |
 |--------------|------|--------|
-| `ISS-\d{8}-\d{6}` pattern | Issue IDs | Use directly |
+| `ISS-\d{8}-\d{3}` pattern | Issue IDs | Use directly |
 | `--text '...'` flag | Text requirement | Create issues via CLI |
 | `--plan <path>` flag | Plan file | Read file, parse phases |
 
@@ -17,10 +13,10 @@ Parse plan-and-execute input -> detect input type -> determine execution method 
 | Condition | Execution Method |
 |-----------|-----------------|
 | `--exec=codex` specified | Codex |
-| `--exec=gemini` specified | Gemini |
-| `-y` or `--yes` flag present | Auto (default Gemini) |
+| `--exec=agy` specified | Agy |
+| `-y` or `--yes` flag present | Auto (default Agy) |
 | No flags (interactive) | AskUserQuestion -> user choice |
-| Auto + task_count <= 3 | Gemini |
+| Auto + task_count <= 3 | Agy |
 | Auto + task_count > 3 | Codex |
 
 ## Scope Assessment
@@ -34,13 +30,13 @@ Parse plan-and-execute input -> detect input type -> determine execution method 
 
 ## Output
 
-Write <session>/task-analysis.json:
+Write {run_dir}/work/team/task-analysis.json:
 ```json
 {
   "task_description": "<original>",
   "input_type": "<issues|text|plan>",
   "raw_input": "<original input>",
-  "execution_method": "<codex|gemini>",
+  "execution_method": "<codex|agy>",
   "issue_count_estimate": 0,
   "complexity": { "score": 0, "level": "Low|Medium|High" },
   "pipeline_type": "plan-execute",

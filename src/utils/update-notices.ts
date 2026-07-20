@@ -403,3 +403,117 @@ registerNotice({
   ],
   actions: [],
 });
+
+registerNotice({
+  version: '0.5.36',
+  title: 'Session Anchor 锚定 + Search Daemon + API Explore',
+  highlights: [
+    'Session Anchor：每个 step 自动注入 intent/boundary/goal 上下文锚定',
+    'Re-grounding 漂移熔断：周期性意图保真检查 + 漂移安全门',
+    'Search Daemon 常驻进程：ONNX 模型热缓存，搜索响应提速',
+    '新增 api-explore 轻量代码探索 subagent + 独立配置文件',
+    'Boundary Grill 协议：analyze/collab/plan/brainstorm 边界冲突审查',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.5.38',
+  title: 'Dashboard 入口恢复 + Install TUI 重构 + 反漂移防护',
+  highlights: [
+    '恢复 maestro view/stop 命令，前端 dashboard 入口重新启用',
+    'install TUI 重构：平台驱动安装 + update 迁移修复',
+    '新增 manage-drift-realign 命令 + maestro timeline CLI',
+    'ralph 反漂移 4 层防护 + 目标热修改 --amend',
+    'codex 完整移植 re-grounding 子系统',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.5.40',
+  title: '原生插件安装 + 代码框复制按钮 + shell_exec 统一',
+  highlights: [
+    '新增 maestro plugin 命令：原生插件安装模式，第三方插件直接安装到工作区',
+    'docs-site 代码框增加复制按钮 + 亮色模式深色背景修复',
+    '修复 7 个核心 skill 的确认门控缺失和 wave 流程缺陷',
+    'CLI 裸 intent 拦截优化 + codex skill shell_exec 统一抽象',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.5.42',
+  title: '.agents/ 指令注入 + explore 增强 + 命令内容分离',
+  highlights: [
+    '新增 AGENTS.md 指令注入组件：.agents/ 平台自动注入项目指令',
+    'explore 指令增强：Context Injection + Cross-Search 交叉验证',
+    '8 个命令文件内容分离：过程性逻辑下沉到 workflow 层',
+    'spec-loader category 匹配放宽 + codex skill dedupe 修复',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.5.43',
+  title: 'KG 代码嵌入引擎 + MCP 语义搜索工具 + zvec 向量存储',
+  highlights: [
+    '新增代码嵌入模块：结构化文本提取 + 向量索引 + 混合搜索（BM25F + 向量）',
+    '新增 MCP 工具 maestro_wiki_search / maestro_code_semantic_search',
+    '集成 zvec 向量存储后端：多分块嵌入 + 并行索引 + GPU 加速',
+    'ralph CLI 委托架构重构 + S_POST_ANALYZE 产物偏离自动修正',
+    '修复 skill/command 238 个执行歧义问题',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.5.44',
+  title: 'Ralph Agent 编排器 + rmux-collab 协作系统 + explore 增强',
+  highlights: [
+    '新增 Claude Agent 专属 ralph 编排器 + 执行器命令',
+    'rmux-collab 多 Agent 频道协作系统：atomic send+wait + 结构化 AgentResult',
+    'explore 重构：去除 maxTurns 限制、并行 tool calls、async ripgrep',
+    'graph 模块迁移至 node:sqlite，消除 better-sqlite3 deprecated 警告',
+    'search daemon 类型去重 + 过度获取级联修复 + MCP fallback 对齐',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.5.46',
+  title: 'MOA 多模型聚合引擎 + Ralph dual-dispatch 编排',
+  highlights: [
+    '新增 MOA (Mixture of Agents) 核心循环：per-turn 模式 + reference 磁盘缓存 + 成本跟踪',
+    'Ralph-v2 dual dispatch：executor 支持多 agent 编排 + CLI delegate 三模式',
+    '集成 WikiIndexer BM25 搜索到 keyword-spec-injector',
+    '修复知识图谱代码搜索多词查询 + 泛化搜索 OR 降级',
+    '修复 odyssey 举一反三阶段被跳过 + ralph agent 异步 mailbox 空转',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.5.48',
+  title: 'Embedding 模型管理 + Ralph 嵌套套娃编排',
+  highlights: [
+    '新增 embedding 模型管理命令：download / status / index rebuild',
+    'Ralph-v2 executor 重构为 unnamed 嵌套套娃模型',
+    'commands 入口参数统一从 phase 改为 milestone',
+    '安装界面 EmbeddingPanel 配置 + circuit breaker 保护',
+  ],
+  actions: [],
+});
+
+registerNotice({
+  version: '0.5.49',
+  title: '知识演化链 + Explore 三层容错',
+  highlights: [
+    'Explore circuit-breaker 持久化 + pre-flight 探测 + 即时 fallback',
+    '知识系统演化链替代机制 + 遗忘曲线搜索权重',
+    'Spec 冲突标记条目搜索降级评分',
+    'Wiki indexer streaming 写入 + embedding 构建 abort 支持',
+    'Search daemon 连接数上限 + socket 超时保护',
+  ],
+  actions: [],
+});

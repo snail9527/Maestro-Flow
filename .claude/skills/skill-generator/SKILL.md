@@ -1,17 +1,33 @@
 ---
 name: skill-generator
+disable-model-invocation: true
 description: Meta-skill for creating new Claude Code skills with configurable execution modes. Supports sequential (fixed order) and autonomous (stateless) phase patterns. Use for skill scaffolding, skill creation, or building new workflows. Triggers on "create skill", "new skill", "skill generator".
 allowed-tools: Agent, AskUserQuestion, Read, Bash, Glob, Grep, Write
+session-mode: run
 ---
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 
 # Skill Generator
 
 Meta-skill for creating new Claude Code skills with configurable execution modes.
 
+## Run Lifecycle
+
+Follow `~/.maestro/workflows/run-mode.md`. If an orchestrator injected `run_id` / `run_dir` in the birth packet, use them and do NOT call `maestro run create`. Otherwise self-start before Phase 1:
+
+```bash
+maestro run create skill-generator --session <YYYYMMDD-skill-generator-{topic}> --intent "<short phrase>"
+```
+
+Session slug is ASCII-only, ≤64 chars. Retain the returned `run_id` and `run_dir`; all `{run_dir}/...` paths below refer to it. Close per Phase 5.
+
 ## Pre-load (before execution)
 
 1. **Codebase docs**: If `.workflow/codebase/ARCHITECTURE.md` exists, read for project context
-2. **Specs**: `maestro spec load --category coding` — load coding conventions
+2. **Specs**: `maestro load --type spec --category coding` — load coding conventions
 3. **Wiki knowledge**: `maestro search "skill design optimization" --json` — top 5 entries as prior context
 4. All optional — proceed without if unavailable
 
@@ -207,6 +223,7 @@ Phase 5: Validation & Documentation
    - Generate: README.md (usage instructions)
    - Generate: validation-report.json (completeness check)
    - Output: Final documentation
+   - Close the Run: `maestro run check {run_id}` → repair any reported gate → `maestro run complete {run_id}`. Report success only after completion.
 ```
 
 **Execution Protocol**:
@@ -225,7 +242,7 @@ const answers = AskUserQuestion({
 });
 
 const config = generateConfig(answers);
-const workDir = `.workflow/.scratchpad/skill-gen-${timestamp}`;
+const workDir = `{run_dir}/outputs/skill-gen-${timestamp}`;
 Write(`${workDir}/skill-config.json`, JSON.stringify(config));
 
 // Phase 2: Create structure

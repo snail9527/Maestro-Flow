@@ -1,3 +1,8 @@
+<!-- session-mode: inherited -->
+
+<required_reading>
+@~/.maestro/workflows/run-mode.md
+</required_reading>
 # UI Codify: Main Workflow
 
 从源代码提取设计系统，生成参考包，固化为知识资产。
@@ -130,7 +135,7 @@ echo "  Output: $package_dir"
 
 ## Phase 2: Parallel Agent Extraction (Deferred)
 
-**Read** `@~/.maestro/workflows/ui-codify-extract.md` then execute.
+MANDATORY: execute `~/.maestro/workflows/ui-codify-extract.md` steps; REQUIRED produce: design-tokens.json, animation-tokens.json, layout-templates.json; BLOCKED if missing.
 
 Variables available to Phase 2:
 - `source_path` — absolute path to source directory
@@ -147,7 +152,7 @@ Phase 2 writes:
 
 ## Phase 3: Reference Package Generation (Deferred)
 
-**Read** `@~/.maestro/workflows/ui-codify-package.md` then execute.
+MANDATORY: execute `~/.maestro/workflows/ui-codify-package.md` steps; REQUIRED produce: preview.html, preview.css, token files copied to package_dir; BLOCKED if missing.
 
 Variables available to Phase 3:
 - `temp_dir` — temporary workspace with extraction results
@@ -167,7 +172,7 @@ Phase 3 writes:
 
 ## Phase 4: Knowledge Asset Generation (Deferred)
 
-**Read** `@~/.maestro/workflows/ui-codify-knowhow.md` then execute.
+MANDATORY: execute `~/.maestro/workflows/ui-codify-knowhow.md` steps; REQUIRED produce: knowhow-manifest.json, knowhow files, spec entries; BLOCKED if missing.
 
 Variables available to Phase 4:
 - `package_dir` — package directory with all token files
@@ -189,14 +194,16 @@ Phase 4 writes:
 | 1 | E001: Missing source path | Report usage, exit |
 | 1 | E002: Source not found | Report path, exit |
 | 1 | E003: Package exists | Suggest --overwrite, exit |
-| 2 | Agent failure | Report which agent failed, continue with partial results |
+| 2 | Agent failure | Report which agent failed, continue with partial results; flag partial results as [LOW CONFIDENCE] (agent failure) |
 | 2 | No files discovered | Report empty discovery, exit |
 | 3 | Token copy failed | Report missing file, exit |
-| 3 | Preview generation failed | Report error, continue (preview is non-critical) |
-| 4 | Manifest build failed | Report error, package still usable without knowhow |
-| 4 | codify-to-knowhow failed | Report error, manifest remains for manual retry |
+| 3 | Preview generation failed | Report error, continue (preview is non-critical); flag preview.html/css as [LOW CONFIDENCE] (preview generation failed) |
+| 4 | Manifest build failed | Report error, package still usable without knowhow; flag knowhow assets as [LOW CONFIDENCE] (manifest build failed) |
+| 4 | codify-to-knowhow failed | Report error, manifest remains for manual retry; flag knowhow/spec entries as [LOW CONFIDENCE] (codify-to-knowhow failed) |
 
 ## Completion Message
+
+Glob all listed output files MUST exist before completion message; BLOCKED if missing.
 
 ```
 UI Design System Codified!

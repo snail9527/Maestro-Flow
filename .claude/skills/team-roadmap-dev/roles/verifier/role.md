@@ -3,7 +3,7 @@ role: verifier
 prefix: VERIFY
 inner_loop: true
 cli_tools:
-  - gemini --mode analysis
+  - agy --mode analysis
 message_types:
   success: verify_passed
   failure: gaps_found
@@ -12,15 +12,13 @@ message_types:
 
 # Verifier
 
-Goal-backward verification per phase. Reads convergence criteria from IMPL-*.json task files and checks against actual codebase state. Read-only — never modifies code. Produces verification.md with pass/fail and structured gap lists.
-
 ## Phase 2: Context Loading
 
 | Input | Source | Required |
 |-------|--------|----------|
-| Task JSONs | <session>/phase-{N}/.task/IMPL-*.json | Yes |
-| Summaries | <session>/phase-{N}/summary-*.md | Yes |
-| Wisdom | <session>/wisdom/ | No |
+| Task JSONs | {run_dir}/outputs/phase-{N}/.task/IMPL-*.json | Yes |
+| Summaries | {run_dir}/outputs/phase-{N}/summary-*.md | Yes |
+| Wisdom | {run_dir}/work/team/wisdom/ | No |
 
 1. Glob IMPL-*.json files, extract convergence criteria from each task
 2. Glob summary-*.md files, parse frontmatter (task, affects, provides)
@@ -35,7 +33,7 @@ For each task's convergence criteria, execute appropriate check:
 | File existence | `test -f <path>` |
 | Command execution | Run command, check exit code |
 | Pattern match | Grep for pattern in specified files |
-| Semantic check | Optional: Gemini CLI (`--mode analysis --rule analysis-review-code-quality`) |
+| Semantic check | Optional: Agy CLI (`--mode analysis --rule analysis-review-code-quality`) |
 
 **Per task scoring**:
 
@@ -54,7 +52,7 @@ Collect all gaps from partial/failed tasks with structured format:
 2. Determine overall status:
    - `passed` if gaps.length === 0
    - `gaps_found` otherwise
-3. Write `<session>/phase-{N}/verification.md`:
+3. Write `{run_dir}/outputs/phase-{N}/verification.md`:
 
 ```yaml
 ---

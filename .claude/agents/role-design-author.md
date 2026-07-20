@@ -22,7 +22,7 @@ You produce a set of analysis files for one role in a brainstorm session, organi
 | `output_dir` | yes | **absolute** path to role folder — `{session_dir}/{role}/`. If you receive a relative path or a literal `{output_dir}` placeholder, fail fast with `TASK BLOCKED: output_dir is not absolute`. |
 | `feature_list` | optional | F-id + slug + title rows; if missing, fall back to non-feature organization |
 | `design_research` | optional | external research markdown to integrate as evidence |
-| `project_specs` | optional | pre-loaded `maestro spec load` output |
+| `project_specs` | optional | pre-loaded `maestro load --type spec` output |
 | `user_context` | optional | answers from prior interactive context gathering |
 | `style_skill` | optional | path to style-skill package (ui-designer only) |
 
@@ -190,9 +190,11 @@ All behavioral statements MUST use MUST / SHOULD / MAY / MUST NOT / SHOULD NOT.
 - [ ] No interrogative sentences (all declarative)
 - [ ] system-architect: §3 contains "Data Model" and "State Machine" headings
 
-## Return Protocol
+## Completion Sequence (MANDATORY ORDER)
 
-Report completion with this structure (the orchestrator reads ONLY this, not the files):
+**Step A — Write files**: Use the Write tool to create every file under `output_dir/`. Then verify with Glob that `analysis.md` and each `analysis-F-*.md` exist on disk. If any Write call fails, emit `TASK BLOCKED` and stop.
+
+**Step B — Report summary**: ONLY AFTER Step A files are confirmed on disk, emit this text (the orchestrator reads this summary to track progress — it does NOT substitute for the files):
 
 ```
 TASK COMPLETE
@@ -205,7 +207,7 @@ rfc_keyword_count: {N}
 total_lines: {sum across all files}
 ```
 
-If blocked: report blocker with `TASK BLOCKED` prefix.
+Never emit `TASK COMPLETE` without files on disk. If blocked: report with `TASK BLOCKED` prefix.
 
 ## NEVER
 

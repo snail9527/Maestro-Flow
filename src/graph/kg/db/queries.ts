@@ -1,7 +1,7 @@
 // src/graph/kg/db/queries.ts — MaestroGraph 统一 CRUD
 // 扩展 CodeGraph QueryBuilder 以支持知识节点 + 双 FTS5
 
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import type { KgDatabaseConnection } from './connection.js';
 import type {
   UnifiedNode, UnifiedEdge, FileRecord,
@@ -9,6 +9,7 @@ import type {
   SourceType, EdgeProvenance, UnifiedGraphStats, Visibility,
 } from './types.js';
 import { tokenize as camelTokenize } from '../resolution/name-matcher.js';
+import { computeScore } from '../query/scoring.js';
 
 // ---------------------------------------------------------------------------
 // Row ↔ Object mappers
@@ -74,6 +75,22 @@ function safeJsonParse<T>(str: string | null | undefined, fallback: T): T {
   if (!str) return fallback;
   try { return JSON.parse(str) as T; }
   catch { return fallback; }
+}
+
+function isRecoverableFtsFailure(err: unknown, table: 'code_fts' | 'knowledge_fts'): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return new RegExp(`no such table:\\s*${table}`, 'i').test(message)
+    || /database disk image is malformed|database corruption|malformed database schema|vtable constructor failed/i.test(message);
+}
+
+function isFtsCorruption(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /database disk image is malformed|database corruption|malformed database schema|vtable constructor failed/i.test(message);
+}
+
+function clampQueryLimit(value: number | undefined, fallback: number, max: number): number {
+  const candidate = Number.isFinite(value) ? Math.trunc(value as number) : fallback;
+  return Math.max(1, Math.min(candidate, max));
 }
 
 function rowToNode(row: NodeRow): UnifiedNode {
@@ -170,7 +187,7 @@ export class KgQueryBuilder {
     this.conn = conn;
   }
 
-  private get db(): Database.Database {
+  private get db(): DatabaseSync {
     return this.conn.raw;
   }
 
@@ -182,7 +199,7 @@ export class KgQueryBuilder {
     const placeholders = cols.map(() => '?').join(',');
     this.db.prepare(
       `INSERT OR REPLACE INTO nodes (${cols.join(',')}) VALUES (${placeholders})`
-    ).run(...cols.map(c => row[c]));
+    ).run(...cols.map(c => row[c] as string | number | null));
   }
 
   insertNodes(nodes: UnifiedNode[]): number {
@@ -199,38 +216,36 @@ export class KgQueryBuilder {
       )`
     );
     let count = 0;
-    this.conn.transaction(() => {
-      for (const node of nodes) {
-        let keywords = node.keywords;
-        if (node.sourceType === 'codegraph' && keywords.length === 0) {
-          const nameTokens = camelTokenize(node.name);
-          const qnTokens = node.qualifiedName ? camelTokenize(node.qualifiedName.split('.').pop() || '') : [];
-          const merged = [...new Set([...nameTokens, ...qnTokens])];
-          if (merged.length > 1) keywords = merged;
-        }
-        stmt.run(
-          node.id, node.kind, node.name, node.qualifiedName, node.filePath, node.language,
-          node.startLine, node.endLine, node.startColumn, node.endColumn,
-          node.docstring || null, node.signature || null, node.visibility || null,
-          node.isExported ? 1 : 0, node.isAsync ? 1 : 0, node.isStatic ? 1 : 0, node.isAbstract ? 1 : 0,
-          node.decorators.length > 0 ? JSON.stringify(node.decorators) : null,
-          node.typeParameters.length > 0 ? JSON.stringify(node.typeParameters) : null,
-          node.sourceType, node.definition || null,
-          node.aliases.length > 0 ? JSON.stringify(node.aliases) : null,
-          keywords.length > 0 ? JSON.stringify(keywords) : null,
-          node.category || null, node.roles.length > 0 ? JSON.stringify(node.roles) : null,
-          node.priority || null, node.status || null,
-          node.body || null, Object.keys(node.metadata).length > 0 ? JSON.stringify(node.metadata) : null,
-          node.updatedAt,
-        );
-        count++;
+    for (const node of nodes) {
+      let keywords = node.keywords;
+      if (node.sourceType === 'codegraph' && keywords.length === 0) {
+        const nameTokens = camelTokenize(node.name);
+        const qnTokens = node.qualifiedName ? camelTokenize(node.qualifiedName.split('.').pop() || '') : [];
+        const merged = [...new Set([...nameTokens, ...qnTokens])];
+        if (merged.length > 1) keywords = merged;
       }
-    });
+      stmt.run(
+        node.id, node.kind, node.name, node.qualifiedName, node.filePath, node.language,
+        node.startLine, node.endLine, node.startColumn, node.endColumn,
+        node.docstring || null, node.signature || null, node.visibility || null,
+        node.isExported ? 1 : 0, node.isAsync ? 1 : 0, node.isStatic ? 1 : 0, node.isAbstract ? 1 : 0,
+        node.decorators.length > 0 ? JSON.stringify(node.decorators) : null,
+        node.typeParameters.length > 0 ? JSON.stringify(node.typeParameters) : null,
+        node.sourceType, node.definition || null,
+        node.aliases.length > 0 ? JSON.stringify(node.aliases) : null,
+        keywords.length > 0 ? JSON.stringify(keywords) : null,
+        node.category || null, node.roles.length > 0 ? JSON.stringify(node.roles) : null,
+        node.priority || null, node.status || null,
+        node.body || null, Object.keys(node.metadata).length > 0 ? JSON.stringify(node.metadata) : null,
+        node.updatedAt,
+      );
+      count++;
+    }
     return count;
   }
 
   getNode(id: string): UnifiedNode | null {
-    const row = this.db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as NodeRow | undefined;
+    const row = this.db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as unknown as NodeRow | undefined;
     return row ? rowToNode(row) : null;
   }
 
@@ -244,7 +259,7 @@ export class KgQueryBuilder {
       const placeholders = batch.map(() => '?').join(',');
       const rows = this.db.prepare(
         `SELECT * FROM nodes WHERE id IN (${placeholders})`
-      ).all(...batch) as NodeRow[];
+      ).all(...batch) as unknown as NodeRow[];
       for (const row of rows) {
         result.set(row.id, rowToNode(row));
       }
@@ -257,21 +272,21 @@ export class KgQueryBuilder {
     const placeholders = kinds.map(() => '?').join(',');
     const rows = this.db.prepare(
       `SELECT * FROM nodes WHERE kind IN (${placeholders})`
-    ).all(...kinds) as NodeRow[];
+    ).all(...kinds) as unknown as NodeRow[];
     return rows.map(rowToNode);
   }
 
   getNodesByFile(filePath: string): UnifiedNode[] {
     const rows = this.db.prepare(
       'SELECT * FROM nodes WHERE file_path = ? ORDER BY start_line'
-    ).all(filePath) as NodeRow[];
+    ).all(filePath) as unknown as NodeRow[];
     return rows.map(rowToNode);
   }
 
   getNodesBySourceType(sourceType: SourceType): UnifiedNode[] {
     const rows = this.db.prepare(
       'SELECT * FROM nodes WHERE source_type = ?'
-    ).all(sourceType) as NodeRow[];
+    ).all(sourceType) as unknown as NodeRow[];
     return rows.map(rowToNode);
   }
 
@@ -280,15 +295,15 @@ export class KgQueryBuilder {
   }
 
   deleteNodesBySourceTypeAndFile(sourceType: SourceType, filePath: string): number {
-    return this.db.prepare(
+    return Number(this.db.prepare(
       'DELETE FROM nodes WHERE source_type = ? AND file_path = ?'
-    ).run(sourceType, filePath).changes;
+    ).run(sourceType, filePath).changes);
   }
 
   deleteNodesBySourceType(sourceType: SourceType): number {
-    return this.db.prepare(
+    return Number(this.db.prepare(
       'DELETE FROM nodes WHERE source_type = ?'
-    ).run(sourceType).changes;
+    ).run(sourceType).changes);
   }
 
   // ── Edge CRUD ──────────────────────────────────────────────────────
@@ -311,16 +326,14 @@ export class KgQueryBuilder {
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
     let count = 0;
-    this.conn.transaction(() => {
-      for (const edge of edges) {
-        stmt.run(
-          edge.source, edge.target, edge.kind,
-          edge.metadata && Object.keys(edge.metadata).length > 0 ? JSON.stringify(edge.metadata) : null,
-          edge.line ?? null, edge.column ?? null, edge.provenance ?? null,
-        );
-        count++;
-      }
-    });
+    for (const edge of edges) {
+      stmt.run(
+        edge.source, edge.target, edge.kind,
+        edge.metadata && Object.keys(edge.metadata).length > 0 ? JSON.stringify(edge.metadata) : null,
+        edge.line ?? null, edge.column ?? null, edge.provenance ?? null,
+      );
+      count++;
+    }
     return count;
   }
 
@@ -328,12 +341,12 @@ export class KgQueryBuilder {
     if (kind) {
       const rows = this.db.prepare(
         'SELECT * FROM edges WHERE source = ? AND kind = ?'
-      ).all(nodeId, kind) as EdgeRow[];
+      ).all(nodeId, kind) as unknown as EdgeRow[];
       return rows.map(rowToEdge);
     }
     const rows = this.db.prepare(
       'SELECT * FROM edges WHERE source = ?'
-    ).all(nodeId) as EdgeRow[];
+    ).all(nodeId) as unknown as EdgeRow[];
     return rows.map(rowToEdge);
   }
 
@@ -341,12 +354,12 @@ export class KgQueryBuilder {
     if (kind) {
       const rows = this.db.prepare(
         'SELECT * FROM edges WHERE target = ? AND kind = ?'
-      ).all(nodeId, kind) as EdgeRow[];
+      ).all(nodeId, kind) as unknown as EdgeRow[];
       return rows.map(rowToEdge);
     }
     const rows = this.db.prepare(
       'SELECT * FROM edges WHERE target = ?'
-    ).all(nodeId) as EdgeRow[];
+    ).all(nodeId) as unknown as EdgeRow[];
     return rows.map(rowToEdge);
   }
 
@@ -360,7 +373,7 @@ export class KgQueryBuilder {
       const placeholders = batch.map(() => '?').join(',');
       const rows = this.db.prepare(
         `SELECT * FROM edges WHERE source IN (${placeholders})`
-      ).all(...batch) as EdgeRow[];
+      ).all(...batch) as unknown as EdgeRow[];
       for (const row of rows) {
         const edge = rowToEdge(row);
         result.get(edge.source)?.push(edge);
@@ -379,7 +392,7 @@ export class KgQueryBuilder {
       const placeholders = batch.map(() => '?').join(',');
       const rows = this.db.prepare(
         `SELECT * FROM edges WHERE target IN (${placeholders})`
-      ).all(...batch) as EdgeRow[];
+      ).all(...batch) as unknown as EdgeRow[];
       for (const row of rows) {
         const edge = rowToEdge(row);
         result.get(edge.target)?.push(edge);
@@ -389,9 +402,9 @@ export class KgQueryBuilder {
   }
 
   deleteEdgesByProvenanceAndSource(provenance: string, sourcePrefix: string): number {
-    return this.db.prepare(
+    return Number(this.db.prepare(
       "DELETE FROM edges WHERE provenance = ? AND source LIKE ? ESCAPE '\\'"
-    ).run(provenance, `${escapeLikePattern(sourcePrefix)}%`).changes;
+    ).run(provenance, `${escapeLikePattern(sourcePrefix)}%`).changes);
   }
 
   // ── Unresolved Refs CRUD ──────────────────────────────────────────
@@ -429,7 +442,7 @@ export class KgQueryBuilder {
   }> {
     const rows = this.db.prepare(
       'SELECT * FROM unresolved_refs WHERE file_path = ?'
-    ).all(filePath) as Array<{
+    ).all(filePath) as unknown as Array<{
       id: number; from_node_id: string; reference_name: string; reference_kind: string;
       line: number; col: number; file_path: string; language: string; candidates: string | null;
     }>;
@@ -442,9 +455,9 @@ export class KgQueryBuilder {
   }
 
   deleteUnresolvedRefsByFile(filePath: string): number {
-    return this.db.prepare(
+    return Number(this.db.prepare(
       'DELETE FROM unresolved_refs WHERE file_path = ?'
-    ).run(filePath).changes;
+    ).run(filePath).changes);
   }
 
   // ── File CRUD ──────────────────────────────────────────────────────
@@ -463,7 +476,7 @@ export class KgQueryBuilder {
   }
 
   getFile(filePath: string): FileRecord | null {
-    const row = this.db.prepare('SELECT * FROM files WHERE path = ?').get(filePath) as FileRow | undefined;
+    const row = this.db.prepare('SELECT * FROM files WHERE path = ?').get(filePath) as unknown as FileRow | undefined;
     if (!row) return null;
     return {
       path: row.path,
@@ -481,34 +494,34 @@ export class KgQueryBuilder {
   getStaleFiles(): FileRow[] {
     return this.db.prepare(
       'SELECT * FROM files WHERE modified_at > indexed_at'
-    ).all() as FileRow[];
+    ).all() as unknown as FileRow[];
   }
 
   // ── Stats ──────────────────────────────────────────────────────────
 
   getStats(dbSizeBytes: number): UnifiedGraphStats {
-    const nodeCount = (this.db.prepare('SELECT COUNT(*) as n FROM nodes').get() as { n: number }).n;
-    const edgeCount = (this.db.prepare('SELECT COUNT(*) as n FROM edges').get() as { n: number }).n;
-    const fileCount = (this.db.prepare('SELECT COUNT(*) as n FROM files').get() as { n: number }).n;
+    const nodeCount = (this.db.prepare('SELECT COUNT(*) as n FROM nodes').get() as unknown as { n: number }).n;
+    const edgeCount = (this.db.prepare('SELECT COUNT(*) as n FROM edges').get() as unknown as { n: number }).n;
+    const fileCount = (this.db.prepare('SELECT COUNT(*) as n FROM files').get() as unknown as { n: number }).n;
 
     const nodesByKind: Record<string, number> = {};
-    const kindRows = this.db.prepare('SELECT kind, COUNT(*) as n FROM nodes GROUP BY kind').all() as Array<{ kind: string; n: number }>;
+    const kindRows = this.db.prepare('SELECT kind, COUNT(*) as n FROM nodes GROUP BY kind').all() as unknown as Array<{ kind: string; n: number }>;
     for (const r of kindRows) nodesByKind[r.kind] = r.n;
 
     const edgesByKind: Record<string, number> = {};
-    const edgeKindRows = this.db.prepare('SELECT kind, COUNT(*) as n FROM edges GROUP BY kind').all() as Array<{ kind: string; n: number }>;
+    const edgeKindRows = this.db.prepare('SELECT kind, COUNT(*) as n FROM edges GROUP BY kind').all() as unknown as Array<{ kind: string; n: number }>;
     for (const r of edgeKindRows) edgesByKind[r.kind] = r.n;
 
     const nodesBySourceType: Record<string, number> = {};
-    const sourceRows = this.db.prepare('SELECT source_type, COUNT(*) as n FROM nodes GROUP BY source_type').all() as Array<{ source_type: string; n: number }>;
+    const sourceRows = this.db.prepare('SELECT source_type, COUNT(*) as n FROM nodes GROUP BY source_type').all() as unknown as Array<{ source_type: string; n: number }>;
     for (const r of sourceRows) nodesBySourceType[r.source_type] = r.n;
 
-    const staleCount = (this.db.prepare('SELECT COUNT(*) as n FROM files WHERE modified_at > indexed_at').get() as { n: number }).n;
+    const staleCount = (this.db.prepare('SELECT COUNT(*) as n FROM files WHERE modified_at > indexed_at').get() as unknown as { n: number }).n;
     const stalenessRatio = fileCount > 0 ? staleCount / fileCount : 0;
 
     const detectedFrameworks: string[] = [];
     try {
-      const fwStr = this.db.prepare("SELECT value FROM project_metadata WHERE key = 'detected_frameworks'").get() as { value: string } | undefined;
+      const fwStr = this.db.prepare("SELECT value FROM project_metadata WHERE key = 'detected_frameworks'").get() as unknown as { value: string } | undefined;
       if (fwStr) detectedFrameworks.push(...safeJsonParse<string[]>(fwStr.value, []));
     } catch { /* ignore */ }
 
@@ -524,19 +537,34 @@ export class KgQueryBuilder {
   // ── Search — FTS5 统一搜索 (D1.5: 输入消毒) ───────────────────────
 
   searchCodeFTS(query: string, opts: { limit?: number; kinds?: string[]; languages?: string[]; pathFilters?: string[] }): Array<UnifiedNode & { _bm25Score?: number }> {
-    // CJK 查询降级到 LIKE — unicode61 tokenizer 不支持 CJK 分词
     if (hasCjkChars(query)) {
       return this.searchNodesLike(query, opts);
     }
     const sanitized = sanitizeFtsQuery(query);
     if (!sanitized) return [];
+
+    const results = this.runCodeFtsQuery(sanitized, opts);
+    if (results.length > 0) return results;
+
+    // Multi-word AND returned 0 — retry with OR semantics
+    const tokens = sanitized.match(/"[^"]+"/g);
+    if (tokens && tokens.length > 1) {
+      const orQuery = tokens.join(' OR ');
+      const orResults = this.runCodeFtsQuery(orQuery, opts);
+      if (orResults.length > 0) return orResults;
+    }
+
+    return this.searchNodesLike(query, opts);
+  }
+
+  private runCodeFtsQuery(matchExpr: string, opts: { limit?: number; kinds?: string[]; languages?: string[] }): Array<UnifiedNode & { _bm25Score?: number }> {
     try {
       let sql = `
         SELECT n.*, bm25(code_fts, 0, 20, 5, 1, 2, 10) AS score
         FROM code_fts JOIN nodes n ON code_fts.id = n.id
         WHERE code_fts MATCH ? AND n.source_type = 'codegraph'
       `;
-      const params: unknown[] = [sanitized];
+      const params: (string | number | null)[] = [matchExpr];
       if (opts.kinds && opts.kinds.length > 0) {
         sql += ` AND n.kind IN (${opts.kinds.map(() => '?').join(',')})`;
         params.push(...opts.kinds);
@@ -546,53 +574,134 @@ export class KgQueryBuilder {
         params.push(...opts.languages);
       }
       sql += ` ORDER BY score LIMIT ?`;
-      params.push(opts.limit ?? 20);
+      params.push(clampQueryLimit(opts.limit, 20, 500));
 
-      const rows = this.db.prepare(sql).all(...params) as Array<NodeRow & { score?: number }>;
-      const results = rows.map(r => {
-        const node = rowToNode(r) as UnifiedNode & { _bm25Score?: number };
-        if (typeof r.score === 'number') node._bm25Score = -r.score;
-        return node;
-      });
-      if (results.length > 0) return results;
-      return this.searchNodesLike(query, opts);
-    } catch (err) {
-      if (process.env.DEBUG) console.warn('[KG] code FTS5 failed, LIKE fallback:', err);
-      return this.searchNodesLike(query, opts);
-    }
-  }
-
-  searchKnowledgeFTS(query: string, opts: { limit?: number; sourceTypes?: SourceType[] }): Array<UnifiedNode & { _bm25Score?: number }> {
-    // CJK 短查询降级 (D7.1: trigram 最小单元 3 字符)
-    const isCjkShort = /^[㐀-䶿一-鿿぀-ヿ가-힯]{1,2}$/.test(query.trim());
-    if (isCjkShort) {
-      return this.searchKnowledgeLike(query, opts);
-    }
-    const sanitized = sanitizeFtsQuery(query);
-    if (!sanitized) return [];
-    try {
-      let sql = `
-        SELECT n.*, bm25(knowledge_fts, 0, 20, 10, 1, 15, 10) AS score
-        FROM knowledge_fts JOIN nodes n ON knowledge_fts.id = n.id
-        WHERE knowledge_fts MATCH ? AND n.source_type != 'codegraph'
-      `;
-      const params: unknown[] = [sanitized];
-      if (opts.sourceTypes && opts.sourceTypes.length > 0) {
-        sql += ` AND n.source_type IN (${opts.sourceTypes.map(() => '?').join(',')})`;
-        params.push(...opts.sourceTypes);
-      }
-      sql += ` ORDER BY score LIMIT ?`;
-      params.push(opts.limit ?? 20);
-
-      const rows = this.db.prepare(sql).all(...params) as Array<NodeRow & { score?: number }>;
+      const rows = this.db.prepare(sql).all(...params) as unknown as Array<NodeRow & { score?: number }>;
       return rows.map(r => {
         const node = rowToNode(r) as UnifiedNode & { _bm25Score?: number };
         if (typeof r.score === 'number') node._bm25Score = -r.score;
         return node;
       });
     } catch (err) {
-      if (process.env.DEBUG) console.warn('[KG] knowledge FTS5 failed, LIKE fallback:', err);
+      if (isFtsCorruption(err)) {
+        process.stderr.write('[KG] MaestroGraph database corruption detected; run "maestro kg rebuild --confirm" if automatic repair fails.\n');
+      }
+      if (isRecoverableFtsFailure(err, 'code_fts') && this.tryRebuildCodeFts()) {
+        try {
+          return this.runCodeFtsQuery(matchExpr, opts);
+        } catch { /* rebuild didn't help — fall through */ }
+      }
+      if (process.env.MAESTRO_DEBUG === '1') console.warn('[KG] code FTS5 failed, LIKE fallback:', err);
+      return [];
+    }
+  }
+
+  private codeFtsRebuilt = false;
+  private tryRebuildCodeFts(): boolean {
+    if (this.codeFtsRebuilt) return false;
+    this.codeFtsRebuilt = true;
+    try {
+      this.conn.transaction(() => {
+        this.db.exec(`
+          DROP TABLE IF EXISTS code_fts;
+          CREATE VIRTUAL TABLE code_fts USING fts5(
+            id, name, qualified_name, docstring, signature, keywords,
+            tokenize = 'unicode61 remove_diacritics 2',
+            content = 'nodes', content_rowid = 'rowid'
+          );
+          INSERT INTO code_fts(rowid, id, name, qualified_name, docstring, signature, keywords)
+          SELECT rowid, id, name, qualified_name, docstring, signature, keywords
+          FROM nodes WHERE source_type = 'codegraph';
+        `);
+      });
+      if (process.env.MAESTRO_DEBUG === '1') console.warn('[KG] code_fts recreated from nodes table');
+      return true;
+    } catch (err) {
+      process.stderr.write(`[KG] code_fts rebuild failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      return false;
+    }
+  }
+
+  searchKnowledgeFTS(query: string, opts: { limit?: number; sourceTypes?: SourceType[] }): Array<UnifiedNode & { _bm25Score?: number }> {
+    const isCjkShort = /^[㐀-䶿一-鿿぀-ヿ가-힯]{1,2}$/.test(query.trim());
+    if (isCjkShort) {
       return this.searchKnowledgeLike(query, opts);
+    }
+    const sanitized = sanitizeFtsQuery(query);
+    if (!sanitized) return [];
+
+    const results = this.runKnowledgeFtsQuery(sanitized, opts);
+    if (results.length > 0) return results;
+
+    const tokens = sanitized.match(/"[^"]+"/g);
+    if (tokens && tokens.length > 1) {
+      const orQuery = tokens.join(' OR ');
+      const orResults = this.runKnowledgeFtsQuery(orQuery, opts);
+      if (orResults.length > 0) return orResults;
+    }
+
+    return this.searchKnowledgeLike(query, opts);
+  }
+
+  private runKnowledgeFtsQuery(matchExpr: string, opts: { limit?: number; sourceTypes?: SourceType[] }): Array<UnifiedNode & { _bm25Score?: number }> {
+    try {
+      let sql = `
+        SELECT n.*, bm25(knowledge_fts, 0, 20, 10, 1, 15, 10) AS score
+        FROM knowledge_fts JOIN nodes n ON knowledge_fts.id = n.id
+        WHERE knowledge_fts MATCH ? AND n.source_type != 'codegraph'
+      `;
+      const params: (string | number | null)[] = [matchExpr];
+      const sourceTypes = opts.sourceTypes?.slice(0, 6);
+      if (sourceTypes && sourceTypes.length > 0) {
+        sql += ` AND n.source_type IN (${sourceTypes.map(() => '?').join(',')})`;
+        params.push(...sourceTypes);
+      }
+      sql += ` ORDER BY score LIMIT ?`;
+      params.push(clampQueryLimit(opts.limit, 20, 500));
+
+      const rows = this.db.prepare(sql).all(...params) as unknown as Array<NodeRow & { score?: number }>;
+      return rows.map(r => {
+        const node = rowToNode(r) as UnifiedNode & { _bm25Score?: number };
+        if (typeof r.score === 'number') node._bm25Score = -r.score;
+        return node;
+      });
+    } catch (err) {
+      if (isFtsCorruption(err)) {
+        process.stderr.write('[KG] MaestroGraph database corruption detected; run "maestro kg rebuild --confirm" if automatic repair fails.\n');
+      }
+      if (isRecoverableFtsFailure(err, 'knowledge_fts') && this.tryRebuildKnowledgeFts()) {
+        try {
+          return this.runKnowledgeFtsQuery(matchExpr, opts);
+        } catch { /* rebuild didn't help */ }
+      }
+      if (process.env.MAESTRO_DEBUG === '1') console.warn('[KG] knowledge FTS5 failed, LIKE fallback:', err);
+      return [];
+    }
+  }
+
+  private knowledgeFtsRebuilt = false;
+  private tryRebuildKnowledgeFts(): boolean {
+    if (this.knowledgeFtsRebuilt) return false;
+    this.knowledgeFtsRebuilt = true;
+    try {
+      this.conn.transaction(() => {
+        this.db.exec(`
+          DROP TABLE IF EXISTS knowledge_fts;
+          CREATE VIRTUAL TABLE knowledge_fts USING fts5(
+            id, name, definition, body, aliases, keywords,
+            tokenize = 'trigram',
+            content = 'nodes', content_rowid = 'rowid'
+          );
+          INSERT INTO knowledge_fts(rowid, id, name, definition, body, aliases, keywords)
+          SELECT rowid, id, name, definition, body, aliases, keywords
+          FROM nodes WHERE source_type != 'codegraph';
+        `);
+      });
+      if (process.env.MAESTRO_DEBUG === '1') console.warn('[KG] knowledge_fts recreated from nodes table');
+      return true;
+    } catch (err) {
+      process.stderr.write(`[KG] knowledge_fts rebuild failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      return false;
     }
   }
 
@@ -602,11 +711,30 @@ export class KgQueryBuilder {
     return [...codeResults, ...knowledgeResults];
   }
 
-  // LIKE fallback — 当 FTS5 无结果时
-  private searchNodesLike(query: string, opts: { limit?: number; kinds?: string[]; languages?: string[] }): UnifiedNode[] {
-    const escaped = escapeLikePattern(query);
-    let sql = `SELECT * FROM nodes WHERE source_type = 'codegraph' AND (name LIKE ? ESCAPE '\\' OR qualified_name LIKE ? ESCAPE '\\' OR docstring LIKE ? ESCAPE '\\' OR signature LIKE ? ESCAPE '\\')`;
-    const params: unknown[] = [`%${escaped}%`, `%${escaped}%`, `%${escaped}%`, `%${escaped}%`];
+  private searchNodesLike(query: string, opts: { limit?: number; kinds?: string[]; languages?: string[] }): Array<UnifiedNode & { _bm25Score?: number }> {
+    const words = query.split(/\s+/).filter(w => w.length > 0);
+    const FIELDS = ['name', 'qualified_name', 'docstring', 'signature'] as const;
+
+    let whereClause: string;
+    const params: (string | number | null)[] = [];
+
+    if (words.length <= 1) {
+      const escaped = escapeLikePattern(query);
+      const fieldConds = FIELDS.map(f => `${f} LIKE ? ESCAPE '\\'`).join(' OR ');
+      whereClause = `(${fieldConds})`;
+      params.push(...FIELDS.map(() => `%${escaped}%`));
+    } else {
+      // Each word must match at least one field (AND across words, OR across fields)
+      const wordClauses = words.map(w => {
+        const escaped = escapeLikePattern(w);
+        const fieldConds = FIELDS.map(f => `${f} LIKE ? ESCAPE '\\'`).join(' OR ');
+        params.push(...FIELDS.map(() => `%${escaped}%`));
+        return `(${fieldConds})`;
+      });
+      whereClause = wordClauses.join(' AND ');
+    }
+
+    let sql = `SELECT * FROM nodes WHERE source_type = 'codegraph' AND ${whereClause}`;
     if (opts.kinds && opts.kinds.length > 0) {
       sql += ` AND kind IN (${opts.kinds.map(() => '?').join(',')})`;
       params.push(...opts.kinds);
@@ -615,23 +743,52 @@ export class KgQueryBuilder {
       sql += ` AND language IN (${opts.languages.map(() => '?').join(',')})`;
       params.push(...opts.languages);
     }
+    // LIKE has no bm25 — fetch a wider candidate pool, then rank by the
+    // multi-signal relevance score (name match > path > kind) — G-C5.
+    const requested = clampQueryLimit(opts.limit, 20, 500);
     sql += ` ORDER BY name LIMIT ?`;
-    params.push(opts.limit ?? 20);
-    const rows = this.db.prepare(sql).all(...params) as NodeRow[];
-    return rows.map(rowToNode);
+    params.push(Math.min(requested * 3, 500));
+    const rows = this.db.prepare(sql).all(...params) as unknown as NodeRow[];
+    const scored = rows.map(r => {
+      const node = rowToNode(r) as UnifiedNode & { _bm25Score?: number };
+      node._bm25Score = computeScore(node, query);
+      return node;
+    });
+    scored.sort((a, b) => (b._bm25Score ?? 0) - (a._bm25Score ?? 0));
+    return scored.slice(0, requested);
   }
 
   private searchKnowledgeLike(query: string, opts: { limit?: number; sourceTypes?: SourceType[] }): UnifiedNode[] {
-    const escaped = escapeLikePattern(query);
-    let sql = `SELECT * FROM nodes WHERE source_type != 'codegraph' AND (name LIKE ? ESCAPE '\\' OR definition LIKE ? ESCAPE '\\' OR aliases LIKE ? ESCAPE '\\' OR keywords LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')`;
-    const params: unknown[] = [`%${escaped}%`, `%${escaped}%`, `%${escaped}%`, `%${escaped}%`, `%${escaped}%`];
-    if (opts.sourceTypes && opts.sourceTypes.length > 0) {
-      sql += ` AND source_type IN (${opts.sourceTypes.map(() => '?').join(',')})`;
-      params.push(...opts.sourceTypes);
+    const words = query.split(/\s+/).filter(w => w.length > 0);
+    const FIELDS = ['name', 'definition', 'aliases', 'keywords', 'body'] as const;
+
+    let whereClause: string;
+    const params: (string | number | null)[] = [];
+
+    if (words.length <= 1) {
+      const escaped = escapeLikePattern(query);
+      const fieldConds = FIELDS.map(f => `${f} LIKE ? ESCAPE '\\'`).join(' OR ');
+      whereClause = `(${fieldConds})`;
+      params.push(...FIELDS.map(() => `%${escaped}%`));
+    } else {
+      const wordClauses = words.map(w => {
+        const escaped = escapeLikePattern(w);
+        const fieldConds = FIELDS.map(f => `${f} LIKE ? ESCAPE '\\'`).join(' OR ');
+        params.push(...FIELDS.map(() => `%${escaped}%`));
+        return `(${fieldConds})`;
+      });
+      whereClause = wordClauses.join(' AND ');
+    }
+
+    let sql = `SELECT * FROM nodes WHERE source_type != 'codegraph' AND ${whereClause}`;
+    const sourceTypes = opts.sourceTypes?.slice(0, 6);
+    if (sourceTypes && sourceTypes.length > 0) {
+      sql += ` AND source_type IN (${sourceTypes.map(() => '?').join(',')})`;
+      params.push(...sourceTypes);
     }
     sql += ` ORDER BY name LIMIT ?`;
-    params.push(opts.limit ?? 20);
-    const rows = this.db.prepare(sql).all(...params) as NodeRow[];
+    params.push(clampQueryLimit(opts.limit, 20, 500));
+    const rows = this.db.prepare(sql).all(...params) as unknown as NodeRow[];
     return rows.map(rowToNode);
   }
 }

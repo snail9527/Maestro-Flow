@@ -1,3 +1,5 @@
+
+
 # PlanEx Pipeline Definitions
 
 ## Pipeline Diagram
@@ -61,18 +63,18 @@ callback <-- executor impl_complete ---------------------+
 | Condition | Execution Method |
 |-----------|-----------------|
 | `--exec=codex` specified | codex |
-| `--exec=gemini` specified | gemini |
-| `-y` or `--yes` flag present | Auto (default gemini) |
+| `--exec=agy` specified | agy |
+| `-y` or `--yes` flag present | Auto (default agy) |
 | No flags (interactive) | AskUserQuestion -> user choice |
-| Auto + task_count <= 3 | gemini |
+| Auto + task_count <= 3 | agy |
 | Auto + task_count > 3 | codex |
 
 ## Input Type Detection
 
 | Input Pattern | Type | Action |
 |--------------|------|--------|
-| `ISS-\d{8}-\d{6}` pattern | Issue IDs | Use directly |
-| `--text '...'` flag | Text requirement | Create issues via `ccw issue create` |
+| `ISS-\d{8}-\d{3}` pattern | Issue IDs | Use directly |
+| `--text '...'` flag | Text requirement | Create issues via `maestro issue create` |
 | `--plan <path>` flag | Plan file | Read file, parse phases, batch create issues |
 
 ## Checkpoints

@@ -131,11 +131,12 @@ maestro wiki list --type spec --json    # 列出所有 spec 条目
 | Knowhow 漂移 | recipe/template 与实际代码实现不一致 |
 | Artifact 残留 | 临时 scratch 文件未清理 |
 
-### 三态决策模型
+### 四态决策模型
 
 | 状态 | 动作 | 适用场景 |
 |------|------|----------|
 | **keep** | 保留不变 | 条目仍然准确有效 |
+| **contest** | 标记矛盾 | 检测到矛盾，需进一步审查 |
 | **deprecate** | 标记废弃 | 条目部分过时，保留参考价值 |
 | **delete** | 移入 `.trash/` | 条目完全失效，无保留价值 |
 
@@ -147,7 +148,9 @@ maestro wiki list --type spec --json    # 列出所有 spec 条目
 | `--level P0\|P1\|P2` | 严重级别过滤 |
 | `--since YYYY-MM-DD` | 仅审计此后修改的条目 |
 | `--milestone <name>` | 限定到特定里程碑 |
-| `--interactive` | 逐条三态决策面板（默认） |
+| `--timeline T1..T6` | Timeline 产物过滤 |
+| `--include-archive` | 包含归档条目 |
+| `--interactive` | 逐条四态决策面板（默认） |
 | `--mark` | 非交互：仅标记不删除 |
 | `--delete` | 非交互：软删除到 `.trash/` |
 | `--purge` | 非交互：物理擦除（仅 artifact，需二次确认） |
@@ -224,3 +227,76 @@ maestro wiki list --type spec --json    # 列出所有 spec 条目
 - manifest 文件不存在时，可手动指定版本并使用 `--no-tag`
 - 推送失败时可手动执行 `git push --follow-tags`
 - `--dry-run` 不写入任何文件或创建 tag
+
+---
+
+## 六、Boundary Grill 协议
+
+嵌入式迷你审查协议，在管线阶段间触发，用于检测和解决冲突。
+
+### 冲突类型
+
+| 类型 | 代码 | 说明 |
+|------|------|------|
+| Scope Breach | **RSC** | 任务超出当前阶段职责范围 |
+| Module Boundary | **MOD** | 跨模块修改未遵循约定 |
+| Decision Conflict | **DEC** | 与已有决策或规范冲突 |
+
+### 触发条件
+
+Boundary Grill 在以下场景自动触发：
+
+- `maestro-analyze` 完成后
+- `maestro-plan` 完成后
+- `maestro-brainstorm` 完成后
+- `maestro-collab` 阶段间
+- 管线阶段间的 mini-grill 审查
+
+### 协议流程
+
+```
+检测冲突 → 最多 3x3 问答 → 冲突分类 → 解决方案 → 记录决策
+```
+
+1. **检测**: 自动扫描产物和上下文，识别潜在冲突
+2. **问答**: 最多 3 轮，每轮最多 3 个问题
+3. **分类**: 将冲突归类为 RSC/MOD/DEC
+4. **解决**: 生成解决方案或升级决策
+5. **记录**: 写入决策日志
+
+### Auto Mode
+
+```bash
+# 使用 -y 标志启用 Auto Mode（自动回答，基于代码分析）
+/maestro-analyze "auth module" -y
+```
+
+Auto Mode 下，Grill 使用代码分析结果自动回答问题，无需人工交互。
+
+### 输出格式
+
+```json
+{
+  "conflicts": [
+    {
+      "type": "RSC",
+      "description": "任务修改了 auth 模块但当前阶段是 database 优化",
+      "resolution": "将 auth 修改移至下一阶段",
+      "severity": "medium"
+    }
+  ],
+  "questions_asked": 2,
+  "auto_answered": true
+}
+```
+
+### 集成命令
+
+| 命令 | 集成方式 |
+|------|----------|
+| `maestro-analyze` | 分析完成后触发 |
+| `maestro-plan` | 计划完成后触发 |
+| `maestro-brainstorm` | 头脑风暴完成后触发 |
+| `maestro-collab` | 协作阶段间触发 |
+
+> 完整协议定义见 `workflows/boundary-grill.md`

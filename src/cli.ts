@@ -9,7 +9,7 @@ process.emit = function (event: string, ...args: unknown[]) {
   return _origEmit.call(process, event, ...args);
 };
 
-import { Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import { getPackageVersion } from './utils/get-version.js';
 
 const program = new Command();
@@ -30,14 +30,18 @@ program
 const commandLoaders: Record<string, () => Promise<(p: Command) => void>> = {
   serve:      async () => (await import('./commands/serve.js')).registerServeCommand,
   run:        async () => (await import('./commands/run.js')).registerRunCommand,
+  session:    async () => (await import('./commands/session.js')).registerSessionCommand,
   ext:        async () => (await import('./commands/ext.js')).registerExtCommand,
   tool:       async () => (await import('./commands/tool.js')).registerToolCommand,
   cli:        async () => (await import('./commands/cli.js')).registerCliCommand,
   install:    async () => (await import('./commands/install.js')).registerInstallCommand,
   uninstall:  async () => (await import('./commands/uninstall.js')).registerUninstallCommand,
+  plugin:     async () => (await import('./commands/plugin.js')).registerPluginCommand,
   view:       async () => (await import('./commands/view.js')).registerViewCommand,
   stop:       async () => (await import('./commands/stop.js')).registerStopCommand,
+
   spec:       async () => (await import('./commands/spec.js')).registerSpecCommand,
+  issue:      async () => (await import('./commands/issue.js')).registerIssueCommand,
   wiki:       async () => (await import('./commands/wiki.js')).registerWikiCommand,
   hooks:      async () => (await import('./commands/hooks.js')).registerHooksCommand,
   coordinate: async () => (await import('./commands/coordinate.js')).registerCoordinateCommand,
@@ -62,22 +66,90 @@ const commandLoaders: Record<string, () => Promise<(p: Command) => void>> = {
   'command-help': async () => (await import('./commands/command-help.js')).registerCommandHelpCommand,
   ch: async () => (await import('./commands/command-help.js')).registerCommandHelpCommand,
   kg:         async () => (await import('./graph/kg/surface/cli.js')).registerKgCommands,
+  load:       async () => (await import('./commands/load.js')).registerLoadCommand,
   search:     async () => (await import('./commands/search.js')).registerSearchCommand,
+  'search-daemon': async () => (await import('./commands/search.js')).registerSearchCommand,
+  'search-start-daemon': async () => (await import('./commands/search.js')).registerSearchCommand,
+  embedding:  async () => (await import('./commands/search.js')).registerSearchCommand,
   domain:     async () => (await import('./commands/domain.js')).registerDomainCommand,
   workspace:  async () => (await import('./commands/workspace.js')).registerWorkspaceCommand,
   ws:         async () => (await import('./commands/workspace.js')).registerWorkspaceCommand,
+  explore:    async () => (await import('./commands/explore.js')).registerExploreCommand,
+  moa:        async () => (await import('./commands/moa.js')).registerMoaCommand,
+  timeline:   async () => (await import('./commands/timeline.js')).registerTimelineCommand,
 };
 
 // Determine which command is being invoked from argv (if any)
 const argv = process.argv.slice(2);
 const requestedCommand = argv.find(a => !a.startsWith('-'));
+const runMachineSubcommands = new Set([
+  'create', 'new', 'next', 'complete', 'brief', 'recall', 'recall-confirm', 'fork', 'import',
+  'check', 'decide', 'seal-session', 'accept-reuse',
+]);
+const sessionMachineSubcommands = new Set(['create', 'resolve', 'resume', 'chain', 'meta']);
+const requestedCommandIndex = requestedCommand ? argv.indexOf(requestedCommand) : -1;
+const requestedSubcommand = requestedCommandIndex >= 0 ? argv[requestedCommandIndex + 1] : undefined;
+const runMachineMode = argv.includes('--json') && (
+  (requestedCommand === 'run' && runMachineSubcommands.has(requestedSubcommand ?? ''))
+  || (requestedCommand === 'session' && sessionMachineSubcommands.has(requestedSubcommand ?? ''))
+);
+
+type MachineOperation =
+  | 'create' | 'next' | 'complete' | 'brief' | 'recall' | 'resolve' | 'resume' | 'fork' | 'import'
+  | 'check' | 'decide' | 'seal-session' | 'chain-insert' | 'chain-replace' | 'chain-skip' | 'meta-update'
+  | 'accept-reuse';
+
+function inferMachineOperation(command: 'run' | 'session', args: string[]): MachineOperation {
+  const commandIndex = args.indexOf(command);
+  const tail = args.slice(commandIndex + 1);
+  const primaryIndex = tail.findIndex(token => !token.startsWith('-'));
+  const primary = primaryIndex >= 0 ? tail[primaryIndex] : null;
+  if (command === 'run') {
+    if (primary === 'new') return 'create';
+    if (primary === 'recall-confirm') return 'recall';
+    const operations: MachineOperation[] = [
+      'create', 'next', 'complete', 'brief', 'recall', 'fork', 'import', 'check', 'decide', 'seal-session',
+      'accept-reuse',
+    ];
+    return operations.includes(primary as MachineOperation) ? primary as MachineOperation : 'next';
+  }
+  if (primary === 'resolve' || primary === 'resume') return primary;
+  if (primary === 'create') return 'create';
+  if (primary === 'chain') {
+    const mutation = tail.slice(primaryIndex + 1).find(token => !token.startsWith('-'));
+    if (mutation === 'insert' || mutation === 'replace' || mutation === 'skip') return `chain-${mutation}`;
+  }
+  if (primary === 'meta') return 'meta-update';
+  return 'resolve';
+}
+
+if (runMachineMode) {
+  program.exitOverride();
+  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+}
 
 if (requestedCommand && requestedCommand in commandLoaders) {
   // Load only the requested command module
   const register = await commandLoaders[requestedCommand]();
   register(program);
+} else if (requestedCommand && !(requestedCommand in commandLoaders)) {
+  // Bare intent or unknown command — guide to correct skill invocation
+  console.error(`[maestro] Unknown command: "${requestedCommand}"`);
+  console.error();
+  console.error('  The maestro CLI does not accept bare intent text.');
+  console.error('  Use the platform-specific skill invocation instead:');
+  console.error();
+  console.error('    Claude Code:  /maestro "your intent"');
+  console.error('    Codex:        $maestro "your intent"');
+  console.error();
+  console.error('  Or use a CLI subcommand directly:');
+  console.error('    maestro ralph next|complete|skills|check|session');
+  console.error('    maestro delegate "prompt" --to <tool>');
+  console.error('    maestro explore "prompt"');
+  console.error();
+  process.exit(1);
 } else {
-  // No command or unknown command (e.g., --help, --version) — register all.
+  // No command (e.g., --help, --version) — register all.
   // Multiple keys may point to the same register function (e.g. a command and
   // its alias share one module); deduplicate so we register each module once.
   const seen = new Set<(p: Command) => void>();
@@ -89,4 +161,17 @@ if (requestedCommand && requestedCommand in commandLoaders) {
   }
 }
 
-await program.parseAsync();
+try {
+  await program.parseAsync();
+} catch (error) {
+  if (!runMachineMode || !(error instanceof CommanderError)) throw error;
+  const operation = inferMachineOperation(requestedCommand as 'run' | 'session', argv);
+  const { createRunResponseError, emitRunResponse } = await import('./run/response.js');
+  emitRunResponse(createRunResponseError({
+    operation,
+    exit_code: 2,
+    code: 'COMMANDER_USAGE',
+    message: error.message,
+    details: { commander_code: error.code, argv },
+  }));
+}

@@ -20,7 +20,7 @@ export function registerDomainCommand(program: Command): void {
   // ── init ──────────────────────────────────────────────────────────────
   domain
     .command('init')
-    .description('Initialize .workflow/domain/ with empty glossary.json')
+    .description('Initialize .workflow/domain/ with empty glossary.yaml')
     .option('--project <name>', 'Project name for glossary metadata')
     .action(async (opts) => {
       const { initDomain } = await import('../tools/domain-loader.js');
@@ -71,8 +71,11 @@ export function registerDomainCommand(program: Command): void {
       console.log(`  Tier:        ${term.tier}`);
 
       try {
-        addTerm(getWorkflowRoot(), term);
+        const wfRoot = getWorkflowRoot();
+        addTerm(wfRoot, term);
         console.log(`\n✓ Registered: ${canonical}`);
+        const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+        invalidateSearchIndex(wfRoot).catch(() => {});
       } catch (e) {
         console.error(`\n✗ Failed: ${(e as Error).message}`);
         process.exit(1);
@@ -105,8 +108,12 @@ export function registerDomainCommand(program: Command): void {
       }
 
       console.log(`Domain terms (${terms.length}):\n`);
-      const maxId = Math.max(...terms.map(t => t.id.length), 4);
-      const maxCan = Math.max(...terms.map(t => t.canonical.length), 9);
+      let maxId = 4;
+      let maxCan = 9;
+      for (const t of terms) {
+        if (t.id.length > maxId) maxId = t.id.length;
+        if (t.canonical.length > maxCan) maxCan = t.canonical.length;
+      }
       console.log(`  ${'ID'.padEnd(maxId)}  ${'Canonical'.padEnd(maxCan)}  Tier       Status      Definition`);
       console.log(`  ${'─'.repeat(maxId)}  ${'─'.repeat(maxCan)}  ${'─'.repeat(10)} ${'─'.repeat(11)} ${'─'.repeat(40)}`);
       for (const t of terms) {
@@ -222,8 +229,11 @@ export function registerDomainCommand(program: Command): void {
         return;
       }
 
-      updateTerm(getWorkflowRoot(), id, updates as any);
+      const wfRoot = getWorkflowRoot();
+      updateTerm(wfRoot, id, updates as any);
       console.log(`✓ Updated: ${term.canonical}`);
+      const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+      invalidateSearchIndex(wfRoot).catch(() => {});
     });
 
   // ── remove ────────────────────────────────────────────────────────────
@@ -233,12 +243,15 @@ export function registerDomainCommand(program: Command): void {
     .action(async (id: string) => {
       const { removeTerm } = await import('../tools/domain-loader.js');
       try {
-        const { warnings } = removeTerm(getWorkflowRoot(), id);
+        const wfRoot = getWorkflowRoot();
+        const { warnings } = removeTerm(wfRoot, id);
         if (warnings.length > 0) {
           console.warn('Warnings:');
           for (const w of warnings) console.warn(`  ${w}`);
         }
         console.log(`✓ Removed: ${id}`);
+        const { invalidateSearchIndex } = await import('../search/daemon-client.js');
+        invalidateSearchIndex(wfRoot).catch(() => {});
       } catch (e) {
         console.error(`✗ Failed: ${(e as Error).message}`);
         process.exit(1);
@@ -408,7 +421,8 @@ export function registerDomainCommand(program: Command): void {
           }
           const domainPath = join(getWorkflowRoot(), 'domain');
           mkdirSync(domainPath, { recursive: true });
-          writeFileSync(join(domainPath, 'glossary.json'), JSON.stringify(glossary, null, 2) + '\n', 'utf-8');
+          const YAML = await import('yaml');
+          writeFileSync(join(domainPath, 'glossary.yaml'), YAML.default.stringify(glossary, { lineWidth: 120 }), 'utf-8');
         } finally {
           lock.release();
         }
@@ -439,13 +453,13 @@ export function registerDomainCommand(program: Command): void {
   // ── validate ──────────────────────────────────────────────────────────
   domain
     .command('validate')
-    .description('Validate glossary.json schema and relationships')
+    .description('Validate glossary schema and relationships')
     .action(async () => {
       const { validateGlossaryFile } = await import('../tools/domain-loader.js');
       const { errors, warnings } = validateGlossaryFile(getWorkflowRoot());
 
       if (errors.length === 0 && warnings.length === 0) {
-        console.log('✓ glossary.json is valid.');
+        console.log('✓ glossary is valid.');
         return;
       }
 

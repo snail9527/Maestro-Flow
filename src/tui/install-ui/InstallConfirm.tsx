@@ -43,7 +43,7 @@ function hookSummary(sel?: HooksSelection, fallbackLevel?: HookLevel): string {
 export function InstallConfirm({ config, onConfirm, onBack }: InstallConfirmProps) {
   useInput((_input, key) => {
     if (key.return) onConfirm();
-    if (key.escape) onBack();
+    if (key.escape || key.leftArrow) onBack();
   });
 
   const target = config.mode === 'global'
@@ -94,15 +94,16 @@ export function InstallConfirm({ config, onConfirm, onBack }: InstallConfirmProp
     <Box flexDirection="column">
       <Text bold color={C.primary}>{t.install.confirmReady}</Text>
 
-      <Box marginTop={1}>
-        <Text bold>{t.install.confirmLabelMode} </Text>
-        <Text>{config.mode}</Text>
-        <Text dimColor>  → {target}</Text>
+      <Box marginTop={1} gap={1}>
+        <Text bold>{t.install.confirmLabelMode}</Text>
+        <Text color={C.primary}>{config.mode}</Text>
+        <Text dimColor>→</Text>
+        <Text dimColor>{target}</Text>
       </Box>
 
       {/* Will Install section */}
       <Box flexDirection="column" {...BORDER.success} paddingX={1} marginTop={1}>
-        <Text bold color={C.success}>{t.install.confirmWillInstall}</Text>
+        <Text bold color={C.success}>{t.install.confirmWillInstall} ({willInstall.length})</Text>
         {willInstall.map((item) => (
           <Row key={item.label} label={item.label} value={item.value} valueColor={C.success} />
         ))}

@@ -7,10 +7,6 @@ message_types: [state_update]
 
 # Code Refactorer
 
-> **inner_loop: dynamic** — Dispatch sets per-task: `true` for single mode (one REFACTOR task with iterative fix cycles), `false` for fan-out/independent modes (REFACTOR-B01..N run as separate parallel workers). When false, each branch gets its own worker.
-
-Implement architecture refactoring changes following the design plan. For FIX tasks, apply targeted corrections based on review/validation feedback.
-
 ## Modes
 
 | Mode | Task Prefix | Trigger | Focus |
@@ -22,12 +18,12 @@ Implement architecture refactoring changes following the design plan. For FIX ta
 
 | Input | Source | Required |
 |-------|--------|----------|
-| Refactoring plan | <session>/artifacts/refactoring-plan.md | Yes (REFACTOR, no branch) |
-| Branch refactoring detail | <session>/artifacts/branches/B{NN}/refactoring-detail.md | Yes (REFACTOR with branch) |
-| Pipeline refactoring plan | <session>/artifacts/pipelines/{P}/refactoring-plan.md | Yes (REFACTOR with pipeline) |
+| Refactoring plan | {run_dir}/outputs/refactoring-plan.md | Yes (REFACTOR, no branch) |
+| Branch refactoring detail | {run_dir}/outputs/branches/B{NN}/refactoring-detail.md | Yes (REFACTOR with branch) |
+| Pipeline refactoring plan | {run_dir}/outputs/pipelines/{P}/refactoring-plan.md | Yes (REFACTOR with pipeline) |
 | Review/validation feedback | From task description | Yes (FIX) |
-| .msg/meta.json | <session>/wisdom/.msg/meta.json | Yes |
-| Wisdom files | <session>/wisdom/patterns.md | No |
+| .msg/meta.json | {run_dir}/work/team/wisdom/.msg/meta.json | Yes |
+| Wisdom files | {run_dir}/work/team/wisdom/patterns.md | No |
 | Context accumulator | From prior REFACTOR/FIX tasks | Yes (inner loop) |
 
 1. Extract session path and task mode (REFACTOR or FIX) from task description
@@ -40,9 +36,9 @@ Implement architecture refactoring changes following the design plan. For FIX ta
 | Neither present | - | Single mode -- load full refactoring plan |
 
 3. **Load refactoring context by mode**:
-   - **Single mode (no branch)**: Read `<session>/artifacts/refactoring-plan.md` -- extract ALL priority-ordered changes
-   - **Fan-out branch**: Read `<session>/artifacts/branches/B{NN}/refactoring-detail.md` -- extract ONLY this branch's refactoring (single REFACTOR-ID)
-   - **Independent pipeline**: Read `<session>/artifacts/pipelines/{P}/refactoring-plan.md` -- extract this pipeline's plan
+   - **Single mode (no branch)**: Read `{run_dir}/outputs/refactoring-plan.md` -- extract ALL priority-ordered changes
+   - **Fan-out branch**: Read `{run_dir}/outputs/branches/B{NN}/refactoring-detail.md` -- extract ONLY this branch's refactoring (single REFACTOR-ID)
+   - **Independent pipeline**: Read `{run_dir}/outputs/pipelines/{P}/refactoring-plan.md` -- extract this pipeline's plan
 
 4. For FIX: parse review/validation feedback for specific issues to address
 5. Use `explore` CLI tool to load implementation context for target files
@@ -59,7 +55,7 @@ Implementation backend selection:
 
 | Backend | Condition | Method |
 |---------|-----------|--------|
-| CLI | Multi-file refactoring with clear plan | maestro delegate --to gemini --mode write |
+| CLI | Multi-file refactoring with clear plan | maestro delegate --to agy --mode write |
 | Direct | Single-file changes or targeted fixes | Inline Edit/Write tools |
 
 For REFACTOR tasks:
@@ -99,6 +95,6 @@ Append to context_accumulator for next REFACTOR/FIX task (single/inner-loop mode
 - Any discovered patterns or caveats for subsequent iterations
 
 **Branch output paths**:
-- Single: write artifacts to `<session>/artifacts/`
-- Fan-out: write artifacts to `<session>/artifacts/branches/B{NN}/`
-- Independent: write artifacts to `<session>/artifacts/pipelines/{P}/`
+- Single: write artifacts to `{run_dir}/outputs/`
+- Fan-out: write artifacts to `{run_dir}/outputs/branches/B{NN}/`
+- Independent: write artifacts to `{run_dir}/outputs/pipelines/{P}/`

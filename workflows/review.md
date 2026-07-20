@@ -1,446 +1,311 @@
-# Review Workflow
+---
+name: review
+prepare: review
+commands: [quality-review]
+session-mode: inherited
+---
 
-Tiered multi-dimensional code review with parallel agents, severity classification, and iterative deep-dive.
+# Workflow: Review
+
+Layered multi-dimensional code review — parallel agents, severity grading, iterative deep-dive. Artifacts unified as `review-findings.json`; findings handed to test or plan.
 
 ---
 
-## Spec Compliance Pre-Check (Phase 0)
+## Step 0: Spec Compliance pre-check
 
-1. Load `convergence.criteria[]` from each `.task/TASK-{NNN}.json`
-2. For each criterion, grep for functions/endpoints/components named in the criterion
-3. Classify: **MET** (evidence found) | **UNMET** (not implemented) | **PARTIAL** (incomplete)
+1. Read acceptance criteria from each execution task's `convergence.criteria[]`.
+2. For each criterion, grep for the function/endpoint/component named in it.
+3. Classify: **MET** (evidence found) | **UNMET** (not implemented) | **PARTIAL** (incomplete).
 
 | Result | Action |
-|--------|--------|
-| All MET | Proceed to Step 1 (dimensional review) |
-| Any UNMET | Report as spec_compliance_failures, add to findings with severity=critical, dimension="spec-compliance" |
-| Any PARTIAL | Report with severity=high |
+|------|------|
+| all MET | proceed to Step 1 dimension review |
+| any UNMET | record as spec_compliance_failure, add to findings, severity=critical, dimension="spec-compliance" |
+| any PARTIAL | record into findings, severity=high |
 
 ---
 
-## Receiving Review Feedback
+## Step 1: Collect changed files
 
-1. **Verify before implementing** — Check each suggestion against codebase reality.
-2. **Technical acknowledgment only** — No performative agreement. State the fix or provide technical reasoning.
-3. **Push back when wrong** — If a suggestion would break functionality or violate constraints, explain why with evidence.
-4. **YAGNI check** — Verify suggested features/abstractions are actually needed.
-5. **Implement one at a time** — Fix one item, test, then next. NEVER batch-implement all feedback.
-6. **Priority order** — Blocking (breaks, security) → Simple (typos, imports) → Complex (refactoring, logic).
+Parse the change manifest from `current-execution`: created/modified/deleted paths from task summaries + `files[].path` from task JSON (action create/modify). Deduplicate.
 
----
+Filter: keep files that exist on disk and are not in the exclusion patterns. Exclude `node_modules/**`, `vendor/**`, `dist/**`, `build/**`, `*.lock`, `*.min.js`, `*.min.css`, `.workflow/**`, `.claude/**`.
 
-## Phase Resolution
-
-```
-Input: <phase> argument (number or slug)
-
-Resolve phase from .workflow/state.json artifacts (type=execute, match by phase number or slug)
-→ PHASE_DIR = ".workflow/" + artifact.path
-→ Error if not found or no completed tasks
-```
+Empty changed files → abort (E004).
 
 ---
 
-## Flag Processing
-
-| Flag | Effect |
-|------|--------|
-| `--level quick\|standard\|deep` | Explicit review level (default: auto-detect) |
-| `--dimensions <list>` | Comma-separated subset (overrides level defaults) |
-| `--skip-specs` | Skip loading project specs |
-
----
-
-## Review Levels
-
-| Aspect | Quick | Standard | Deep |
-|--------|-------|----------|------|
-| **Trigger** | `--level quick`, or auto ≤3 files | Default, or auto 4-19 files | `--level deep`, or auto ≥20 files / critical phase |
-| **Dimensions** | correctness, security | All 6 | All 6 |
-| **Execution** | Inline (no agents) | Parallel agents | Parallel agents |
-| **Deep-Dive** | None | Auto (if critical > 0) | Forced, max 3 iterations |
-| **Issue Creation** | Critical only | Critical + High | Critical + High + Medium |
-| **Cross-File Analysis** | None | Critical files (3+ dims) | Full impact radius |
-
----
-
-## Step 1: Collect Changed Files
-
-### 1a: Extract from task summaries
+## Step 2: Determine review level and dimensions
 
 ```
-Collect changed_files from PHASE_DIR:
-  - .summaries/TASK-{NNN}-summary.md → extract referenced file paths (created/modified/deleted)
-  - .task/TASK-{NNN}.json → extract files[].path where action is create|modify
-Deduplicate result
-```
+level = --level value, or auto:
+  ≤3 files → quick | ≥20 files or critical session → deep | otherwise → standard
 
-### 1b: Validate files exist
-
-```
-review_files = changed_files filtered to: exists on disk AND not in excluded patterns
-
-Excluded patterns:
-  - node_modules/**, vendor/**, dist/**, build/**
-  - *.lock, *.min.js, *.min.css
-  - .workflow/**, .claude/**
-```
-
-### 1c: Error if empty
-
-```
-Abort E004 if review_files is empty
-```
-
----
-
-## Step 2: Determine Review Level
-
-```
-level = --level flag value, or auto-detect:
-  ≤3 files → quick | ≥20 files or critical phase → deep | otherwise → standard
-
-Log: "Review level: {level} ({file_count} files)"
-```
-
-### Determine dimensions
-
-```
-dimensions = --dimensions flag (comma-separated), or level defaults:
+dimensions = --dimensions value, or level default:
   quick → [correctness, security]
-  standard|deep → [correctness, security, performance, architecture, maintainability, best-practices]
+  standard | deep → [correctness, security, performance, architecture, maintainability, best-practices]
 ```
 
 ---
 
-## Step 3: Load Project Specs
-
-**Skip if `--skip-specs`.**
+## Step 3: Load specs (unless --skip-specs)
 
 ```
 specs_content = maestro spec load --category review
-→ Pass to reviewer agents as quality standards context
+→ passed to the reviewer agent as the quality standard
 ```
 
 ---
 
-## Step 4: Load Review Context
-
-Build context object for reviewer agents:
+## Step 4: Build review context
 
 ```
 review_context = {
-  phase_goal: index.json.goal || index.json.description,
-  success_criteria: index.json.success_criteria,
-  tech_stack: detect from package.json / pyproject.toml / go.mod / Cargo.toml,
-  specs: specs_content (from Step 3),
-  verification_gaps: load from ${PHASE_DIR}/verification.json .gaps if exists, else []
+  session_goal:      goal / description from report.md frontmatter,
+  success_criteria:  acceptance criteria,
+  tech_stack:        detected from package.json / pyproject.toml / go.mod / Cargo.toml,
+  specs:             specs_content (Step 3),
+  verification_gaps: gaps from latest-verification (if any), otherwise []
 }
 ```
 
 ---
 
-## Step 5: Execute Review
+## Step 5: Run review
 
-### Quick Level — Inline Scan
+### Quick — inline scan
 
-```
-Scan each review_file against each dimension, collecting findings:
-
-  correctness: unhandled null/undefined, missing error propagation, type mismatches,
-               off-by-one, missing boundary checks, unreachable code, logic contradictions
-  security:    SQL/command injection, hardcoded secrets/keys/passwords,
-               missing input validation, XSS vectors
-
-Each finding: { id: "{PREFIX}-{NNN}", dimension, severity, title, file, line, snippet,
-               description, impact, suggestion }
-```
-
-**After inline scan, skip to Step 6.**
-
-### Standard Level — Parallel Agent Review
+Scan each file per dimension, collect findings:
 
 ```
-Per dimension → spawn workflow-reviewer agent (all parallel):
-  Context: dimension, phase_name, phase_goal, review_files, success_criteria,
-           tech_stack, specs_content, verification_gaps
-  Instructions:
-    - Read each file, analyze for {dimension}-specific issues only
-    - Classify: critical / high / medium / low
-    - Return JSON array: id, dimension, severity, title, file, line, snippet,
-      description, impact, suggestion, spec_violation (if applicable)
-    - Top 20 findings by severity, each with file:line evidence
+correctness: unhandled null/undefined, missing error propagation, type mismatch,
+             off-by-one, missing boundary check, unreachable code, logic contradiction
+security:    SQL/command injection, hardcoded secrets/passwords, missing input validation, XSS vectors
+
+finding: { id, dimension, severity, title, file, line, snippet,
+           description, impact, suggestion }
 ```
 
-Launch ALL dimension agents in a single message. Collect dimension_results (JSON findings array). Log W001 on agent failure, continue with partial results.
+After scanning, jump directly to Step 6.
 
-### Deep Level — Enhanced Agent Review
+### Standard — parallel agent review
+
+**Mandatory, cannot be substituted with manual Read/Grep**: dispatch one workflow-reviewer agent per dimension (all parallel, launched in a single message).
 
 ```
-Same as standard, with deep-mode enhancements:
-  - Also read direct imports for context
-  - Trace callers/dependents for critical/high findings
-  - Cross-reference patterns across files (duplication, inconsistency)
-  - Return includes additional field: related_files[]
-  - Top 30 findings (vs 20 for standard)
+Context: dimension, session_goal, review_files, success_criteria,
+         tech_stack, specs_content, verification_gaps
+Instructions:
+  - read each file, analyze only issues of this dimension
+  - grade critical / high / medium / low
+  - return a JSON array: id, dimension, severity, title, file, line, snippet,
+    description, impact, suggestion, spec_violation (if any)
+  - take top 20 by severity, each with file:line evidence
+```
+
+Collect dimension_results. On agent failure record W001, continue with partial results, and mark the review [LOW CONFIDENCE] (partial results).
+
+### Deep — enhanced agent review
+
+Same as standard, plus deep enhancements:
+
+```
+- additionally read direct imports as context
+- for critical/high findings, trace callers/dependents
+- cross-file pattern comparison (duplication, inconsistency)
+- return additional field related_files[]
+- top 30 findings (standard is 20)
 ```
 
 ---
 
-## Step 6: Aggregate Findings
-
-### 6a: Merge all findings
+## Step 6: Aggregate findings
 
 ```
-all_findings = merge all dimension results, sorted by severity (critical > high > medium > low), then dimension
-```
+all_findings = merge all dimension results, sort by severity (critical > high > medium > low), then by dimension
+severity_dist = count by {critical, high, medium, low}
 
-### 6b: Severity distribution
+IF level != quick:
+  critical_files = files with a critical/high finding in 3+ distinct dimensions → [{ file, dimensions[] }]
 
-```
-severity_dist = count all_findings by severity {critical, high, medium, low}
-```
-
-### 6c: Identify critical files (standard + deep only)
-
-```
-IF level != "quick":
-  critical_files = files with critical/high findings across 3+ distinct dimensions
-  → [{ file, dimensions[] }]
-```
-
-### 6d: Determine verdict
-
-```
 verdict:
   BLOCK → any critical, or >5 high
-  WARN  → any high (≤5)
-  PASS  → no critical or high
+  WARN  → has high (≤5)
+  PASS  → no critical, no high
 ```
+
+**GATE: dimension-coverage** — all requested dimensions merged into all_findings (no dimension silently dropped).
+**GATE: severity-triaged** — every finding graded and severity_dist computed BEFORE verdict.
 
 ---
 
-## Step 6.5: CLI Supplementary Analysis (standard + deep only)
+## Step 6.5: CLI supplementary analysis (standard + deep)
 
-**Skip for quick level or if no enabled CLI tools.**
-
-```
-IF level == "quick" OR no CLI tools enabled: skip to Step 7
-
-# Gather critical/high findings for CLI cross-check
-cli_targets = all_findings.filter(f => f.severity in ["critical", "high"])
-IF cli_targets.length == 0: skip to Step 7
-
-# Build concise review prompt from findings
-finding_summary = cli_targets.map(f => "${f.id}: [${f.severity}] ${f.file}:${f.line} — ${f.title}").join("\n")
-
-Bash({
-  command: 'maestro delegate "PURPOSE: Cross-verify code review findings and identify missed issues
-TASK: For each finding, verify severity is accurate | Check for false positives | Identify any critical issues missed by initial review in the same files
-MODE: analysis
-CONTEXT: @${review_files as glob pattern}
-EXPECTED: JSON array of { finding_id, verified: bool, adjusted_severity?, missed_issues?: [{ severity, file, line, title, description }] }
-CONSTRAINTS: Only report missed issues of severity high or above | Do not duplicate existing findings
-
-Existing findings to verify:
-${finding_summary}
-" --role review --mode analysis',
-  run_in_background: true
-})
-```
-
-**On callback:**
-```
-cli_result = maestro delegate output <id>
-Parse JSON from cli_result
-
-For each verified finding:
-  If adjusted_severity differs: update finding.severity, add finding.cli_note = "severity adjusted by CLI review"
-For each missed_issue:
-  Append to all_findings with id: "CLI-{NNN}", source: "cli-supplementary"
-
-Recalculate severity_dist after merge
-```
+Skip for quick level or when no CLI tool is enabled. Do CLI cross-validation on critical/high findings — calibrate severity, identify false positives, discover issues missed in the first pass. See `ref/cli-supplementary.md`. Merge the callback results into `all_findings` (new items prefixed with id `CLI-`), recompute severity_dist.
 
 ---
 
-## Step 7: Deep-Dive (Conditional)
+## Step 7: Deep-Dive (conditionally triggered)
 
-**Skip for quick level.**
+Skip for quick level.
 
 | Level | Trigger |
-|-------|---------|
-| Standard | `severity_dist.critical > 0` |
-| Deep | Always |
-
-### 7a: Select deep-dive targets
+|------|------|
+| standard | `severity_dist.critical > 0` |
+| deep | always |
 
 ```
-deep_dive_targets:
-  deep  → critical + high findings, top 15
-  standard → critical findings only, top 10
-```
+Targets: deep → critical + high, top 15 | standard → critical only, top 10
 
-### 7b: Deep-dive iteration
+Iterate (deep up to 3 rounds, standard 1 round):
+  Mandatory, cannot be substituted with manual Read/Grep: dispatch a workflow-reviewer agent per target
+    Context: original finding JSON, previous round's analysis (if iteration > 1)
+    Tasks: read affected files, find callers/imports, check test coverage
+    return JSON: finding_id, root_cause, impact_radius[], remediation{approach, code_example},
+              risk_if_unfixed, reassessed_severity, confidence(0.0-1.0)
 
-```
-Iterate up to max_iterations (deep=3, standard=1) over unresolved targets:
-
-  Per target → spawn workflow-reviewer agent:
-    Context: original finding JSON, previous analysis (if iteration > 1)
-    Tasks: read affected file, find callers/imports, check test coverage
-    Analyze: root cause, impact radius, remediation (with code example), risk if unfixed
-
-    Return JSON:
-    {
-      "finding_id": "{target.id}",
-      "root_cause": "...",
-      "impact_radius": ["file1.ts", "file2.ts"],
-      "remediation": { "approach": "...", "code_example": "..." },
-      "risk_if_unfixed": "...",
-      "reassessed_severity": "critical|high|medium|low",
-      "confidence": 0.0-1.0
-    }
-
-  Merge: enrich original finding, mark complete if confidence >= 0.8,
-         update severity if reassessed. Stop early if all resolved.
+  Merge: enrich the original finding; confidence >= 0.8 mark complete; update severity by reassessed. Stop early if all resolved.
 ```
 
 ---
 
-## Step 8: Auto-Create Issues
+## Step 8: Generate issue candidates
 
-| Level | Create issues for |
-|-------|-------------------|
-| Quick | Critical only |
-| Standard | Critical + High |
-| Deep | Critical + High + Medium |
+Filter by level threshold: quick → critical only | standard → critical + high | deep → critical + high + medium.
+
+Write qualifying findings into `outputs/issue-candidates.json`:
 
 ```
-Filter findings by level threshold
-
-For each qualifying finding → append issue to .workflow/issues/issues.jsonl:
-  id: "ISS-{YYYYMMDD}-{NNN}" (auto-increment from existing today's entries)
-  title: "[{dimension}] {title}" (max 100 chars)
-  status: "registered"
-  priority: severity_to_priority (critical→1, high→2, medium→3)
-  severity, source: "review", phase_ref, gap_ref: finding.id
+Each candidate:
+  finding_ref: finding.id
+  title: "[{dimension}] {title}" (≤100 chars)
+  severity, priority: critical→1, high→2, medium→3
+  location: "{file}:{line}"
   description, fix_direction: finding.suggestion
-  context: { location: "{file}:{line}", suggested_fix, notes: impact }
+  notes: impact
   tags: ["review", dimension]
-  Timestamps: created_at, updated_at = now()
-
-Link finding.issue_id back to created issue
 ```
+
+Candidates only describe problems, no manual writing to the issue registry. Formal issue registration is handled by the downstream consumer.
 
 ---
 
-## Step 9: Write review.json
+## Step 9: Write spec-conflicts
 
-Archive existing `review.json` → `${PHASE_DIR}/.history/review-{YYYY-MM-DDTHH-mm-ss}.json`
+For each finding that directly contradicts a loaded spec entry (code behavior ≠ spec rule), write into `outputs/spec-conflicts.json`:
 
 ```
-Write ${PHASE_DIR}/review.json:
+Each item:
+  finding_ref, spec_id, code_location: "{file}:{line}",
+  conflict_type: "outdated" | "disputed",
+  suggested_action: "supersede" | "conflict-mark"
+```
+
+Code is the single source of truth. Determination and handling details see `ref/spec-conflict.md`.
+
+---
+
+## Step 10: Write review-findings.json
+
+When an old file exists, archive first → `outputs/.history/review-findings-{YYYY-MM-DDTHH-mm-ss}.json`. Artifact paths and metadata are declared in `prepare/review.md` contract.
+
+```
+Write outputs/review-findings.json:
 {
-  "phase": PHASE_NUM,
+  "scope": "{scope}",
   "level": "quick" | "standard" | "deep",
   "verdict": "PASS" | "WARN" | "BLOCK",
   "reviewed_at": now(),
   "reviewer": "workflow-reviewer",
   "dimensions_reviewed": dimensions,
   "files_reviewed": review_files,
-  "severity_distribution": {
-    "critical": N,
-    "high": N,
-    "medium": N,
-    "low": N,
-    "total": N
-  },
+  "severity_distribution": { "critical": N, "high": N, "medium": N, "low": N, "total": N },
   "critical_files": critical_files,
   "findings": all_findings,
-  "deep_dives": deep_dive_results (if any),
-  "issues_created": issue_ids[]
+  "deep_dives": deep_dive_results,
+  "issue_candidates": [...]
 }
 ```
 
 ---
 
-## Step 10: Update index.json
+## report.md
 
-```
-Update index.json.updated_at = now()
-Set index.json.review = { level, verdict, reviewed_at, severity_distribution,
-                          findings_count, issues_created count }
-```
-
----
-
-## Report Format
+Write `report.md` with standard frontmatter + fixed five sections. frontmatter records scope, level, verdict, severity_distribution, findings_count, issue_candidate_count. Body contains a review results summary and handoff.
 
 ```
 === CODE REVIEW RESULTS ===
-Phase:     {phase_name}
-Level:     {quick | standard | deep}
-Files:     {files_reviewed.length} files across {dimensions.length} dimensions
-Duration:  {duration}
+Scope:    {scope}
+Level:    {quick | standard | deep}
+Files:    {N} files × {M} dimensions
 
 Severity Distribution:
-  Critical: {critical}
-  High:     {high}
-  Medium:   {medium}
-  Low:      {low}
+  Critical: {c}   High: {h}   Medium: {m}   Low: {l}
 
-Top Issues:
+Top Issues: (up to 10)
   1. [{severity}] {finding_id}: {title} ({file}:{line})
-  2. [{severity}] {finding_id}: {title} ({file}:{line})
-  3. [{severity}] {finding_id}: {title} ({file}:{line})
-  ... (up to 10)
 
-{IF level != "quick":
-Critical Files (3+ dimensions flagged):
-  - {file} ({dimension1}, {dimension2}, {dimension3})
+{IF level != quick:
+Critical Files (flagged in 3+ dimensions):
+  - {file} ({dim1}, {dim2}, {dim3})
 }
 
 Verdict: {PASS | WARN | BLOCK}
-Issues Created: {count}
-
-Files:
-  {artifact_dir}/review.json
-
-Next steps:
-  {suggested_next_command}
+Issue Candidates: {count}
 ```
 
 ---
 
-## Next Step Routing
+## Handoff routing
 
-| Verdict | Suggestion |
-|---------|------------|
-| PASS | Skill({ skill: "quality-test", args: "{phase}" }) for UAT, or Skill({ skill: "maestro-milestone-audit" }) if UAT already passed |
-| WARN | Review findings, then Skill({ skill: "quality-test", args: "{phase}" }) — acknowledge warnings before proceeding |
-| BLOCK (≤3 findings, all medium/low) | **Lightweight fix loop**: fix inline → re-run review on affected files only → repeat until PASS/WARN (max 2 iterations) |
-| BLOCK (>3 findings or any critical) | Full fix cycle: Skill({ skill: "maestro-plan", args: "{phase} --gaps" }) -> Skill({ skill: "maestro-execute", args: "{phase}" }) -> re-run Skill({ skill: "quality-review", args: "{phase}" }) |
+The verdict decides the downstream run; the report's needs includes `latest-review` (and `latest-verification` where necessary) accordingly:
 
----
-
-## Error Handling
-
-| Error | Action |
-|-------|--------|
-| Phase directory not found | Abort: "Phase {phase} not found." |
-| No execution results | Abort: "No completed tasks found. Run maestro-execute first." |
-| No changed files | Abort: "No changed files detected in this phase." |
-| Reviewer agent fails | Log W001, continue with available dimension results |
-| All agents fail | Abort: "Review could not complete — all dimension agents failed." |
-| Deep-dive agent fails | Log finding as unresolved, skip enrichment |
+| verdict | Routing |
+|---------|------|
+| PASS | `test` (UAT), or proceed directly to session wrap-up |
+| WARN | acknowledge warnings then proceed to `test` |
+| BLOCK (≤3 findings, all medium/low) | lightweight fix loop: inline fix → re-run review on affected files only → loop until PASS/WARN (up to 2 rounds) |
+| BLOCK (>3 findings or has critical) | full fix loop: `plan --gaps` → `execute` → re-run `review` |
+| spec conflict found | `maestro spec conflict list` → knowledge audit |
 
 ---
 
-## State Updates
+## Success Criteria
 
-| When | Field | Value |
-|------|-------|-------|
-| Step 5 start | index.json.status | "reviewing" (if currently "verifying") |
-| Step 10 | index.json.review | Review results summary |
-| Step 10 | index.json.updated_at | Current timestamp |
+- [ ] Review level determined (quick/standard/deep)
+- [ ] All required dimensions produced findings (quick: 2, standard/deep: 6)
+- [ ] Every finding anchored to file:line with severity/evidence/impact/recommendation
+- [ ] Severity triage completed (severity_dist computed)
+- [ ] Spec-conflict routing applied (supersede for evolved practice, conflict mark for disputes)
+- [ ] Delta comparison with prior-review (if exists)
+- [ ] review-findings.json written with PASS/WARN/BLOCK verdict
+- [ ] issue-candidates.json written (if findings warrant)
+
+---
+
+## GateRecord
+
+After review completes, inline-record one entry per declared gate (no separate gate artifact):
+
+```json
+{ "gate": "dimension-coverage", "verdict": "PASS|WARN|BLOCK", "checked_at": now(),
+  "evidence": { "dimensions_covered": N, "findings": N },
+  "artifact": "outputs/review-findings.json" }
+{ "gate": "severity-triaged", "verdict": "PASS|WARN|BLOCK", "checked_at": now(),
+  "evidence": { "critical": N, "high": N, "triaged": N },
+  "artifact": "outputs/review-findings.json" }
+```
+
+BLOCKED conditions: `review-findings.json` missing, or there are unhandled UNMET spec compliance criteria.
+
+---
+
+## Error Codes
+
+| Code | Condition | Recovery |
+|------|-----------|----------|
+| E001 | No change manifest (`current-execution` missing or has no completed tasks) | Abort; run `execute` first |
+| E002 | No changed files detected for this scope | Abort; verify scope has pending changes |
+| E003 | All dimension agents failed | Abort; cannot complete the review, retry |
+| W001 | Reviewer agent failed (one dimension) | Record, continue with available dimension results |
+| W002 | Deep-dive agent failed | Record finding as unresolved, skip enrichment, mark [LOW CONFIDENCE] |

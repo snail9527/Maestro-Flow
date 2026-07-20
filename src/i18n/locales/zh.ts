@@ -4,6 +4,7 @@ export const zh: LocaleStrings = {
   install: {
     // Progress step labels
     stepMode: '模式',
+    stepPlatforms: '平台',
     stepMenu: '菜单',
     stepConfirm: '确认',
     stepInstall: '安装',
@@ -12,7 +13,7 @@ export const zh: LocaleStrings = {
     // Footer hints
     footerMode: '[G] 全局  [P] 项目  [Enter] 下一步  [Esc] 退出',
     footerHub: '[Space/1-5] 切换  [Enter] 配置/安装  [Esc] 返回',
-    footerComponents: '[Space] 切换  [1-9] 快选  [A] 全选  [N] 全不选  [Enter] 完成  [Esc] 返回',
+    footerComponents: '[Space] 切换  [1-9] 快选  [A] 全选  [N] 全不选  [D] 默认  [Enter] 完成  [Esc] 返回',
     footerHooks: '[1-4] 选择级别  [Enter] 完成  [Esc] 返回',
     footerMcp: '[y/n] 启用  [1-6] 切换工具  [Enter] 完成  [Esc] 返回',
     footerStatusline: '[y/n] 切换  [Enter] 完成  [Esc] 返回',
@@ -38,10 +39,16 @@ export const zh: LocaleStrings = {
     hubTools: '{count} 个工具',
 
     // Grouped Hub
+    groupPlatforms: '安装平台',
+    groupAddons: '可选组件',
     groupCore: '核心',
     groupClaude: 'Claude Code',
     groupCodex: 'Codex',
     groupOther: '其他工具',
+    groupHooks: 'Hooks',
+    groupMcp: 'MCP 服务',
+    groupAppearance: '外观',
+    groupEmbedding: 'Embedding',
     hubScope: '范围：',
     hubGlobal: '全局',
     hubProject: '项目',
@@ -159,7 +166,7 @@ export const zh: LocaleStrings = {
     codexHooksLevelDescriptions: {
       none: '无 Hooks',
       minimal: '会话上下文 (SessionStart)',
-      standard: '+ 规范/关键词注入 + skill 感知 + delegate 监控 + 协调器/团队/遥测(Stop) + preflight/spec 守护',
+      standard: '+ UserPromptSubmit 规范/关键词/KG 注入 + skill 感知 + delegate 监控 + 协调器/团队/遥测(Stop) + preflight/spec 守护',
       full: '+ 工作流防护 (PreToolUse，仅 Bash) + prompt-guard (UserPromptSubmit)',
     },
     codexHooksWinWarning: '警告：Codex hooks 暂不支持 Windows。',

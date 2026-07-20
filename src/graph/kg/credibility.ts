@@ -5,7 +5,7 @@
 // Scoring: factor = floor + (1 - floor) * e^(-λ * age_days)
 
 import { createHash } from 'node:crypto';
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,7 +24,6 @@ export interface CredibilityRow {
 
 export interface CredibilityConfig {
   floor: number;
-  ceiling: number;
   warningThreshold: number;
   halfLives: Record<string, number>;
 }
@@ -35,7 +34,6 @@ export interface CredibilityConfig {
 
 const DEFAULT_CONFIG: CredibilityConfig = {
   floor: 0.3,
-  ceiling: 1.2,
   warningThreshold: 0.5,
   halfLives: {
     domain: 180,
@@ -82,8 +80,8 @@ export function computeDecayFactor(
 ): number {
   const halfLife = config.halfLives[nodeType] ?? 60;
   const lambda = LN2 / halfLife;
-  const raw = config.floor + (1 - config.floor) * Math.exp(-lambda * ageDays);
-  return Math.min(raw, config.ceiling);
+  // Raw max is 1 (at age 0) — no ceiling needed.
+  return config.floor + (1 - config.floor) * Math.exp(-lambda * ageDays);
 }
 
 export function computeCredibilityFactor(
@@ -113,7 +111,7 @@ export function contentHash(body: string): string {
 // ---------------------------------------------------------------------------
 
 export class CredibilityStore {
-  constructor(private db: Database.Database) {}
+  constructor(private db: DatabaseSync) {}
 
   upsert(nodeId: string, hash: string, nowMs: number = Date.now()): void {
     this.db.prepare(`
@@ -131,7 +129,7 @@ export class CredibilityStore {
   get(nodeId: string): CredibilityRow | null {
     return this.db.prepare(
       'SELECT * FROM credibility WHERE node_id = ?'
-    ).get(nodeId) as CredibilityRow | null;
+    ).get(nodeId) as unknown as CredibilityRow | null;
   }
 
   getMany(nodeIds: string[]): Map<string, CredibilityRow> {
@@ -139,14 +137,14 @@ export class CredibilityStore {
     const placeholders = nodeIds.map(() => '?').join(',');
     const rows = this.db.prepare(
       `SELECT * FROM credibility WHERE node_id IN (${placeholders})`
-    ).all(...nodeIds) as CredibilityRow[];
+    ).all(...nodeIds) as unknown as CredibilityRow[];
     const map = new Map<string, CredibilityRow>();
     for (const r of rows) map.set(r.node_id, r);
     return map;
   }
 
   getAll(): CredibilityRow[] {
-    return this.db.prepare('SELECT * FROM credibility').all() as CredibilityRow[];
+    return this.db.prepare('SELECT * FROM credibility').all() as unknown as CredibilityRow[];
   }
 
   incrementSearchHits(nodeIds: string[], nowMs: number = Date.now()): void {
@@ -154,10 +152,7 @@ export class CredibilityStore {
     const stmt = this.db.prepare(
       'UPDATE credibility SET search_hits = search_hits + 1, last_hit_at = ? WHERE node_id = ?'
     );
-    const tx = this.db.transaction((ids: string[]) => {
-      for (const id of ids) stmt.run(nowMs, id);
-    });
-    tx(nodeIds);
+    for (const id of nodeIds) stmt.run(nowMs, id);
   }
 
   incrementConsumption(nodeId: string, nowMs: number = Date.now()): void {
@@ -170,7 +165,7 @@ export class CredibilityStore {
     const result = this.db.prepare(
       'DELETE FROM credibility WHERE node_id NOT IN (SELECT id FROM nodes)'
     ).run();
-    return result.changes;
+    return Number(result.changes);
   }
 }
 

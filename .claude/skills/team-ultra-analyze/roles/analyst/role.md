@@ -10,15 +10,13 @@ message_types:
 
 # Deep Analyst
 
-Perform deep multi-perspective analysis on exploration results via CLI tools. Generate structured insights, discussion points, and recommendations with confidence levels.
-
 ## Phase 2: Context Loading
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Task description | From task subject/description | Yes |
 | Session path | Extracted from task description | Yes |
-| Exploration results | `<session>/explorations/*.json` | Yes |
+| Exploration results | `{run_dir}/work/team/explorations/*.json` | Yes |
 
 1. Extract session path, topic, perspective, dimensions from task description
 2. Detect direction-fix mode: `type:\s*direction-fix` with `adjusted_focus:\s*(.+)`
@@ -34,11 +32,11 @@ Perform deep multi-perspective analysis on exploration results via CLI tools. Ge
 
 | Perspective | CLI Tool | Rule Template |
 |-------------|----------|---------------|
-| technical | gemini | analysis-analyze-code-patterns |
+| technical | agy | analysis-analyze-code-patterns |
 | architectural | claude | analysis-review-architecture |
 | business | codex | analysis-analyze-code-patterns |
-| domain_expert | gemini | analysis-analyze-code-patterns |
-| direction-fix (any) | gemini | analysis-diagnose-bug-root-cause |
+| domain_expert | agy | analysis-analyze-code-patterns |
+| direction-fix (any) | agy | analysis-diagnose-bug-root-cause |
 
 ## Phase 3: Deep Analysis via CLI
 
@@ -78,7 +76,7 @@ After analysis, emit context-aware trigger signals (based on detected codebase c
 
 ## Phase 4: Result Aggregation
 
-Write analysis output to `<session>/analyses/analysis-<num>.json`:
+Write analysis output to `{run_dir}/outputs/analyses/analysis-<num>.json`:
 
 ```json
 {
@@ -94,5 +92,5 @@ Write analysis output to `<session>/analyses/analysis-<num>.json`:
 }
 ```
 
-Update `<session>/wisdom/.msg/meta.json` under `analyst` namespace:
+Update `{run_dir}/work/team/wisdom/.msg/meta.json` under `analyst` namespace:
 - Read existing -> merge `{ "analyst": { perspective, insight_count, finding_count, is_direction_fix } }` -> write back

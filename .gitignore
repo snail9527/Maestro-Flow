@@ -1,8 +1,18 @@
 node_modules/
 dist/
 dist-server/
+# Compiled TS artifacts must not live in src/ — source is .ts, build → dist/.
+# (Leaked .js/.d.ts/.js.map break tooling and make runners resolve stale code.)
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+!src/types/hono.d.ts
+!src/tools/impeccable/live/static/*.js
 .tmp/
 *.log
+# Python bytecode (generated when running skill scripts, e.g. team-adversarial-swarm/scripts)
+__pycache__/
+*.pyc
 .env
 .env.*
 .DS_Store
@@ -16,7 +26,6 @@ Thumbs.db
 .workflow/collab/*
 !.workflow/collab/overlays/
 claude-code-skills-guide.md
-docs/
 
 # Dashboard local state
 dashboard/.planning/
@@ -34,3 +43,8 @@ dashboard/node_modules/
 # Not committed; regenerate via `npm run build:mirrors` before publishing.
 .agy/
 .agents/
+
+search-cache.json
+
+# Pi platform local config (permissions/model mapping), same nature as .claude/settings.local.json
+.pi/
