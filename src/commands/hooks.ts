@@ -866,6 +866,30 @@ function readStdin(): Promise<string> {
 }
 
 /**
+ * K4 — register/refresh the knowledge identity channel for a host session.
+ * Channels let knowledge stage/record resolve write authority without
+ * guessing; registration is best-effort and must never break host hooks.
+ */
+async function registerKnowledgeChannel(
+  workspace: string,
+  hostSessionId: string,
+  boundMaestroSessionId: string | null,
+): Promise<void> {
+  try {
+    const { touchChannel } = await import('../run/knowledge-identity.js');
+    touchChannel(workspace, {
+      identity: hostSessionId,
+      hostKind: 'hook',
+      context: boundMaestroSessionId
+        ? { kind: 'session', session_id: boundMaestroSessionId }
+        : null,
+    });
+  } catch {
+    // Channel registration must never break host hooks.
+  }
+}
+
+/**
  * Extract key fields from hook stdin for analytics logging.
  * Keeps only short, diagnostic-relevant fields — never full prompts.
  */
@@ -1001,9 +1025,11 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
     if (!sessionId) return;
 
     const cwd: string = data.cwd ?? process.cwd();
+    const workspace = resolveWorkspace({ cwd });
+    if (!workspace) return;
 
     const { evaluateKgSync } = await import('../hooks/kg-sync-hook.js');
-    await evaluateKgSync(cwd, sessionId);
+    await evaluateKgSync(workspace, sessionId);
   },
 
   'kg-auto-init': async () => {
@@ -1101,7 +1127,8 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
 
     const raw = await readStdin();
     const data = JSON.parse(raw);
-    const { evaluateSpecInjection } = await import('../hooks/spec-injector.js');
+    const { evaluateSpecInjection, recordSpecInjectionCredibility } =
+      await import('../hooks/spec-injector.js');
     const hookEventName: string = data.hook_event_name ?? '';
     const isSessionStart = hookEventName === 'SessionStart';
 
@@ -1119,6 +1146,7 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
           },
         }));
       }
+      await recordSpecInjectionCredibility(cwd, result.categories ?? []);
       return;
     }
 
@@ -1148,6 +1176,8 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
         },
       }));
     }
+    // After stdout, so the credibility write never delays the injected prompt.
+    await recordSpecInjectionCredibility(cwd, result.categories ?? []);
   },
 
   'session-context': async () => {
@@ -1160,6 +1190,21 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
     const result = evaluateSessionContext(data);
     if (result) {
       process.stdout.write(JSON.stringify(result));
+    }
+    // K4: register the host-session knowledge channel (SessionStart). Context
+    // binding is best-effort from an existing coord bridge; the
+    // coordinator-tracker Stop hook rebinds once a maestro Session resolves.
+    const channelSessionId: string = data.session_id ?? '';
+    const channelWorkspace = resolveWorkspace(data);
+    if (channelSessionId && channelWorkspace) {
+      let bound: string | null = null;
+      try {
+        const { readCoordBridge } = await import('../hooks/coordinator-tracker.js');
+        bound = readCoordBridge(channelSessionId)?.maestro_session_id ?? null;
+      } catch {
+        // Best-effort binding only.
+      }
+      await registerKnowledgeChannel(channelWorkspace, channelSessionId, bound);
     }
   },
 
@@ -1175,7 +1220,7 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
     const cwd = data.cwd ?? process.cwd();
     const sessionId: string = data.session_id ?? '';
     const { evaluateSkillContext } = await import('../hooks/skill-context.js');
-    const result = evaluateSkillContext({ user_prompt: prompt, cwd, session_id: sessionId });
+    const result = await evaluateSkillContext({ user_prompt: prompt, cwd, session_id: sessionId });
     if (result) {
       process.stdout.write(JSON.stringify(result));
     }
@@ -1230,15 +1275,21 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
     // Read status.json (/maestro & /maestro-coordinate)
     let bridgeData: CoordBridgeData | null = readMaestroSession(workspace);
 
-    // Fallback: pick most recently updated session
+    // Fallback: pick most recently updated session. readMaestroSession above
+    // already returned null, so hand that in — otherwise readLatestSession runs
+    // the identical scan (56 session dirs, 533 KB of session.json) a second time
+    // for an answer we have.
     if (!bridgeData) {
       const existing = readCoordBridge(sessionId);
-      bridgeData = readLatestSession(workspace, existing);
+      bridgeData = readLatestSession(workspace, existing, null);
     }
 
     if (!bridgeData) return;
     bridgeData.session_id = sessionId;
     writeCoordBridge(sessionId, bridgeData);
+    // K4: bind the host-session knowledge channel to the resolved maestro
+    // Session so knowledge writes can attribute without guessing.
+    await registerKnowledgeChannel(workspace, sessionId, bridgeData.maestro_session_id ?? null);
   },
 
   'search-cache-invalidator': async () => {
@@ -1262,24 +1313,30 @@ const HOOK_RUNNERS: Record<string, HookRunner> = {
 
     const workflowRoot = join(projectRoot, '.workflow');
 
-    // Notify daemon to invalidate (rebuilds wiki + BM25 + embedding in the long-lived process)
-    const { readDaemonInfo, isDaemonAlive, queryDaemon } = await import('../search/daemon-client.js');
+    const { readDaemonInfo, isDaemonAlive, queryDaemon, invalidateSearchIndex, spawnDaemon } =
+      await import('../search/daemon-client.js');
+
+    // Notify the daemon, which rebuilds wiki + BM25 + embedding in its long-lived
+    // process. Its invalidate handler rebuilds *before* replying, so awaiting the
+    // ack means awaiting the whole rebuild on a PostToolUse hook. Only delivery
+    // matters here: once the request is written the daemon will rebuild whether or
+    // not this process is still listening (it destroys the socket on hang-up), so
+    // this budget covers a localhost connect + write and nothing more.
     const daemonInfo = readDaemonInfo(workflowRoot);
     if (daemonInfo && isDaemonAlive(daemonInfo)) {
-      const resp = await queryDaemon(daemonInfo.port, { action: 'invalidate' }).catch(() => null);
-      if (resp?.ok) return;
+      const ACK_BUDGET_MS = 500;
+      await queryDaemon(daemonInfo.port, { action: 'invalidate' }, { timeoutMs: ACK_BUDGET_MS })
+        .catch(() => null);
+      return;
     }
 
-    // No daemon running — rebuild index directly so disk cache is fresh for next search
-    const { WikiIndexer } = await import('#maestro-dashboard/wiki/wiki-indexer.js');
-    const { loadWorkspaceConfig, resolveWorkspaceLinks } = await import('../config/index.js');
-    const wsConfig = loadWorkspaceConfig(projectRoot);
-    const resolved = resolveWorkspaceLinks(projectRoot, wsConfig);
-    const linkedWorkspaces = resolved
-      .filter((lw: { valid: boolean }) => lw.valid)
-      .map((lw: { name: string; workflowRoot: string; share: Array<'spec' | 'knowhow' | 'domain' | 'codebase'> }) => ({ name: lw.name, workflowRoot: lw.workflowRoot, shareTypes: lw.share }));
-    const indexer = new WikiIndexer({ workflowRoot, linkedWorkspaces });
-    await indexer.rebuild();
+    // No daemon. A WikiIndexer.rebuild() inline here is unbounded work on the
+    // tool-call path — every Write/Edit under .workflow/ would stall on a full
+    // knowledge-tree reindex. Drop the stale on-disk cache so no reader serves
+    // outdated hits, then hand the rebuild to the daemon's own process. If the
+    // spawn fails, the next `maestro search` rebuilds lazily.
+    await invalidateSearchIndex(workflowRoot);
+    await spawnDaemon(workflowRoot).catch(() => { /* lazy rebuild on next search */ });
   },
 
   'search-daemon-start': async () => {

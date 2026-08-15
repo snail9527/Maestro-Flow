@@ -2,23 +2,25 @@
 title: "Maestro 命令使用指南"
 ---
 
-Maestro 命令系统包含 64 个 slash 命令，分为 7 大类。本文档提供命令全景图和核心工作流导航。
+Maestro 命令系统包含 **18 个 slash 命令**，另有由编排器在 Session chain 内派发的一级 step，以及可直接调用的 `team-*`、`skill-*` 等技能（`scholar-*` 为选装，见[学术技能](#十一学术技能scholar-skills选装)）。本文档提供命令全景图和核心工作流导航。
 
 ## 命令总览
 
-| 类别 | 命令数 | 前缀 | 职责 |
+| 类别 | 命令数 | 命令 | 职责 |
 |------|--------|------|------|
-| **核心工作流** | 32 | `maestro-*` | 生命周期引擎（ralph）、初始化、规划、执行、验证、协调、milestone、overlay、swarm、companion、next、amend、collab、composer、fork、guard、merge、player、tools、ui-codify、universal-workflow、update |
-| **管理** | 11 | `manage-*` | Issue 生命周期、代码库文档、知识捕获、记忆管理、harvest、status、knowledge-audit、kg-extractors |
-| **质量** | 7 | `quality-*` | 代码审查、业务测试、UAT、调试、重构、复盘、同步 |
-| **规范** | 4 | `spec-*` | 项目规范初始化、加载、录入、分析 |
-| **学习** | 4 | `learn-*` | 统一复盘（git+决策）、跟读学习、模式拆解、系统探究 |
-| **奥德赛** | 5 | `odyssey-*` | 深度调试、代码库改进、需求迭代实现、深度审查+修复、UI 优化 |
-| **安全** | 1 | `security-*` | 安全审计 |
-| **学术技能** | 10 | `scholar-*` | 研究构思、实验分析、论文写作、审稿回复、引用验证、AI 去痕、LaTeX 整理、会议准备、学位论文 |
-| **其他技能** | 3 | — | 发现对抗审查（insight-challenge）、委托一致性检查（delegation-check）、提示文件生成（prompt-generator） |
+| **核心编排** | 6 | `/maestro`、`/maestro-ralph`、`/maestro-next`、`/maestro-companion`、`/maestro-init`、`/maestro-session-seal` | 意图到链规划、闭环策略、路由、轻量执行、项目初始化、Session 封存 |
+| **Issue 与知识** | 4 | `/maestro-issue`、`/maestro-knowledge`、`/maestro-knowhow`、`/maestro-learn` | Issue 生命周期与发现；知识存储 audit/harvest/wiki/domain；knowhow 捕获；学习工具集 |
+| **规范** | 1 | `/maestro-spec` | 约束规则录入（初始化 `maestro spec init`、加载 `maestro spec load`、移除 step `specs-remove`） |
+| **深度循环与 UI** | 2 | `/maestro-odyssey`、`/maestro-impeccable` | 六模式长周期迭代（debug/improve/planex/review/security/ui）；UI 设计与 codify |
+| **Worktree** | 2 | `/maestro-fork`、`/maestro-merge` | 创建与合并并行开发 worktree |
+| **系统** | 3 | `/maestro-update`、`/maestro-overlay`、`/maestro-guard` | 自更新、命令 overlay、编辑边界 |
 
-全局入口 `/maestro` 是智能协调器，根据用户意图和项目状态自动选择最优命令链。
+除 slash 命令外还有两层，均不以 `/` 开头直接调用：
+
+- **一级 step**（`workflows/`）——`analyze`、`plan`、`execute`、`review`、`test`、`auto-test`、`debug`、`grill`、`brainstorm`、`blueprint`、`roadmap`、`harvest`、`retrospective`、`verify`、`collab` 等，由编排器在 Session chain 内派发，经 `/maestro "<意图>"` 或 `/maestro-next` 触达，不能直接键入形如 `/maestro-…` 的斜杠命令。
+- **Skill**（`.claude/skills/`，其中 8 个为 `team-*`）——可直接调用的团队与工具技能，如 `/team-swarm`；另有 `scholar-*` 学术技能族（选装，见后文）。
+
+全局入口 `/maestro` 是**意图到链规划器**，根据用户意图和项目状态自动选择最优命令链。
 
 ---
 
@@ -26,101 +28,84 @@ Maestro 命令系统包含 64 个 slash 命令，分为 7 大类。本文档提�
 
 ```mermaid
 graph TB
-    subgraph entry["入口"]
+    subgraph entry["入口（用户可敲）"]
         M["/maestro 智能协调器"]
-        NX["/maestro-next 单命令推荐"]
-        SW["/maestro-swarm-workflow 并行加速"]
+        NX["/maestro-next 单步推荐"]
     end
 
-    subgraph init["项目初始化"]
-        BS["/maestro-brainstorm"]
-        GR["/maestro-grill 压力测试"]
+    subgraph campaign["长跑入口（用户可敲）"]
+        OD["/maestro-odyssey --mode debug|improve|planex|review|security|ui"]
+        RA["/maestro-ralph 闭环自治"]
+        IMP["/maestro-impeccable UI 精修"]
+    end
+
+    subgraph setup["项目初始化"]
         INIT["/maestro-init"]
-        RM["/maestro-roadmap"]
-        SG["/maestro-blueprint"]
-        UID["/maestro-impeccable"]
+        BSs["brainstorm 步骤"]
+        GRs["grill 步骤"]
+        RMs["roadmap 步骤"]
+        BPs["blueprint 步骤"]
     end
 
-    subgraph knowledge["知识管理"]
-        CP["/maestro-companion 知识伴侣"]
-        KA["/manage-knowledge-audit 审计淘汰"]
+    subgraph pipeline["Phase 管线（Session chain 内派发）"]
+        ANs["analyze 步骤"]
+        PLs["plan 步骤"]
+        EXs["execute 步骤"]
+        VFs["verify 步骤"]
     end
 
-    subgraph pipeline["Milestone 管线"]
-        AN["/maestro-analyze"]
-        PL["/maestro-plan"]
-        EX["/maestro-execute"]
-        VF["/maestro-execute (verify)"]
-    end
-
-    subgraph quality["质量管线"]
-        QR["/quality-review"]
-        QAT["/quality-auto-test"]
-        QT["/quality-test"]
-        QD["/quality-debug"]
-        QRF["/quality-refactor"]
-        QS["/quality-sync"]
+    subgraph quality["质量管线（Session chain 内派发）"]
+        RVs["review 步骤"]
+        ATs["auto-test 步骤"]
+        TSs["test 步骤"]
+        DBs["debug 步骤"]
+        RTs["retrospective 步骤"]
     end
 
     subgraph issue["Issue 闭环"]
-        ID["/manage-issue-discover"]
-        IC["/manage-issue create"]
-        IA["/maestro-analyze --gaps"]
-        IP["/maestro-plan --gaps"]
-        IE["/maestro-execute"]
-        ICL["/manage-issue close"]
+        ISS["/maestro-issue discover|create|close"]
+        IDs["issue-discover 步骤"]
     end
 
-    subgraph milestone["里程碑"]
-        MA["/maestro-milestone-audit"]
-        MC["/maestro-milestone-complete"]
+    subgraph knowledge["知识管理"]
+        CP["/maestro-companion"]
+        KN["/maestro-knowledge audit|harvest|wiki"]
+        KH["/maestro-knowhow"]
+        SP["/maestro-spec"]
+        LN["/maestro-learn follow|investigate|decompose|consult"]
     end
 
-    subgraph quick["快速渠道"]
-        MQ["/maestro-quick"]
-        LP["/workflow-lite-plan"]
+    subgraph seal["收尾"]
+        SL["/maestro-session-seal"]
+        KGI["maestro kg index (CLI)"]
     end
 
-    M -->|意图路由| init
-    M -->|意图路由| pipeline
-    M -->|"continue"| pipeline
-    M -->|quick| quick
-    NX -->|推荐单命令| init
-    NX -->|推荐单命令| pipeline
-    SW -->|并行加速| pipeline
-    GR -.->|压力测试后| BS
-    CP -.->|任务知识伴侣| pipeline
+    M -->|意图分类 → 建链| setup
+    M -->|意图分类 → 建链| pipeline
+    M -->|意图分类 → 建链| quality
+    M -->|意图分类 → 建链| issue
+    NX -->|推荐下一步| pipeline
+    NX -->|推荐下一步| quality
 
-    BS -.->|可选| INIT
-    INIT --> RM
-    INIT --> SG
-    RM --> PL
-    SG --> PL
-    UID -.->|可选| PL
+    INIT --> RMs
+    INIT --> BPs
+    BSs -.->|可选前置| RMs
+    GRs -.->|压力测试| BSs
 
-    AN -->|"多次"| AN
-    AN --> PL
-    PL -->|"多次 revise, 碰撞检测"| PL
-    PL -->|"逐个执行, wave 并行"| EX
-    EX --> VF
-    VF --> QAT
-    QAT --> QR
-    QR --> QT
-    QT -->|所有 Phase 完成| MA
+    ANs --> PLs --> EXs --> VFs
+    VFs --> RVs
+    RVs -->|PASS/WARN| ATs --> TSs
+    RVs -->|BLOCK| PLs
+    TSs -->|发现问题| DBs
+    DBs -->|根因确认| PLs
+    ISS --> IDs
+    IDs -.->|gap → 修复链| PLs
 
-    VF -->|"gaps"| AN
-    QAT -->|"失败"| PL
-    QT -->|"失败"| QD
-    QD -->|"修复"| PL
-
-    ID --> IC
-    IC --> IA
-    IA --> IP
-    IP --> IE
-    IE -->|resolved| ICL
-
-    MA --> MC
-    MC -->|下一 Milestone| AN
+    TSs -->|全部通过| SL
+    SL --> RTs
+    SL --> KGI
+    RTs -.->|知识回流| KN
+    CP -.->|上下文/知识路由| pipeline
 ```
 
 ---
@@ -133,7 +118,7 @@ graph TB
         direction LR
         AN["analyze"] -->|"多次"| AN
         AN --> PL["plan"] -->|"revise"| PL -->|"逐个执行"| EX["execute"] --> VF["verify"]
-        VF --> QBT["business-test"] --> QR["review"] --> QT["test"] --> MA["milestone-audit"]
+        VF --> QR["review"] --> QBT["auto-test"] --> QT["test"] --> MA["session-seal"]
     end
 
     subgraph issue_loop["Issue 闭环"]
@@ -150,7 +135,7 @@ graph TB
     end
 
     QR -->|"review 发现问题, auto-create Issue"| IC
-    QBT -->|"业务规则失败, 创建 Issue"| IC
+    QBT -->|"auto-test 失败, 创建 Issue"| IC
     QT -->|"test 失败, 创建 Issue"| IC
     VF -->|"verify gaps, 产生 Issue"| IC
 
@@ -171,8 +156,8 @@ graph TB
 
 | path | 含义 | 来源 | 生命周期 |
 |------|------|------|----------|
-| `standalone` | 独立 Issue，不绑定 Phase | 手动创建、`/manage-issue-discover`、外部导入 | 独立闭环，不影响 Phase 推进 |
-| `workflow` | Phase 关联 Issue | `quality-review` auto-create、`quality-auto-test` 失败产生、Phase 验证产生 | 可能阻塞 milestone 完成 |
+| `standalone` | 独立 Issue，不绑定 Phase | 手动创建、`/maestro-issue discover`、外部导入 | 独立闭环，不影响 Phase 推进 |
+| `workflow` | Phase 关联 Issue | `review` 决策门 auto-create、`auto-test` 失败产生、Phase 验证产生 | 可能阻塞 milestone 完成 |
 
 ---
 
@@ -181,30 +166,29 @@ graph TB
 ### 项目初始化
 
 ```
-/maestro-init → /maestro-roadmap 或 /maestro-blueprint
+/maestro-init → roadmap 或 blueprint（step，经 /maestro 派发）
 ```
 
-| 步骤 | 命令 | 作用 | 产出 |
+| 步骤 | 命令 / step | 作用 | 产出 |
 |------|------|------|------|
-| 0 | `/maestro-brainstorm` (可选) | 多角色头脑风暴 | guidance-specification.md |
+| 0 | `brainstorm` 步骤（可选，经 `/maestro`） | 多角色头脑风暴 | guidance-specification.md |
 | 1 | `/maestro-init` | 初始化 .workflow/ 目录 | state.json, project.md, specs/ |
-| 2a | `/maestro-roadmap` | 轻量路线图 | roadmap.md |
-| 2b | `/maestro-blueprint` | 6 阶段规范蓝图 | PRD + 架构文档 + `.workflow/blueprint/` |
+| 2a | `roadmap` 步骤 | 轻量路线图 | roadmap.md |
+| 2b | `blueprint` 步骤 | 6 阶段规范蓝图 | PRD + 架构文档 + `.workflow/blueprint/` |
 
 ### Milestone 管线
 
 ```
-analyze → plan → execute → verify → review → test → milestone-audit → milestone-complete
+analyze → plan → execute → verify → review → auto-test → test → session-seal
 ```
 
-| 阶段 | 命令 | 产出 | Artifact |
+| 阶段 | Skill / 命令 | 产出 | Artifact |
 |------|------|------|----------|
-| 分析 | `/maestro-analyze` | context.md, analysis.md | ANL-{NNN} |
-| 规划 | `/maestro-plan` | plan.json + TASK-*.json | PLN-{NNN} |
-| 执行 | `/maestro-execute` | .summaries/, 代码变更 | EXC-{NNN} |
-| 验证 | `/maestro-execute` (E2.7) | verification.json | VRF-{NNN} |
-| 审计 | `/maestro-milestone-audit` | audit-report.md | — |
-| 完成 | `/maestro-milestone-complete` | 归档到 milestones/ | — |
+| 分析 | `analyze` 步骤 | context.md, analysis.md | ANL-{NNN} |
+| 规划 | `plan` 步骤 | plan.json + TASK-*.json | PLN-{NNN} |
+| 执行 | `execute` 步骤 | .summaries/, 代码变更 | EXC-{NNN} |
+| 验证 | `execute` 内置验证门（E2.7） | verification.json | VRF-{NNN} |
+| 封存 | `/maestro-session-seal` | 归档到 milestones/ | — |
 
 **Scope 路由**：无参数 = milestone 全量；数字 = 指定 milestone（micro 模式）；文本 = 宏观探索（macro 模式）。`--dir` 直接指定上游产物路径。
 
@@ -216,14 +200,15 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 | **Micro（微观）** | 数字，如 `1` | Milestone 级 6 维度深度分析 | 直接进入 plan |
 
 ```bash
+# analyze 为 Session chain 步骤，经 /maestro 或 /maestro-next 派发；下列 args 即 chain 内的参数
 # Macro：在 roadmap 之前探索需求影响面
-/maestro-analyze "实现多租户架构"           # → scope_verdict: large → 建议 roadmap
+analyze "实现多租户架构"           # → scope_verdict: large → 建议 roadmap
 
 # Micro：Milestone 级深度分析
-/maestro-analyze 1                          # → 6 维度评分 → 直接进入 plan
+analyze 1                          # → 6 维度评分 → 直接进入 plan
 
 # 传递上游上下文
-/maestro-analyze "认证模块" --from brainstorm:BRN-001
+analyze "认证模块" --from brainstorm:BRN-001
 ```
 
 ### 六种使用模式
@@ -245,17 +230,15 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 ## 二、快速渠道
 
 ```bash
-/maestro-quick "修复登录页面 bug"              # 最短路径
-/maestro-quick --full "重构 API 层"            # 带规划验证
-/maestro-quick --discuss "数据库迁移方案"       # 带决策提取
+/maestro-next "修复登录页面 bug"        # 纯路由：分类意图 → companion / 单 Run / /maestro
 
-# Scratch 模式（无需 init）
-/maestro-analyze "实现 JWT 认证"               # scope=standalone
-/maestro-plan --dir scratch/20260420-analyze-xxx
-/maestro-execute --dir scratch/20260420-plan-xxx
+# Scratch 模式（无需 init；analyze/plan/execute 为 step，经 /maestro 派发）
+analyze "实现 JWT 认证"                 # scope=standalone
+plan --dir scratch/20260420-analyze-xxx
+execute --dir scratch/20260420-plan-xxx
 
-# Lite 链
-/workflow-lite-plan "实现 Issue 闭环系统"      # 探索→规划→执行→测试
+# Lite 链（探索→规划→执行→测试，由协调器建链）
+/maestro "实现 Issue 闭环系统"
 ```
 
 ---
@@ -267,12 +250,12 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 ```
 
 ```bash
-/manage-issue-discover by-prompt "检查 API 的错误处理"
-/manage-issue create --title "内存泄漏" --severity high
-/maestro-analyze --gaps ISS-xxx                 # 根因分析
-/maestro-plan --gaps                            # 方案规划
-/maestro-execute                                # 执行修复
-/manage-issue close ISS-xxx --resolution "Fixed"
+/maestro-issue discover by-prompt "检查 API 的错误处理"
+/maestro-issue create --title "内存泄漏" --severity high
+analyze --gaps ISS-xxx                          # 根因分析（step）
+plan --gaps                                     # 方案规划（step）
+execute                                         # 执行修复（step）
+/maestro-issue close ISS-xxx --resolution "Fixed"
 ```
 
 **Commander Agent** 可自动推进未分析的 Issue，按 `execute > analyze > plan` 优先级调度。
@@ -282,16 +265,18 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 ## 四、质量管线
 
 ```bash
-/maestro-execute → /quality-auto-test → /quality-review → /quality-test → /maestro-milestone-audit
+execute → review → auto-test → test → /maestro-session-seal
 ```
 
-| 命令 | 用途 | 关键参数 |
+> 注：`auto-test` `review` `test` `debug` 为一级 step，由编排器通过 session chain 派发，用户不直接调用；经 `/maestro-next` 或 `/maestro "<意图>"` 触发。
+
+| 步骤 / 命令 | 用途 | 关键参数 |
 |------|------|----------|
-| `/quality-auto-test {N}` | 智能路由测试（spec/gap/code） | `--re-run` `--dry-run` |
-| `/quality-review {N}` | 分层代码审查 | `--level quick\|standard\|deep` |
-| `/quality-test {N}` | 会话式 UAT | `--auto-fix` |
-| `/quality-debug` | 假设驱动调试 | `--from-uat {N}` `--parallel` |
-| `/quality-refactor` | 技术债务治理 | `[scope]` |
+| `auto-test` 步骤 | 智能路由测试（spec/gap/code） | `--re-run` `--dry-run` |
+| `review` 步骤 | 分层代码审查 | `--level quick\|standard\|deep` |
+| `test` 步骤 | 会话式 UAT | `--auto-fix` |
+| `debug` 步骤 | 假设驱动调试 | `--from-uat {N}` `--parallel` |
+| `/maestro-odyssey --mode improve` | 技术债务治理 | `[scope]` |
 
 **修复循环**：`verify gaps → plan --gaps → execute → verify` 或 `test 失败 → debug → plan --gaps → execute`
 
@@ -307,39 +292,39 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 
 | 链名 | 命令序列 | 适用场景 |
 |------|----------|----------|
-| `full-lifecycle` | init→blueprint→...→milestone-audit | 全新项目 |
+| `full-lifecycle` | init→blueprint→...→session-seal | 全新项目 |
 | `roadmap-driven` | init→roadmap→... | 轻量路线图 |
 | `brainstorm-driven` | brainstorm→init→roadmap→... | 从头脑风暴开始 |
 | `analyze-plan-execute` | analyze→plan→execute | 快速执行 |
 | `quality-loop` | review→test→debug | 质量流水线 |
-| `milestone-close` | milestone-audit→milestone-complete | 关闭里程碑 |
-| `quick` | quick task | 即时小任务 |
+| `milestone-close` | session-seal | 关闭里程碑 |
+| `companion` | 即时小任务（`/maestro-companion`） | 即时小任务 |
 
 ---
 
 ## 六、规范与知识
 
 ```bash
-/spec-setup                                     # 扫描项目生成规范
-/spec-add coding "所有 API 使用 Hono 框架"       # 录入规范
-/spec-load --role implement                     # 加载规范
-/manage-codebase-rebuild                        # 重建代码库文档
-/manage-knowhow search "认证"                   # 搜索知识复用
-/manage-knowledge-audit --scope all             # 审计三存储，清理过期/矛盾条目
-/manage-status                                  # 项目仪表板
-/maestro-companion before --task "实现认证"      # 任务前加载知识上下文
+maestro spec init                                       # 播种规范骨架文件（不扫描代码库）
+maestro run skill specs-setup                            # 已有项目：扫描代码库填充规范
+/maestro-spec coding "所有 API 使用 Hono 框架"           # 录入约束规则（首个位置参数即 category）
+maestro spec load --category coding                      # 加载规范
+maestro kg index                                        # 重建代码库文档
+maestro knowhow search "认证"                            # 搜索知识复用
+/maestro-knowledge audit --scope all                    # 审计三存储，清理过期/矛盾条目
+maestro session status                                  # 项目仪表板
+/maestro-companion "实现认证"                            # 轻量执行：加载知识上下文并完成小任务
 ```
 
 ### 新增命令速查
 
-| 命令 | 定位 | 使用场景 |
+| 命令 / step | 定位 | 使用场景 |
 |------|------|----------|
-| `/maestro-swarm-workflow` | 并行加速层 | 8 个 Workflow 脚本覆盖 analyze/brainstorm/review/verify/grill/plan/execute/milestone-audit |
-| `/maestro-companion` | 知识伴侣 | before（加载上下文）→ note（记录洞察）→ after（沉淀知识）→ route（推荐下一步） |
-| `/maestro-next` | 单命令推荐 | 轻量路由，不创建 session，推荐 1 个原子命令 + 2-3 备选 |
-| `/maestro-grill` | 压力测试 | 对抗式苏格拉底访谈，验证方案假设，产出 context-package |
-| `/maestro-blueprint` | 正式规格 | 6 阶段文档链（Brief → PRD → Architecture → Epics），与 brainstorm 互补 |
-| `/manage-knowledge-audit` | 知识审计 | spec/knowhow/artifact 三存储审计淘汰（keep/deprecate/delete） |
+| `/maestro-companion` | 轻量执行 | 最小 Run 生命周期（start + done）+ 证据记录，处理机械清晰的小任务 |
+| `/maestro-next` | 单步推荐 | 轻量路由，不创建 session，分类意图后路由到 companion / 单 Run / `/maestro` |
+| `grill` 步骤 | 压力测试 | 对抗式苏格拉底访谈，验证方案假设，产出 context-package |
+| `blueprint` 步骤 | 正式规格 | 6 阶段文档链（Brief → PRD → Architecture → Epics），与 brainstorm 互补 |
+| `/maestro-knowledge audit` | 知识审计 | spec/knowhow/artifact 三存储审计淘汰（keep/deprecate/delete） |
 | `/team-swarm` | 蚁群智能 | ACO 驱动群体优化，信息素收敛，4 角色 + Python 控制器 |
 
 ---
@@ -352,11 +337,11 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 
 | 命令 | 定位 | 核心流程 |
 |------|------|----------|
-| `/odyssey-debug` | 深度调试闭环 | 考古 → 探索 → 诊断 → 修复 → 确认 → 泛化 → 发现 → 沉淀 |
-| `/odyssey-improve` | 代码库质量提升 | 调查 → 6 维审查 → 诊断 → 修复 → 验证 → 泛化 → 发现 → 沉淀 |
-| `/odyssey-planex` | 需求驱动迭代实现 | 解析需求 → 验收标准 → 规划 → 执行 → 验证 → 修复循环 → 泛化 |
-| `/odyssey-review-test-fix` | 深度代码审查 + 修复 | 考古 → 探索 → 多维审查 → 穷尽修复 → 确认 → 泛化 → 发现 → 沉淀 |
-| `/odyssey-ui` | UI 视觉体验优化 | 调查 → 6 维审查 → 发散探索 → 修复 → 验证 → 泛化 → 发现 → 沉淀 |
+| `/maestro-odyssey --mode debug` | 深度调试闭环 | 考古 → 探索 → 诊断 → 修复 → 确认 → 泛化 → 发现 → 沉淀 |
+| `/maestro-odyssey --mode improve` | 代码库质量提升 | 调查 → 6 维审查 → 诊断 → 修复 → 验证 → 泛化 → 发现 → 沉淀 |
+| `/maestro-odyssey --mode planex` | 需求驱动迭代实现 | 解析需求 → 验收标准 → 规划 → 执行 → 验证 → 修复循环 → 泛化 |
+| `/maestro-odyssey --mode review` | 深度代码审查 + 修复 | 考古 → 探索 → 多维审查 → 穷尽修复 → 确认 → 泛化 → 发现 → 沉淀 |
+| `/maestro-odyssey --mode ui` | UI 视觉体验优化 | 调查 → 6 维审查 → 发散探索 → 修复 → 验证 → 泛化 → 发现 → 沉淀 |
 
 ### 共同特征
 
@@ -364,17 +349,17 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 - **阶段自动提交**：每个阶段完成后自动 `git commit`，无需用户确认
 - **多 CLI 辅助**：通过 `maestro delegate` 调用多个工具交叉验证
 - **质量门自迭代**：每个分析阶段自动评估覆盖度/深度/可操作性，不足时重新进入（最多 3 轮）
-- **知识沉淀**：S_RECORD 阶段将可复用知识写入 understanding.md，后续通过 `/spec-add` 永久化
+- **知识沉淀**：S_RECORD 阶段将可复用知识写入 understanding.md，后续通过 `/maestro-spec` 永久化
 - **会话可恢复**：`-c` 标志恢复最近会话，`-y` 自动确认所有决策点
 
-### `/odyssey-debug` — 深度调试
+### `/maestro-odyssey --mode debug` — 深度调试
 
 ```bash
-/odyssey-debug "登录接口返回 500"                     # 完整调试闭环
-/odyssey-debug "内存泄漏" --template memory-leak       # 预定义策略模板
-/odyssey-debug "性能劣化" --skip-fix                   # 仅分析不修复
-/odyssey-debug "竞态条件" -y                           # 全自动模式
-/odyssey-debug -c                                      # 恢复上次会话
+/maestro-odyssey --mode debug "登录接口返回 500"                     # 完整调试闭环
+/maestro-odyssey --mode debug "内存泄漏" --template memory-leak       # 预定义策略模板
+/maestro-odyssey --mode debug "性能劣化" --skip-fix                   # 仅分析不修复
+/maestro-odyssey --mode debug "竞态条件" -y                           # 全自动模式
+/maestro-odyssey --mode debug -c                                      # 恢复上次会话
 ```
 
 | 参数 | 说明 |
@@ -383,19 +368,18 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 | `--template <name>` | 预定义策略：`performance` / `memory-leak` / `race-condition` / `regression` / `crash` |
 | `--skip-fix` | 仅分析，不执行修复 |
 | `--skip-generalize` | 跳过泛化扫描 |
-| `--auto` | CLI delegate 不需确认 |
-| `-y` | 自动确认所有决策 |
+| `-y` | 自动确认所有决策（含 delegate/agent 确认，决策记为 `deferred`） |
 | `-c` | 恢复最近会话 |
 
 **输出**：`session.json` + `evidence.ndjson` + `explore.json` + `understanding.md`（9 节）
 
-### `/odyssey-improve` — 代码库质量提升
+### `/maestro-odyssey --mode improve` — 代码库质量提升
 
 ```bash
-/odyssey-improve src/auth/                            # 审查指定模块
-/odyssey-improve HEAD                                 # 审查最近变更
-/odyssey-improve --dimensions performance,security    # 指定审查维度
-/odyssey-improve --all --skip-fix                     # 全项目扫描，仅审查
+/maestro-odyssey --mode improve src/auth/                            # 审查指定模块
+/maestro-odyssey --mode improve HEAD                                 # 审查最近变更
+/maestro-odyssey --mode improve --dimensions performance,security    # 指定审查维度
+/maestro-odyssey --mode improve --all --skip-fix                     # 全项目扫描，仅审查
 ```
 
 | 参数 | 说明 |
@@ -408,14 +392,14 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 
 **6 维审查**：性能（热点路径、N+1 查询）、安全（OWASP Top 10）、架构（层违规、循环依赖）、可靠性（错误处理）、可观测性（日志覆盖）、可维护性（复杂度、死代码）
 
-### `/odyssey-planex` — 需求驱动迭代实现
+### `/maestro-odyssey --mode planex` — 需求驱动迭代实现
 
 ```bash
-/odyssey-planex "实现 JWT 认证"                        # 完整需求闭环
-/odyssey-planex "修复登录 bug" --template bugfix       # Bug 修复模板
-/odyssey-planex "重构 API 层" --template refactor      # 重构模板
-/odyssey-planex "实现支付" --max-iterations 5          # 最多 5 轮验证
-/odyssey-planex "迁移数据库" --method cli --executor codex  # CLI 执行
+/maestro-odyssey --mode planex "实现 JWT 认证"                        # 完整需求闭环
+/maestro-odyssey --mode planex "修复登录 bug" --template bugfix       # Bug 修复模板
+/maestro-odyssey --mode planex "重构 API 层" --template refactor      # 重构模板
+/maestro-odyssey --mode planex "实现支付" --max-iterations 5          # 最多 5 轮验证
+/maestro-odyssey --mode planex "迁移数据库" --method cli --executor codex  # CLI 执行
 ```
 
 | 参数 | 说明 |
@@ -429,13 +413,13 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 
 **核心循环**：定义验收标准 → 规划 → 执行 → 逐条验证 → 修复失败项 → 重新验证，直到所有标准通过
 
-### `/odyssey-review-test-fix` — 深度代码审查
+### `/maestro-odyssey --mode review` — 深度代码审查
 
 ```bash
-/odyssey-review-test-fix src/api/                     # 审查指定目录
-/odyssey-review-test-fix HEAD                         # 审查最近变更
-/odyssey-review-test-fix --dimensions correctness,security  # 指定维度
-/odyssey-review-test-fix --fix-threshold high         # 仅修复 critical + high
+/maestro-odyssey --mode review src/api/                     # 审查指定目录
+/maestro-odyssey --mode review HEAD                         # 审查最近变更
+/maestro-odyssey --mode review --dimensions correctness,security  # 指定维度
+/maestro-odyssey --mode review --fix-threshold high         # 仅修复 critical + high
 ```
 
 | 参数 | 说明 |
@@ -448,12 +432,12 @@ analyze → plan → execute → verify → review → test → milestone-audit 
 
 **穷尽修复**：按 severity 逐轮（critical → high → medium → low），每轮修复后 re-review 修改区域
 
-### `/odyssey-ui` — UI 视觉体验优化
+### `/maestro-odyssey --mode ui` — UI 视觉体验优化
 
 ```bash
-/odyssey-ui src/components/Header/                    # 审查指定组件
-/odyssey-ui --dimensions visual_hierarchy,accessibility  # 指定维度
-/odyssey-ui --skip-fix                                # 仅审查 + 发散探索
+/maestro-odyssey --mode ui src/components/Header/                    # 审查指定组件
+/maestro-odyssey --mode ui --dimensions visual_hierarchy,accessibility  # 指定维度
+/maestro-odyssey --mode ui --skip-fix                                # 仅审查 + 发散探索
 ```
 
 | 参数 | 说明 |
@@ -482,57 +466,49 @@ Ralph 是自适应生命周期引擎，读取项目状态 → 推断位置 → �
 ```
 
 **核心不变量**：
-- Ralph 只构建和评估，不执行步骤
-- `status.json` 是唯一真源
-- 通过 `Skill("maestro-ralph-execute")` 移交执行
-- 每个步骤必须 `completion_confirmed: true`
+- Session/Run/Artifact/Evidence protocol 是唯一真源
+- Ralph policy 负责 proposal 评价、budget、confidence、escalation 与停止条件
+- `run-executor` 每次只执行一个 Skill Run，不 complete、不推进 chain
+- Skill 只能提出 typed proposal，Runtime 独占 mutation authority
 
 **决策门控**：post-execute / post-business-test / post-review / post-test / post-goal-audit / post-analyze-scope / post-milestone — 自动评估质量门结果，决定 proceed / fix / escalate
 
-### `/maestro-ralph-execute` — 单步执行器
+### `run-executor` — 通用单 Run 执行器
 
 ```bash
-/maestro-ralph-execute                                # 执行下一个 pending step
-/maestro-ralph-execute -y                             # 自动模式
+maestro run next --session <session-id>               # 分配下一条 chain Run
+maestro run brief <run-id> --session <session-id>     # 加载 canonical Resume Packet
 ```
 
-Ralph 的执行器：定位会话 → 找下一步 → 通过 `maestro ralph next` CLI 加载 → 内联执行 → `maestro ralph complete` → 自调用下一步。与 `/maestro-ralph` 互调形成自延续工作循环。
+`run-executor`：`run next/brief` → 内联执行一个 Skill → `run check` → 返回 Artifact/proposal。外层 `/maestro-ralph` 评价 proposal，并通过 `maestro run complete --verdict [--chain-proposal]` 收口；只有下一次显式 `run next` 才分配后续 Run。
 
 ---
 
 ## 九、缺失 maestro-* 命令补充
 
-### `/maestro-amend` — 工作流缺陷修复
+### `/maestro-overlay --amend` — 工作流缺陷修复
 
 ```bash
-/maestro-amend --scan                                 # 自动扫描 .workflow/ 发现信号
-/maestro-amend --from-verify .workflow/scratch/xxx    # 从验证结果收集信号
-/maestro-amend --from-review .workflow/scratch/xxx    # 从代码审查收集信号
-/maestro-amend --from-issues ISS-001,ISS-002          # 从 Issue 收集信号
-/maestro-amend "execute 后缺少验证步骤"                # 直接描述缺陷
+/maestro-overlay --amend --scan                                 # 自动扫描 .workflow/ 发现信号
+/maestro-overlay --amend --from-verify .workflow/scratch/xxx    # 从验证结果收集信号
+/maestro-overlay --amend --from-review .workflow/scratch/xxx    # 从代码审查收集信号
+/maestro-overlay --amend --from-issues ISS-001,ISS-002          # 从 Issue 收集信号
+/maestro-overlay --amend "execute 后缺少验证步骤"                # 直接描述缺陷
 ```
 
 信号驱动的 overlay 生成器 — 从多个来源收集工作流缺陷信号，诊断哪些命令需要修补，批量生成定向 overlay。与 `/maestro-overlay`（单个显式意图）不同，此命令**发现**需要修补的内容。
 
-### `/maestro-collab` — 多工具交叉验证
+### `collab` 步骤 — 多工具交叉验证
+
+`collab` 是 Session chain 步骤，经 `/maestro` 派发（链内 `{"command": "collab", "args": "..."}`）；下列 args 为链内参数：
 
 ```bash
-/maestro-collab "评估微服务拆分方案"                    # 多工具并行分析
-/maestro-collab "审查安全架构" --tools gemini,claude   # 指定工具
-/maestro-collab "API 设计评审" --mode analysis         # 只读分析模式
+collab "评估微服务拆分方案"                    # 多工具并行分析
+collab "审查安全架构" --tools gemini,claude    # 指定工具
+collab "API 设计评审" --mode analysis          # 只读分析模式
 ```
 
 将需求扇出到多个 CLI 工具并行执行 → 交叉验证共识/冲突 → 合成统一报告（collab-report.md + context.md + conclusions.json）。
-
-### `/maestro-composer` — 工作流模板编排
-
-```bash
-/maestro-composer "分析→规划→执行→测试"                # 从自然语言创建模板
-/maestro-composer --resume                            # 恢复未完成设计
-/maestro-composer --edit ~/.maestro/templates/workflows/xxx.json  # 编辑现有模板
-```
-
-交互式工作流模板编排器：自然语言 → DAG 模板。三阶段确认（意图 → 节点映射 → Pipeline 可视化），自动注入 checkpoint，输出可由 `/maestro-player` 执行的模板。
 
 ### `/maestro-fork` — Milestone Worktree 并行开发
 
@@ -567,18 +543,6 @@ Ralph 的执行器：定位会话 → 找下一步 → 通过 `maestro ralph nex
 
 配置目录级写入边界，由 `workflow-guard` PreToolUse hook 强制执行。
 
-### `/maestro-milestone-release` — 版本发布
-
-```bash
-/maestro-milestone-release                            # 自动 bump minor 版本
-/maestro-milestone-release 2.0.0                      # 指定版本
-/maestro-milestone-release --bump patch               # patch bump
-/maestro-milestone-release --dry-run                  # 预览变更
-/maestro-milestone-release --no-tag --no-push         # 仅更新版本和 changelog
-```
-
-将已完成的 milestone 打包为可发布版本：版本 bump → changelog 生成 → git tag → push。下游命令，位于 `/maestro-milestone-complete` 之后。
-
 ### `/maestro-overlay` — 命令 Overlay 创建
 
 ```bash
@@ -588,60 +552,15 @@ Ralph 的执行器：定位会话 → 找下一步 → 通过 `maestro ralph nex
 
 将自然语言指令转换为命令 overlay — JSON patch 文件，非侵入式增强 `.claude/commands/*.md`。支持注入点预览、skill chain 配置、幂等安装。管理通过 `maestro overlay list`（ink TUI）。
 
-### `/maestro-player` — 工作流模板执行
+### `/maestro-impeccable --codify` — 设计系统提取
 
 ```bash
-/maestro-player wft-auth-flow-20260601                # 执行指定模板
-/maestro-player --list                                # 列出可用模板
-/maestro-player -c                                    # 恢复暂停的会话
-/maestro-player wft-xxx --context goal="实现认证"      # 绑定上下文变量
-/maestro-player wft-xxx --dry-run                     # 预览执行计划
-```
-
-加载工作流模板（来自 `/maestro-composer`）→ 绑定上下文变量 → 按拓扑序执行 DAG 节点 → checkpoint 持久化 → 支持恢复。支持 skill / cli / agent / checkpoint 四种节点类型。
-
-### `/maestro-tools-execute` — 工具规范执行
-
-```bash
-/maestro-tools-execute integration-test               # 按名称执行工具
-/maestro-tools-execute --category coding              # 按类别选择
-/maestro-tools-execute --category review --keyword api  # 关键词过滤
-/maestro-tools-execute                                # 交互式选择
-```
-
-加载已注册的工具规范（knowhow 文档 `tool: true`）并逐步执行。支持按名称直接调用或按类别列出选择。
-
-### `/maestro-tools-register` — 工具规范注册
-
-```bash
-/maestro-tools-register extract OAuth PKCE flow from src/auth/   # 从代码提取
-/maestro-tools-register generate Stripe webhook verification      # 生成新工具
-/maestro-tools-register optimize e2e-checkout                     # 优化现有工具
-/maestro-tools-register promote RCP-db-migration as test tool     # 提升 knowhow 为工具
-```
-
-将可复用业务流程编码为 knowhow 文档（`tool: true`）。四种模式：Extract（从代码提取）、Generate（生成新工具）、Optimize（优化现有）、Promote（提升已有 knowhow）。
-
-### `/maestro-ui-codify` — 设计系统提取
-
-```bash
-/maestro-ui-codify src/components/                    # 从源码提取设计系统
-/maestro-ui-codify src/ --package-name my-design      # 指定包名
-/maestro-ui-codify src/ --output-dir .workflow/ref    # 指定输出目录
+/maestro-impeccable --codify src/components/                    # 从源码提取设计系统
+/maestro-impeccable --codify src/ --package-name my-design      # 指定包名
+/maestro-impeccable --codify src/ --output-dir .workflow/ref    # 指定输出目录
 ```
 
 4 阶段流水线：验证 → 提取（3 个并行 Agent）→ 打包（preview.html）→ 知识资产持久化。输出 design-tokens.json + layout-templates.json + preview + knowhow manifest。
-
-### `/maestro-universal-workflow` — 动态对抗工作流生成
-
-```bash
-/maestro-universal-workflow "评估 3 种缓存策略"          # 自动匹配或生成
-/maestro-universal-workflow "审查安全性" --depth deep   # 深度对抗模式
-/maestro-universal-workflow "对比方案" --dry-run         # 仅生成不执行
-/maestro-universal-workflow --from wf-analyze "扩展分析"  # 基于已有脚本修改
-```
-
-动态工作流生成器：扫描库匹配 → 生成任务特定 Workflow 脚本（含对抗模式）→ 执行 → 持久化。脚本保存到 `~/.maestro/workflows/dynamic/uwf-*.js` 可复用。三种深度：shallow（1 skeptic）→ standard（3-way advocacy + referee）→ deep（cross-verify + meta-skeptic）。
 
 ### `/maestro-update` — 版本升级
 
@@ -689,13 +608,13 @@ maestro domain                                        # 查看当前领域配置
 
 管理项目领域知识配置，影响 spec 注入和知识搜索的范围。
 
-### `/manage-kg-extractors` — 知识图谱提取器配置
+### `/maestro-knowledge extractors` — 知识图谱提取器配置
 
 ```bash
-/manage-kg-extractors                                 # 扫描并生成提取规则
-/manage-kg-extractors --scan-only                     # 仅扫描不写入
-/manage-kg-extractors --append                        # 追加到现有配置
-/manage-kg-extractors --language typescript            # 限定语言
+/maestro-knowledge extractors                                 # 扫描并生成提取规则
+/maestro-knowledge extractors --scan-only                     # 仅扫描不写入
+/maestro-knowledge extractors --append                        # 追加到现有配置
+/maestro-knowledge extractors --language typescript            # 限定语言
 ```
 
 分析代码库模式，自动生成 `.workflow/kg/extractors.yaml` — 教 MaestroGraph 的 codegraph 提取器识别项目特定符号（builder/factory API、领域常量、自定义装饰器等）。3 个并行 Agent 扫描 builder/factory 调用、常量/注解、框架特定模式。
@@ -713,9 +632,14 @@ maestro domain                                        # 查看当前领域配置
 
 ---
 
-## 十一、学术技能（Scholar Skills）
+## 十一、学术技能（Scholar Skills）— 选装
 
-10 个学术研究技能，覆盖从构思到发表的全流程。
+10 个学术研究技能，覆盖从构思到发表的全流程。**选装（默认不安装）**：源码位于 `optional/skills/`，不在默认镜像与 `.claude/skills/` 中。按需安装：
+
+```bash
+maestro install toggle --enable scholar-writing,scholar-review   # 安装指定技能到当前项目
+maestro install toggle --list                                     # 查看 available 状态的选装技能
+```
 
 | 技能 | 定位 | 触发词 |
 |------|------|--------|
@@ -729,28 +653,6 @@ maestro domain                                        # 查看当前领域配置
 | `scholar-latex-organizer` | LaTeX 模板整理 | organize LaTeX template, prepare Overleaf |
 | `scholar-publish` | 录用后会议准备 | conference preparation, prepare presentation |
 | `scholar-thesis-docx` | 学位论文 Word 排版 | thesis formatting, dissertation Word |
-
----
-
-## 十二、其他技能
-
-| 技能 | 定位 | 触发词 |
-|------|------|--------|
-| `insight-challenge` | 对抗式代码质量发现审查 | insight-challenge, challenge finding |
-| `delegation-check` | 委托提示词与角色定义一致性检查 | check delegation, delegation conflict |
-| `prompt-generator` | Claude Code 提示文件生成/转换 | create command, create skill, create agent |
-
-### `insight-challenge` — 发现对抗审查
-
-对代码质量发现进行对抗式审查。用反证挑战洞察，对照源代码验证声明，产出结构化裁决（confirmed / weakened / overturned）。
-
-### `delegation-check` — 委托一致性检查
-
-检查工作流委托提示词（Agent() 调用）与代理角色定义是否遵守内容分离边界。检测 7 个冲突维度：角色重定义、领域专业知识泄漏、质量门重复、输出格式冲突、流程覆盖、范围权限冲突、缺失契约。
-
-### `prompt-generator` — 提示文件生成
-
-生成或转换 Claude Code 提示文件 — 命令编排器、技能文件、代理角色定义，或将现有文件进行风格转换。遵循 GSD 风格内容分离，内置质量门。
 
 ---
 

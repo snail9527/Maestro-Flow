@@ -4,16 +4,39 @@
 // schema/assign 块 → variable node
 // 参考: codegraph/src/extraction/liquid-extractor.ts
 
-import type { LanguageExtractionResult, ExtractedSymbol, ExtractedReference } from './tree-sitter-types.js';
+import { makeImportReference, type LanguageExtractionResult, type ExtractedSymbol, type ExtractedReference } from './tree-sitter-types.js';
 import type { Language } from '../../db/types.js';
+import { makeFileNodeId } from './tree-sitter-types.js';
+import type { ImportReference } from '../../resolution/structural-reference.js';
 
+const LIQUID_KEYWORDS = new Set(['if','unless','for','case','when','else','elsif','end','new','return','and','or','not','in','contains','true','false','nil','blank','empty','assign','render','include','section','echo','cycle']);
 export function extractLiquid(
   source: string,
   filePath: string,
 ): LanguageExtractionResult {
   const symbols: ExtractedSymbol[] = [];
   const references: ExtractedReference[] = [];
+  const importReferences: ImportReference[] = [];
   const edges: Array<{ source: string; target: string; kind: string }> = [];
+
+  const emitImport = (
+    rawTarget: string,
+    line: number,
+    column: number,
+    importKind: string,
+  ): void => {
+    references.push({
+      fromSymbolName: '<file>',
+      fromSymbolId: makeFileNodeId(filePath),
+      referenceName: rawTarget,
+      referenceKind: 'imports',
+      line,
+      col: column,
+      filePath,
+      language: 'liquid' as Language,
+    });
+    importReferences.push(makeImportReference(filePath, rawTarget, line, column, importKind));
+  };
 
   const lines = source.split('\n');
 
@@ -24,45 +47,18 @@ export function extractLiquid(
     // render/include → import edge
     const renderMatch = line.match(/\{%[-\s]*render\s+"([^"]+)"/);
     if (renderMatch) {
-      references.push({
-        fromSymbolName: '<module>',
-        fromSymbolId: `${filePath}:<module>`,
-        referenceName: renderMatch[1],
-        referenceKind: 'imports',
-        line: lineNum,
-        col: (renderMatch.index ?? 0) + 1,
-        filePath,
-        language: 'liquid' as Language,
-      });
+      emitImport(renderMatch[1], lineNum, (renderMatch.index ?? 0) + 1, 'render');
     }
 
     const includeMatch = line.match(/\{%[-\s]*include\s+"([^"]+)"/);
     if (includeMatch) {
-      references.push({
-        fromSymbolName: '<module>',
-        fromSymbolId: `${filePath}:<module>`,
-        referenceName: includeMatch[1],
-        referenceKind: 'imports',
-        line: lineNum,
-        col: (includeMatch.index ?? 0) + 1,
-        filePath,
-        language: 'liquid' as Language,
-      });
+      emitImport(includeMatch[1], lineNum, (includeMatch.index ?? 0) + 1, 'include');
     }
 
     // section → import edge
     const sectionMatch = line.match(/\{%[-\s]*section\s+"([^"]+)"/);
     if (sectionMatch) {
-      references.push({
-        fromSymbolName: '<module>',
-        fromSymbolId: `${filePath}:<module>`,
-        referenceName: sectionMatch[1],
-        referenceKind: 'imports',
-        line: lineNum,
-        col: (sectionMatch.index ?? 0) + 1,
-        filePath,
-        language: 'liquid' as Language,
-      });
+      emitImport(sectionMatch[1], lineNum, (sectionMatch.index ?? 0) + 1, 'section');
     }
 
     // assign → variable node
@@ -88,6 +84,30 @@ export function extractLiquid(
         decorators: [],
         typeParameters: [],
       });
+    }
+
+    // 输出表达式/过滤器 → calls: {{ fn(...) }} / {{ x | upcase }} / {{ x | default: 5 }}
+    const outMatch = line.match(/\{\{(.*?)\}\}/);
+    if (outMatch) {
+      const expr = outMatch[1];
+      const emitCall = (name: string): void => {
+        if (LIQUID_KEYWORDS.has(name)) return;
+        references.push({
+          fromSymbolName: '<file>',
+          fromSymbolId: makeFileNodeId(filePath),
+          referenceName: name,
+          referenceKind: 'calls',
+          line: lineNum,
+          col: (outMatch.index ?? 0) + 1,
+          filePath,
+          language: 'liquid' as Language,
+        });
+      };
+      const fnRe = /([A-Za-z_]\w*)\s*\(/g;
+      let fm: RegExpExecArray | null;
+      while ((fm = fnRe.exec(expr)) !== null) emitCall(fm[1]);
+      const filterRe = /\|\s*([A-Za-z_]\w*)/g;
+      while ((fm = filterRe.exec(expr)) !== null) emitCall(fm[1]);
     }
 
     // schema 块 → JSON schema 定义
@@ -125,7 +145,27 @@ export function extractLiquid(
         });
       }
     }
+
+    // {% ... %} 标签体内的函数调用: {% assign y = fn() %} / {% if fn() %}
+    const tagBodyMatch = line.match(/\{%[-]?\s*\w+\b([\s\S]*?)%\}/);
+    if (tagBodyMatch && tagBodyMatch[1]) {
+      const fnRe = /([A-Za-z_]\w*)\s*\(/g;
+      let fm: RegExpExecArray | null;
+      while ((fm = fnRe.exec(tagBodyMatch[1])) !== null) {
+        if (LIQUID_KEYWORDS.has(fm[1])) continue;
+        references.push({
+          fromSymbolName: '<file>',
+          fromSymbolId: makeFileNodeId(filePath),
+          referenceName: fm[1],
+          referenceKind: 'calls',
+          line: lineNum,
+          col: (tagBodyMatch.index ?? 0) + 1,
+          filePath,
+          language: 'liquid' as Language,
+        });
+      }
+    }
   }
 
-  return { symbols, references, edges };
+  return { symbols, references, importReferences, structuralReferences: [], edges };
 }

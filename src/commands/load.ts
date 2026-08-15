@@ -14,27 +14,37 @@ import { resolve, join } from 'node:path';
 import { truncate } from '../utils/cli-format.js';
 import { isDeprecatedKnowledgeEntry } from '../utils/knowledge-lifecycle.js';
 import type { WikiIndexer } from '#maestro-dashboard/wiki/wiki-indexer.js';
-import type { WikiEntry } from '#maestro-dashboard/wiki/wiki-types.js';
+import type { WikiEntry, WikiIndex } from '#maestro-dashboard/wiki/wiki-types.js';
 import { loadWorkspaceConfig, resolveWorkspaceLinks } from '../config/index.js';
 
 const VALID_TYPES = ['spec', 'knowhow', 'note', 'domain', 'issue', 'project', 'roadmap', 'session', 'scratch'] as const;
 type LoadType = (typeof VALID_TYPES)[number];
 
 let _indexer: WikiIndexer | null = null;
+let _indexerRoot: string | null = null;
 
-async function getIndexer(): Promise<WikiIndexer> {
-  if (!_indexer) {
-    const { WikiIndexer: Cls } = await import('#maestro-dashboard/wiki/wiki-indexer.js');
-    const workflowRoot = resolve('.workflow');
-    const projectPath = process.cwd();
-    const wsConfig = loadWorkspaceConfig(projectPath);
-    const resolved = resolveWorkspaceLinks(projectPath, wsConfig);
-    const linkedWorkspaces = resolved
-      .filter(lw => lw.valid)
-      .map(lw => ({ name: lw.name, workflowRoot: lw.workflowRoot, shareTypes: lw.share }));
-    _indexer = new Cls({ workflowRoot, linkedWorkspaces });
+async function getIndexer(projectRoot?: string): Promise<WikiIndexer> {
+  const root = resolve(projectRoot ?? '.');
+  if (_indexer && _indexerRoot === root) return _indexer;
+  if (_indexerRoot !== root) {
+    _indexer = null;
+    _indexerRoot = root;
   }
+  const { WikiIndexer: Cls } = await import('#maestro-dashboard/wiki/wiki-indexer.js');
+  const workflowRoot = resolve(root, '.workflow');
+  const projectPath = root;
+  const wsConfig = loadWorkspaceConfig(projectPath);
+  const resolved = resolveWorkspaceLinks(projectPath, wsConfig);
+  const linkedWorkspaces = resolved
+    .filter(lw => lw.valid)
+    .map(lw => ({ name: lw.name, workflowRoot: lw.workflowRoot, shareTypes: lw.share }));
+  _indexer = new Cls({ workflowRoot, linkedWorkspaces });
   return _indexer;
+}
+
+/** Shared indexer accessor for knowledge signal-id validation (K8). */
+export async function getWikiIndexer(projectRoot?: string): Promise<WikiIndexer> {
+  return getIndexer(projectRoot);
 }
 
 function matchesType(entry: WikiEntry, type: LoadType): boolean {
@@ -59,7 +69,44 @@ function formatEntry(e: WikiEntry): string {
     ? `\n\n[editedFiles: ${(e.ext.editedFiles as string[]).join(', ')}]` : '';
   const related = e.related.length > 0
     ? `\n[related: ${e.related.join(', ')}]` : '';
-  return `## [${badge}]${catTag} ${e.title}\n\n${e.body || e.summary}${codePaths}${editedFiles}${related}`;
+  // KG codegraph stubs carry no body in the wiki index — point at the source
+  // file so the caller can still reach the full text.
+  const body = e.body || e.summary;
+  const filePath = typeof e.ext?.filePath === 'string' && e.ext.filePath.length > 0
+    && !e.body
+    ? `\n\n→ 全文: ${e.ext.filePath}` : '';
+  return `## [${badge}]${catTag} ${e.title}\n\n${body}${codePaths}${editedFiles}${filePath}${related}`;
+}
+
+const TYPE_PREFIXES = ['spec', 'knowhow', 'note', 'domain', 'issue', 'project', 'roadmap', 'session', 'scratch'] as const;
+
+/**
+ * Resolve an entry ID with tolerance: exact match first, then
+ * case-insensitive, then with the `--type` prefix applied (e.g. `--id dcs-…`
+ * matches `knowhow-dcs-…`). When no type is given (wiki load/get), all known
+ * type prefixes are tried. Mirrors the lowercase canonical IDs produced by
+ * knowhowFileToWikiId() so hand-typed IDs don't miss.
+ */
+export function findEntry(index: WikiIndex, rawId: string, type?: LoadType): WikiEntry | null {
+  const exact = index.byId[rawId];
+  if (exact) return exact;
+  const lower = rawId.toLowerCase();
+  const candidates: string[] = [lower];
+  if (type) {
+    if (type !== 'session' && type !== 'scratch' && !lower.startsWith(`${type}-`)) {
+      candidates.push(`${type}-${lower}`);
+    }
+  } else {
+    for (const t of TYPE_PREFIXES) {
+      if (!lower.startsWith(`${t}-`)) candidates.push(`${t}-${lower}`);
+    }
+  }
+  for (const candidate of candidates) {
+    for (const e of index.entries) {
+      if (e.id.toLowerCase() === candidate) return e;
+    }
+  }
+  return null;
 }
 
 function formatListLine(e: WikiEntry): string {
@@ -89,6 +136,41 @@ function entryToJson(e: WikiEntry, brief: boolean): Record<string, unknown> {
   };
 }
 
+export async function recordLoadedKnowledge(entries: WikiEntry[]): Promise<void> {
+  try {
+    const { recordKnowledgeConsumptionsDetailed } = await import('../graph/kg/knowledge-usage.js');
+    const result = recordKnowledgeConsumptionsDetailed(
+      process.cwd(),
+      entries.map(entry => ({ id: entry.id, sourceRef: entry.sourceRef })),
+    );
+    if (result.nodeIds.length === 0) return;
+    const { recordActiveRunKnowledgeInputs } = await import('../run/knowledge.js');
+    const runAttribution = recordActiveRunKnowledgeInputs(process.cwd(), result.nodeIds);
+    if (runAttribution) return;
+    // No unique active Run: try an unambiguous Session identity (lease or a
+    // single live channel). Never creates Sessions for attribution purposes.
+    try {
+      const { SessionStore } = await import('../run/store.js');
+      const { findSessionAttributionTarget } = await import('../run/knowledge-identity.js');
+      const store = new SessionStore(process.cwd());
+      const sessionId = findSessionAttributionTarget(process.cwd(), store);
+      if (sessionId) {
+        const { recordSessionKnowledgeInputs } = await import('../run/session-knowledge.js');
+        recordSessionKnowledgeInputs(process.cwd(), sessionId, result.nodeIds, 'consumed', 'load');
+        return;
+      }
+    } catch {
+      // Session attribution is best-effort; fall through to the warning.
+    }
+    console.error(
+      'Warning: knowledge consumption recorded in the global ledger, but run/session '
+      + 'attribution was skipped (no resolvable write authority).',
+    );
+  } catch {
+    // Usage analytics must never block knowledge loading.
+  }
+}
+
 export function registerLoadCommand(program: Command): void {
   program
     .command('load')
@@ -97,6 +179,7 @@ export function registerLoadCommand(program: Command): void {
     .option('--id <ids>', 'Load specific entries by ID (comma-separated)')
     .option('--category <cat>', 'Filter by category (e.g. coding, arch, debug, recipe)')
     .option('--keyword <word>', 'Filter entries by keyword in title/body')
+    .option('--tag <tag>', 'Filter entries by exact tag match')
     .option('--list', 'List matching entries (compact, no body)')
     .option('--scope <scope>', 'Spec scope: project|global|team|personal (default: project)')
     .option('--limit <n>', 'Max entries (default: 20 for --list, 10 for load)', '')
@@ -132,10 +215,10 @@ export function registerLoadCommand(program: Command): void {
 
       if (ids.length > 0) {
         entries = ids
-          .map(id => index.byId[id])
-          .filter((e): e is WikiEntry => Boolean(e) && (includeDeprecated || !isDeprecatedKnowledgeEntry(e)));
+          .map(id => findEntry(index, id, type))
+          .filter((e): e is WikiEntry => e !== null && (includeDeprecated || !isDeprecatedKnowledgeEntry(e)));
         const missing = ids.filter(id => {
-          const entry = index.byId[id];
+          const entry = findEntry(index, id, type);
           return !entry || (!includeDeprecated && isDeprecatedKnowledgeEntry(entry));
         });
         if (missing.length > 0) {
@@ -154,15 +237,28 @@ export function registerLoadCommand(program: Command): void {
           const kw = opts.keyword.toLowerCase();
           pool = pool.filter(e =>
             e.title.toLowerCase().includes(kw) ||
-            e.body.toLowerCase().includes(kw) ||
-            e.tags.some(t => t.toLowerCase().includes(kw)),
+            e.body.toLowerCase().includes(kw),
           );
+        }
+        if (opts.tag) {
+          const tag = opts.tag.toLowerCase();
+          pool = pool.filter(e => e.tags.includes(tag));
         }
 
         if (type === 'session' || type === 'scratch') {
           pool.sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
         } else {
-          pool.sort((a, b) => a.title.localeCompare(b.title));
+          // Content-bearing entries (file-backed or kg nodes with body) sort
+          // before empty stub projections so discovery views aren't flooded
+          // by codegraph stubs; title order stays deterministic within groups.
+          pool.sort((a, b) => {
+            // Codegraph stubs carry no body — keep them after entries that
+            // surface full text so discovery views aren't flooded by stubs.
+            const aStub = !a.body;
+            const bStub = !b.body;
+            if (aStub !== bStub) return aStub ? 1 : -1;
+            return a.title.localeCompare(b.title);
+          });
         }
 
         entries = pool.slice(0, limit);
@@ -172,6 +268,10 @@ export function registerLoadCommand(program: Command): void {
         console.error('No entries found.');
         return;
       }
+
+      // Listing is discovery only. Returning full content is an explicit
+      // consumption signal, regardless of whether output is text or JSON.
+      if (!isList) await recordLoadedKnowledge(entries);
 
       if (opts.json) {
         console.log(JSON.stringify({

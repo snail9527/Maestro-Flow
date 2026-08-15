@@ -14,7 +14,9 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "react-router-dom": ["src/client/router.tsx"],
+      "#maestro-transformers": ["./vendor/transformers/types/transformers.d.ts"]
     }
   },
   "include": ["src/**/*", "vite-env.d.ts"],

@@ -422,96 +422,20 @@ if (severity.length > 0) {
 }
 ```
 
-## Maestro Ralph Swarm 集成
+## Maestro 内的 Workflow 使用
 
-### 架构定位
+### 已退役：`--engine swarm --script wf-*`
 
-`/maestro-ralph --engine swarm` 是基于 Workflow 工具的并行加速层，与 `/maestro-ralph`（顺序决策链）互补：
+`/maestro-ralph --engine swarm --script wf-*` 这一层并行加速语法**已随 v0.5.56 的 Session/Run 链统一全部退役**，没有 1:1 后继：Ralph 不再拥有独立 CLI 驱动，只调用 `maestro session ... / maestro run ...`。`workflows/swarm/` 下的 8 个旧脚本在活树里已无任何引用。不要用别的命令去"顶替"这个语法。
 
-```
-┌─ Ralph（外层决策闭环）──────────────────────────────┐
-│  intent → lifecycle position → step chain           │
-│  decision nodes → quality gates → fix loops         │
-│                                                     │
-│  某些 step 调用 ralph --engine swarm 加速：          │
-│  ┌─ Swarm Workflow（内层并行加速）────────────────┐  │
-│  │  parallel agents → structured output → JSON    │  │
-│  │  无状态、无决策、纯计算                          │  │
-│  └────────────────────────────────────────────────┘  │
-│                                                     │
-│  Ralph 消费 JSON → 写 artifact → 推进 step          │
-└─────────────────────────────────────────────────────┘
-```
+### 对抗式 swarm 模式（workflows/swarm/）
 
-### 固定脚本清单
+> v0.5.61 起 `team-adversarial-swarm` skill 已删除。其对抗决策模式作为通用能力保留在
+> `workflows/swarm/` 的 Workflow 脚本中（如 `wf-analyze.js`、`wf-verify.js`）：
+> prosecutor/defender/judge、3-vote 多数决、3-way advocacy + referee。
 
-脚本源码位于 `workflows/swarm/`，安装后位于 `~/.maestro/workflows/swarm/`：
-
-| 脚本 | 加速命令 | 对抗决策模式 | args 接口 |
-|------|---------|-------------|-----------|
-| `wf-analyze.js` | /maestro-ralph --engine swarm --script wf-analyze | 探索 → 6 维度评分 → **skeptic 逐维挑战** → **3 方 advocacy (go/no-go/conditional) + referee** | `{ target, scope, context, phase?, dimensions? }` |
-| `wf-brainstorm.js` | /maestro-ralph --engine swarm --script wf-brainstorm | N 角色分析 → **3 专项 reviewer** → **3 哲学方案竞标** → **arbitrator 仲裁** | `{ topic, context, count?, roles? }` |
-| `wf-review.js` | /maestro-ralph --engine swarm --script wf-review | 6 维度扫描 → **3 票对抗验证 (prosecutor/defense/judge)** → **3 视角报告 + 仲裁裁决** | `{ target, scope, specs?, tier?, dimensions? }` |
-| `wf-verify.js` | (retired in v0.5.51, integrated into maestro-ralph decision gate) | 3 层 + 反模式 + 收敛 → **prosecutor vs defender 辩论** → **judge 裁决** | `{ goals, plan_dir?, scope?, task_files?, must_haves?, skip_antipattern? }` |
-| `wf-grill.js` | /maestro-ralph --engine swarm --script wf-grill | 探索 → N 分支压力 → **meta-skeptic 反向挑战** → **3 票裁决 (optimist/pessimist/realist)** | `{ topic, context?, depth? }` |
-| `wf-plan.js` | /maestro-next or /maestro-ralph | 并行上下文 → **3 策略竞标 (breadth/depth/risk)** → **judge 评分选优** → **3 专项 critic 挑战** | `{ context_dir?, from?, phase?, scope?, specs?, gaps?, quick? }` |
-| `wf-execute.js` | /maestro-ralph continue | wave 并行执行 → **对抗性收敛抽查** → **3 票状态裁决 (optimist/pessimist/realist)** | `{ plan_dir, specs?, codebase_context?, auto_commit? }` |
-| `wf-milestone-audit.js` | /maestro-session-seal | 3 维度审计 → **对抗性维度挑战** → **3 票裁决 (strict/lenient/objective)** | `{ milestone?, is_adhoc? }` |
-
-### 路由命令使用
-
-```bash
-# 直接调用
-/maestro-ralph --engine swarm "analyze auth module"
-/maestro-ralph --engine swarm --script wf-brainstorm "brainstorm 实时协作方案" --count 5
-/maestro-ralph --engine swarm --script wf-review --tier quick
-
-# 限定维度/角色
-/maestro-ralph --engine swarm "analyze" --dims architecture,security,performance
-/maestro-ralph --engine swarm "brainstorm" --roles system-architect,ux-expert,security-analyst
-
-# 增量恢复
-/maestro-ralph --engine swarm --resume wf_abc123
-```
-
-### 路由规则
-
-| 关键词 | 目标脚本 |
-|--------|---------|
-| 分析 / analyze / 探索 / 架构 / 复杂度 / 风险 | `wf-analyze` |
-| 头脑风暴 / brainstorm / 方案 / 设计 / 评估 | `wf-brainstorm` |
-| 审查 / review / 代码审查 / 质量 | `wf-review` |
-| 验证 / verify / 检查 / 反模式 | `wf-verify` |
-
-`--script` 参数可跳过路由直接指定脚本。
-
-### 与 Ralph 的集成方式
-
-Ralph 的 `A_BUILD_STEPS` 可以将 step 的执行器设为 `maestro-ralph`（配合 `--engine swarm`）：
-
-```json
-{
-  "index": 2,
-  "skill": "maestro-ralph",
-  "args": "--engine swarm --script wf-analyze {phase}",
-  "stage": "analyze",
-  "command_scope": "project",
-  "command_path": ".claude/commands/maestro-ralph.md"
-}
-```
-
-执行流程不变：`ralph-execute` → `maestro ralph next` 加载 → 内联执行 → ralph swarm 内部调 Workflow 工具。
-
-### 产出兼容性
-
-每个脚本的返回 JSON 由路由命令转写为对应命令的标准 artifact 格式：
-
-| 脚本 | 产出文件 | 兼容命令 |
-|------|---------|---------|
-| `wf-analyze` | `analysis.md` + `context.md` + `conclusions.json` | /maestro-ralph --engine swarm --script wf-analyze |
-| `wf-brainstorm` | `guidance-specification.md` | /maestro-ralph --engine swarm --script wf-brainstorm |
-| `wf-review` | `review.json` | /maestro-ralph --engine swarm --script wf-review |
-| `wf-verify` | `verification.json` | (retired in v0.5.51, integrated into maestro-ralph decision gate) |
+需要"并行探索 + 对抗验证"式深度分析时，直接用 `Workflow({ scriptPath })` 调用
+`workflows/swarm/` 下对应脚本；ACO 信息素驱动的多代理探索用 `team-swarm` skill。
 
 ## 限制与注意事项
 

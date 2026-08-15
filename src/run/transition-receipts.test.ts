@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync,} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
   createTransitionOutcome,
+  createTransitionOutcomeV11,
   createTransitionRequest,
+  createTransitionRequestV11,
   replayOrApplyTransition,
+  replayOrApplyTransitionV11,
   TransitionReceiptError,
 } from './transition-receipts.js';
 import {
@@ -25,6 +28,7 @@ import {
   transitionRequestSchema,
   validatedRecallSourceSchema,
   type TransitionFence,
+  type TransitionFenceV11,
 } from './protocol-schemas.js';
 import { createIntentIdentity } from './intent-identity.js';
 import {
@@ -33,6 +37,13 @@ import {
   type SessionTransitionOptions,
 } from './session-transition.js';
 import { SessionStore } from './store.js';
+
+function v2Workspace(root: string): void {
+  mkdirSync(join(root, ".workflow"), { recursive: true });
+  writeFileSync(join(root, ".workflow", "config.json"), JSON.stringify({
+    session_schema: { schema_version: "session-schema-selection/1.0", writer: "session/1.3", features: { session_statusless: false } },
+  }));
+}
 
 const hash = `sha256:${'a'.repeat(64)}`;
 const otherHash = `sha256:${'b'.repeat(64)}`;
@@ -61,6 +72,58 @@ function request() {
     preconditions: fence(0),
     payload: { actor: 'user' },
   });
+}
+
+function fenceV11(
+  revision: number,
+  activity: number,
+  epoch: number | null,
+  status: 'active' | 'paused' = 'active',
+): TransitionFenceV11 {
+  return {
+    session_identity_revision: 1,
+    session_activity_revision: activity,
+    execution_id: 'execution-1',
+    execution_generation: 1,
+    execution_revision: revision,
+    execution_status: status,
+    lease_epoch: epoch,
+    active_run_id: null,
+    run_hash: null,
+    artifact_registry_revision: 0,
+  };
+}
+
+function transitionV11(
+  requestId: string,
+  operation: 'execution-pause' | 'execution-resume',
+  before: TransitionFenceV11,
+  after: TransitionFenceV11,
+  result: Record<string, unknown>,
+) {
+  const request = createTransitionRequestV11({
+    request_id: requestId,
+    operation,
+    subject: {
+      session_id: 's', execution_id: 'execution-1', generation: 1,
+      run_id: null, chain_step_id: null,
+    },
+    requested_at: '2026-07-20T00:00:00.000Z',
+    preconditions: before,
+    payload: { operation },
+  });
+  return replayOrApplyTransitionV11([], request, before, () => createTransitionOutcomeV11({
+    request_id: request.request_id,
+    request_hash: request.normalized_request_hash,
+    operation,
+    status: 'applied',
+    applied_at: '2026-07-20T00:00:01.000Z',
+    subject: request.subject,
+    postconditions: after,
+    exit_code: 0,
+    error_code: null,
+    result,
+  }));
 }
 
 function seedPausedRecovery(projectRoot: string, sessionId: string): SessionStore {
@@ -133,6 +196,55 @@ describe('transition request/outcome receipts', () => {
       expect(() => replayOrApplyTransition([first.record], req, fence(2), () => first.outcome))
         .toThrowError(expect.objectContaining({ code: 'REPLAY_STATE_DIVERGED' }));
     }
+  });
+
+  it('replays transition/1.1 only through valid receipt-backed successors', () => {
+    const paused = transitionV11(
+      'req-pause-v11',
+      'execution-pause',
+      fenceV11(1, 1, 1),
+      fenceV11(2, 2, null, 'paused'),
+      { status: 'paused', released_epoch: 1 },
+    );
+    const resumed = transitionV11(
+      'req-resume-v11',
+      'execution-resume',
+      fenceV11(2, 2, null, 'paused'),
+      fenceV11(3, 3, 2),
+      { status: 'active', lease: { epoch: 2 } },
+    );
+    const replay = replayOrApplyTransitionV11(
+      [paused.record, resumed.record],
+      paused.record.payload,
+      fenceV11(3, 3, 2),
+      () => { throw new Error('must not reapply'); },
+    );
+    expect(replay).toMatchObject({ replayed: true, outcome: { transition_id: paused.outcome.transition_id } });
+
+    const original = paused.record.payload;
+    const conflict = createTransitionRequestV11({
+      request_id: original.request_id,
+      operation: original.operation,
+      subject: original.subject,
+      requested_at: original.requested_at,
+      preconditions: original.preconditions,
+      payload: { operation: 'changed' },
+    });
+    expect(() => replayOrApplyTransitionV11(
+      [paused.record, resumed.record], conflict, fenceV11(3, 3, 2), () => paused.outcome,
+    )).toThrowError(expect.objectContaining({ code: 'REQUEST_CONFLICT' }));
+
+    const crossBound = structuredClone(paused.record);
+    crossBound.claimed_by_run_id = 'foreign-run';
+    expect(() => replayOrApplyTransitionV11(
+      [crossBound], paused.record.payload, fenceV11(2, 2, null, 'paused'), () => paused.outcome,
+    )).toThrowError(expect.objectContaining({ code: 'INVALID_TRANSITION_RECEIPT' }));
+
+    const rewritten = structuredClone(paused.record);
+    rewritten.outcome.postconditions.execution_status = 'active';
+    expect(() => replayOrApplyTransitionV11(
+      [rewritten], paused.record.payload, rewritten.outcome.postconditions, () => paused.outcome,
+    )).toThrowError(expect.objectContaining({ code: 'REPLAY_STATE_DIVERGED' }));
   });
 
   it('applies once and replays the identical request without invoking mutation', () => {
@@ -226,6 +338,8 @@ describe('transition request/outcome receipts', () => {
 describe('canonical paused recovery transitions', () => {
   it('keeps the Session paused after resolving one recovery target', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'maestro-resolve-paused-'));
+
+    v2Workspace(projectRoot);
     roots.push(projectRoot);
     const store = seedPausedRecovery(projectRoot, 's');
     store.update('s', draft => {
@@ -262,8 +376,12 @@ describe('canonical paused recovery transitions', () => {
     expect(transition.replayed).toBe(false);
     expect(transition.next).toMatchObject({
       suggest_only: true,
-      command: 'maestro session resume --session s',
+      command: expect.stringContaining('maestro run recover --session s'),
     });
+    expect(transition.next.command).toContain('--step step-001-failed');
+    expect(transition.next.command).toContain('--disposition <retry|skip>');
+    expect(transition.next.command).toContain(`--expected-identity-revision ${after.identity_revision}`);
+    expect(transition.next.command).toContain(`--expected-activity-revision ${after.activity_revision}`);
     expect(after.status).toBe('paused');
     expect(after.active_run_id).toBeNull();
     expect(after.orchestration.decision_points[0]).toMatchObject({
@@ -333,6 +451,8 @@ describe('canonical paused recovery transitions', () => {
 
     for (const item of cases) {
       const projectRoot = mkdtempSync(join(tmpdir(), `maestro-resume-${item.name.replaceAll(' ', '-')}-`));
+
+      v2Workspace(projectRoot);
       roots.push(projectRoot);
       const store = seedPausedRecovery(projectRoot, 's');
       item.mutate(store);
@@ -482,6 +602,8 @@ describe('recall, confirmation, transition and import protocol schemas', () => {
 describe('SessionStore confirmation and transition APIs', () => {
   it('issues, reads and consumes a single-use confirmation under the global lock', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'maestro-confirmation-'));
+
+    v2Workspace(projectRoot);
     roots.push(projectRoot);
     const store = new SessionStore(projectRoot);
     const identity = createIntentIdentity(projectRoot, 'plan', 'target');
@@ -517,6 +639,8 @@ describe('SessionStore confirmation and transition APIs', () => {
 
   it('persists a transition receipt with the Session mutation and replays without mutation', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'maestro-transition-store-'));
+
+    v2Workspace(projectRoot);
     roots.push(projectRoot);
     const store = new SessionStore(projectRoot);
     store.createSession('s', 'resume me', { command: 'plan' });

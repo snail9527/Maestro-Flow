@@ -21,7 +21,7 @@ allowed-tools:
   - spawn_agents_on_csv
   - wait_agent
 session-mode: none
-version: 0.5.53
+version: 0.5.74
 ---
 
 <purpose>
@@ -31,7 +31,7 @@ Learning toolkit for building understanding of code, decisions, and plans. Four 
 - `decompose` — parallel multi-dimension pattern extraction → reusable pattern catalog
 - `consult` — alternative perspectives via review / challenge / interactive Q&A
 
-All findings persist to `.workflow/knowhow/` and append `<spec-entry>` blocks to `.workflow/specs/learnings.md`.
+All findings persist to `.workflow/knowhow/` and append `<learning-entry>` blocks to `.workflow/specs/learnings.md`.
 </purpose>
 
 <routing>
@@ -49,6 +49,13 @@ $ARGUMENTS — parse first token as `<subcommand>`, remainder as that subcommand
 |------|-----------|----------|
 | E_NO_SUBCOMMAND | No subcommand provided in $ARGUMENTS | Display valid subcommands (follow, investigate, decompose, consult), prompt user to select |
 | E_INVALID_SUBCOMMAND | Unrecognized first token | Display valid subcommands with usage hints |
+
+**Subcommand selection guide:**
+- `follow` — understand code logic flow (why/how). Input: code path. Method: sequential reading + forcing questions. Output: understanding map.
+- `decompose` — extract reusable pattern catalog (what patterns). Input: module/directory. Method: 4 parallel dimension agents. Output: pattern catalog.
+- `follow --depth deep` covers every branch but focuses on comprehension; `decompose` focuses on pattern classification and reusability. They are complementary, not alternatives.
+- `investigate` — answer a specific question via hypothesis-driven search. Input: question. Method: scientific method (evidence → hypothesis → test). Output: evidence-backed report.
+- Key distinction: `follow` input is a **code path** (top-down reading); `investigate` input is a **question** (hypothesis-driven search).
 </routing>
 
 ---
@@ -58,7 +65,7 @@ $ARGUMENTS — parse first token as `<subcommand>`, remainder as that subcommand
 **Usage**: `/maestro-learn follow <path|wiki-id|topic> [--depth shallow|deep] [--save-wiki] [-y]`
 
 <purpose>
-Guided reading: walk through content section-by-section using forcing questions to extract patterns, identify assumptions, and build an understanding map. Findings persist to `.workflow/specs/learnings.md` as `<spec-entry>` blocks.
+Guided reading: walk through content section-by-section using forcing questions to extract patterns, identify assumptions, and build an understanding map. Findings persist to `.workflow/specs/learnings.md` as `<learning-entry>` blocks.
 </purpose>
 
 <context>
@@ -112,9 +119,9 @@ Arguments — target and optional flags.
 - BLOCKED if: unanchored patterns remain in extraction results.
 
 **GATE 4: Persistence → Completion** (S_PERSIST → END)
-- REQUIRED: Unless `-y`, request_user_input showing files to write and spec-entries to append — user must confirm.
+- REQUIRED: Unless `-y`, request_user_input showing files to write and learning-entries to append — user must confirm.
 - REQUIRED: KNW-follow-{slug}-{date}.md written with understanding map.
-- REQUIRED: learnings.md appended (not overwritten) with new spec-entry blocks.
+- REQUIRED: learnings.md appended (not overwritten) with new learning-entry blocks.
 - BLOCKED if: user declines confirmation — offer to adjust findings before retry.
 
 </execution>
@@ -127,7 +134,7 @@ S_CONTEXT      — 构建 1-hop 上下文邻域                       PERSIST: �
 S_ORDER        — 确定阅读顺序                                PERSIST: —
 S_READ         — 逐节应用 forcing questions                   PERSIST: —
 S_EXTRACT      — 提取 patterns、cross-ref conventions         PERSIST: —
-S_PERSIST      — 写 understanding map + spec-entry 块         PERSIST: knowhow files
+S_PERSIST      — 写 understanding map + learning-entry 块         PERSIST: knowhow files
 </states>
 
 <transitions>
@@ -149,7 +156,7 @@ S_EXTRACT:
   → S_PERSIST     DO: A_EXTRACT_PATTERNS
 
 S_PERSIST:
-  → END           GATE: unless -y, request_user_input showing files to write and spec-entries to append — proceed only on confirm
+  → END           GATE: unless -y, request_user_input showing files to write and learning-entries to append — proceed only on confirm
                   DO: write KNW-follow + append .workflow/specs/learnings.md [+ wiki note if --save-wiki]
 
 </transitions>
@@ -206,7 +213,7 @@ Write understanding map: Key Concepts, Patterns (table: name/location/convention
 <success_criteria>
 - [ ] 4 forcing questions applied per section
 - [ ] Patterns extracted with file:line anchors and convention cross-ref
-- [ ] Understanding map + spec-entry blocks written
+- [ ] Understanding map + learning-entry blocks written
 </success_criteria>
 
 <next_step_routing>
@@ -238,7 +245,7 @@ Arguments — question text and optional flags.
 - `.workflow/knowhow/KNW-investigate-{slug}/evidence.ndjson` — structured evidence (one JSON line per item)
 - `.workflow/knowhow/KNW-investigate-{slug}/understanding.md` — evolving understanding
 - `.workflow/knowhow/KNW-investigate-{slug}/report.md` — final report
-- `.workflow/specs/learnings.md` — appended `<spec-entry>` blocks
+- `.workflow/specs/learnings.md` — appended `<learning-entry>` blocks
 
 **Storage read**: source files in scope + `maestro search` + `.workflow/specs/learnings.md` + `debug-notes.md` + `codebase/architecture.md`
 
@@ -252,7 +259,7 @@ Arguments — question text and optional flags.
 4. **Hypothesis cap** — MUST NOT generate more than `--max-hypotheses` (default 3) before triggering escalation; NEVER silently exceed the cap
 5. **Structured evidence format** — every evidence entry MUST include `{ts, type, source, relevance, content, note}`; incomplete entries SHALL NOT be appended
 6. **3-strike escalation** — after all hypotheses fail, MUST escalate to user via request_user_input; NEVER silently conclude as INCONCLUSIVE without user interaction
-7. **Confirmation gate** — unless `-y` is set, MUST present report.md path and spec-entries via request_user_input before final writes
+7. **Confirmation gate** — unless `-y` is set, MUST present report.md path and learning-entries via request_user_input before final writes
 </invariants>
 
 <state_machine>
@@ -296,7 +303,7 @@ S_ESCALATE:
   → S_REPORT      WHEN: user selects "Escalate" or still stuck          DO: mark INCONCLUSIVE
 
 S_REPORT:
-  → END           GATE: unless -y, request_user_input showing report.md path and spec-entries to append — proceed only on confirm
+  → END           GATE: unless -y, request_user_input showing report.md path and learning-entries to append — proceed only on confirm
                   DO: A_SYNTHESIZE_REPORT
 
 </transitions>
@@ -367,7 +374,7 @@ Append to .workflow/specs/learnings.md: confirmed → roles="implement", disprov
 - [ ] Evidence collected and logged to evidence.ndjson (structured NDJSON)
 - [ ] At least 1 hypothesis formed and tested
 - [ ] 3-strike escalation triggered if all fail
-- [ ] Report + spec-entry blocks written
+- [ ] Report + learning-entry blocks written
 </success_criteria>
 
 <next_step_routing>
@@ -393,7 +400,7 @@ Arguments — target path/module and optional flags.
 
 **Flags**:
 - `--patterns <list>`: Comma-separated pattern names to look for (default: detect all)
-- `--save-spec`: recommend `/maestro-spec add ...` for each new pattern
+- `--save-spec`: execute `/maestro-spec add ...` for each new pattern (not just recommend)
 - `--save-wiki`: create wiki note per dimension group
 - `-y`: Skip confirmation prompts for knowhow/spec writes
 
@@ -443,7 +450,7 @@ S_CATALOG:
 
 S_PERSIST:
   → END           GATE: unless -y, request_user_input showing files to write and patterns to persist — proceed only on confirm
-                  DO: append .workflow/specs/learnings.md [+ maestro-spec add if --save-spec] [+ wiki note if --save-wiki]
+                  DO: append .workflow/specs/learnings.md [+ execute maestro-spec add if --save-spec] [+ wiki note if --save-wiki]
 
 </transitions>
 
@@ -527,7 +534,9 @@ Arguments — target and optional mode flag.
 - `--mode review|challenge|consult` (default: review)
 - `-y`: Skip confirmation prompts for knowhow/spec writes
 
-**Pre-load** (optional): recommend `/maestro-spec load ...` for conventions + `maestro search "<target topic>"` for related entries.
+`-y` in consult mode: skips the final write confirmation only. The interactive Q&A loop is NOT affected by `-y` (it is the core interaction, not a confirmation). Use `--mode review` for non-interactive alternative.
+
+**Pre-load** (optional): recommend `maestro load --type spec` for conventions + `maestro search "<target topic>"` for related entries.
 
 **Output**: `.workflow/knowhow/KNW-opinion-{slug}-{YYYY-MM-DD}.md`
 
@@ -571,8 +580,8 @@ S_SYNTHESIZE:
   → S_PERSIST     DO: merge perspectives → agreements, disagreements, verdict, top 3 recommendations
 
 S_PERSIST:
-  → END           GATE: unless -y, request_user_input showing files to write and spec-entries to append — proceed only on confirm
-                  DO: write KNW-opinion + append <spec-entry> blocks to .workflow/specs/learnings.md
+  → END           GATE: unless -y, request_user_input showing files to write and learning-entries to append — proceed only on confirm
+                  DO: write KNW-opinion + append <learning-entry> blocks to .workflow/specs/learnings.md
 
 </transitions>
 
@@ -625,7 +634,7 @@ Interactive loop:
 </success_criteria>
 
 <next_step_routing>
-- Create issue → `/maestro-manage issue create <description>`
+- Create issue → `/maestro-issue create <description>`
 - Decompose patterns → `/maestro-learn decompose <path>`
 - Follow code → `/maestro-learn follow <path>`
 </next_step_routing>

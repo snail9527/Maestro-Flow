@@ -15,7 +15,7 @@ Unlike `/maestro-overlay` (explicit single creation), `/maestro-overlay --amend`
 ### Use Cases
 
 - `/maestro-ralph` decision gate exposed missing command steps
-- `/maestro-ralph --engine swarm --script wf-review` identified process-level deficiencies
+- The `review` decision gate (`post-review`) identified process-level deficiencies
 - Workflow execution deviations traced to incomplete command definitions
 - Issue tracking shows recurring problems rooted in command design
 
@@ -48,7 +48,7 @@ Collect Signals → Diagnose & Classify → Group & Plan → Preview & Confirm �
 /maestro-overlay --amend --from-verify .workflow/phases/1     # Discover gaps from verification
 /maestro-overlay --amend --from-review .workflow/phases/2     # Extract process improvements
 /maestro-overlay --amend --scan                                # Auto-scan all signals
-/maestro-overlay --amend "maestro-ralph continue missing CLI verification step"  # Describe directly
+/maestro-overlay --amend "maestro-ralph -c missing CLI verification step"  # Describe directly
 /maestro-overlay --amend --dry-run                             # Preview mode (no install)
 /maestro-overlay --amend -y                                    # Skip confirmation
 ```
@@ -88,9 +88,9 @@ Detect Version → Preview Plan → Step-by-Step Confirm → Execute Migration �
 
 ---
 
-## 3. maestro-spec remove — Spec Removal
+## 3. specs-remove — Spec Removal
 
-Removes a specified `<spec-entry>` from specs files. Symmetric counterpart to `/maestro-spec add`, using `maestro wiki remove-entry` for atomic deletion with automatic index updates.
+Removes a specified `<spec-entry>` from specs files. The symmetric counterpart to `/maestro-spec` (recording), `specs-remove` is an orchestrator-dispatched step that uses `maestro wiki remove-entry` for atomic deletion with automatic index updates.
 
 ### Entry ID Format
 
@@ -102,15 +102,15 @@ spec-{file-stem}-{NNN}  (e.g., spec-learnings-003)
 
 ```bash
 maestro wiki list --type spec --json    # List all spec entries
-/maestro-spec load --keyword auth               # Search by keyword
-/maestro-spec remove spec-learnings-003          # Remove specific entry
+maestro spec load --keyword auth        # Search by keyword (CLI)
+specs-remove spec-learnings-003         # Remove specific entry (step, orchestrator-dispatched)
 ```
 
 ### Notes
 
-- Requires `.workflow/specs/` initialized via `/maestro-spec setup`
+- Requires `.workflow/specs/` initialized via `maestro spec init`
 - Entry ID must be a spec type child node
-- Removal is irreversible (preview with `/maestro-spec load` first)
+- Removal is irreversible (preview with `maestro spec load` first)
 
 ---
 

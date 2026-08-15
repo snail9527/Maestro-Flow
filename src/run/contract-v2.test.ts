@@ -63,6 +63,39 @@ describe('command-contract/2.0', () => {
     expect(createContractSnapshot(contract).contract_version).toBe('command-contract/2.1');
   });
 
+  it('parses schema_range and rejects ambiguous or malformed range declarations', () => {
+    const parsed = parseCommandContract({
+      ...validV2(),
+      consumes: [{ ...validV2().consumes[0], schema: undefined, schema_range: 'plan/1.x' }],
+    });
+    expect(parsed.consumes[0].schema_range).toBe('plan/1.x');
+    expect(parsed.consumes[0].schema).toBeUndefined();
+    expect(() => parseCommandContract({
+      ...validV2(),
+      consumes: [{ ...validV2().consumes[0], schema_range: 'plan/1.x' }],
+    })).toThrow(/both schema and schema_range/);
+    expect(() => parseCommandContract({
+      ...validV2(),
+      consumes: [{ ...validV2().consumes[0], schema: undefined, schema_range: 'plan/01.x' }],
+    })).toThrow(/schema_range must match/);
+    expect(() => parseCommandContract({
+      ...validV2(),
+      consumes: [{ ...validV2().consumes[0], schema: undefined, schema_range: 'other/1.x' }],
+    })).toThrow(/schema_range must match/);
+  });
+
+  it('permits a consume to reuse a producer alias while producer aliases stay unique', () => {
+    const contract = parseCommandContract({
+      ...validV2(),
+      consumes: [{ ...validV2().consumes[0], alias: 'result' }],
+    });
+    expect(contract.consumes[0].alias).toBe('result');
+    expect(() => parseCommandContract({
+      ...validV2(),
+      produces: [validV2().produces[0], { ...validV2().produces[0], path: 'outputs/other.json' }],
+    })).toThrow(/duplicate contract alias/);
+  });
+
   it('fails closed on synonyms, duplicates, traversal and multiple required primary outputs', () => {
     expect(() => parseCommandContract({ ...validV2(), contract_version: 3 })).toThrow(/Unsupported/);
     expect(() => parseCommandContract({
@@ -108,6 +141,38 @@ describe('command-contract/2.0', () => {
     const reversed = parseCommandContract({ ...validV2(), consumes: [...validV2().consumes, { kind: 'spec', required: false }] });
     const reversedOrder = parseCommandContract({ ...validV2(), consumes: [...reversed.consumes].reverse() });
     expect(hashCommandContract(reversed)).not.toBe(hashCommandContract(reversedOrder));
+  });
+
+  it('parses optional chain effects into the normalized contract without changing legacy defaults', () => {
+    const plain = parseCommandContract(validV2());
+    expect(plain.orchestration).toBeUndefined();
+
+    const capable = parseCommandContract({
+      ...validV2(),
+      orchestration: { chain_effects: ['insert', 'skip'] },
+    });
+    expect(capable.orchestration?.chain_effects).toEqual(['insert', 'skip']);
+    expect(createContractSnapshot(capable).normalized).toMatchObject({
+      orchestration: { chain_effects: ['insert', 'skip'] },
+    });
+    expect(hashCommandContract(capable)).not.toBe(hashCommandContract(plain));
+
+    expect(() => parseCommandContract({
+      ...validV2(),
+      orchestration: { chain_effects: ['insert', 'insert'] },
+    })).toThrow(/duplicate chain effect/);
+    expect(() => parseCommandContract({
+      ...validV2(),
+      orchestration: { chain_effects: ['delete'] },
+    })).toThrow();
+  });
+
+  it('supports chain effects on compatibility v1 contracts while preserving empty default behavior', () => {
+    expect(parseCommandContract({
+      consumes: [], produces: [], gates: { entry: [], exit: [] },
+      orchestration: { chain_effects: ['decide'] },
+    }).orchestration?.chain_effects).toEqual(['decide']);
+    expect(parseCommandContract({}).orchestration).toBeUndefined();
   });
 });
 

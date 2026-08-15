@@ -1,22 +1,57 @@
 ---
 name: debug
 description: Locate root cause via scientific method — reproduction, hypothesis testing, and backward tracing — producing only diagnosis and fix directions
-argument-hint: "[issue] [-c] [--from-test <scope>] [--parallel]"
+argument-hint: '[issue] [-c] [--from-test <scope>] [--parallel]'
 contract:
   consumes:
-    - { kind: test-results, alias: latest-test, required: false }
-    - { kind: review-findings, alias: latest-review, required: false }
-    - { kind: execution, alias: current-execution, required: false }
+  - kind: test-results
+    alias: latest-test
+    required: false
+    schema: test-results/1.0
+    role: primary
+  - kind: review-findings
+    alias: latest-review
+    required: false
+    schema: review-findings/1.0
+    role: primary
+  - kind: artifact
+    alias: current-execution
+    required: false
+    schema: artifacts/1.0
+    role: primary
   produces:
-    - { path: outputs/diagnosis.json, kind: diagnosis, alias: latest-debug, role: primary }
-    - { path: outputs/hypotheses.json, kind: hypotheses, role: evidence }
-    - { path: outputs/reproduction.json, kind: reproduction, role: evidence }
-    - { path: outputs/fix-directions.json, kind: fix-directions, role: attachment }
+  - path: outputs/diagnosis.json
+    kind: diagnosis
+    alias: latest-debug
+    role: primary
+    required: true
+    schema: diagnosis/1.0
+  - path: outputs/hypotheses.json
+    kind: hypotheses
+    role: evidence
+    required: false
+    schema: hypotheses/1.0
+  - path: outputs/reproduction.json
+    kind: reproduction
+    role: evidence
+    required: false
+    schema: reproduction/1.0
+  - path: outputs/fix-directions.json
+    kind: fix-directions
+    alias: latest-fix-directions
+    role: attachment
+    required: false
+    schema: fix-directions/1.0
   gates:
-    exit: [hypothesis-tested, evidence-grounded]
+    exit:
+    - hypothesis-tested
+    - evidence-grounded
+  contract_version: 2.1
 refs:
-  - { path: ref/scientific-debug.md, when: The full Iron Law / 3-strike / backward tracing discipline is needed }
-  - { path: ref/cli-supplementary.md, when: CLI supplementary evidence collection is needed }
+- path: ref/scientific-debug.md
+  when: The full Iron Law / 3-strike / backward tracing discipline is needed
+- path: ref/cli-supplementary.md
+  when: CLI supplementary evidence collection is needed
 ---
 
 # Pre-task Thinking: debug
@@ -69,3 +104,7 @@ When prior debug artifacts of the same scope exist, check their root cause first
 
 - `hypothesis-tested`: each hypothesis records a tested action + evidence + status; investigation stops after 3 failures and escalates to architecture inspection rather than free-associating a 4th.
 - `evidence-grounded`: root cause is confirmed only with a reproduction or code/log evidence (`understanding.md` + `evidence.ndjson` present); an unproven hypothesis stays "suspected" and status maps confirmed/partial/inconclusive accordingly.
+
+## Legacy `session/1.x/2.x` Compatibility Branch
+
+deprecated/legacy-only：v2 运行时以 `kind: execution / schema: execution/1.0`（alias `current-execution`）消费当前 Execution 状态记录；v3 下不存在 Execution 记录，等价消费为 Session artifact registry（`artifacts/1.0`）。

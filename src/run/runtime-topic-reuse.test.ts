@@ -3,17 +3,50 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { completeRun, createRun, briefRun, checkRun, prepareStep, resolveArgumentRequirements } from './runtime.js';
+import {
+  completeExecutionRun,
+  completeRun,
+  createExecutionRun,
+  createRun,
+  briefRun,
+  checkRun,
+  prepareStep,
+  resolveArgumentRequirements,
+  resolveTopicSessionId,
+} from './runtime.js';
+import { sealExecution, startExecution } from './execution.js';
+import type { ExecutionLeaseClaim } from './lease.js';
 import { runNextStep } from './next.js';
 import { SessionStore } from './store.js';
 import { createTopicIdentity } from './topic-identity.js';
+import { archiveSession } from './session-transition.js';
+
+function v2Workspace(root: string): void {
+  mkdirSync(join(root, ".workflow"), { recursive: true });
+  writeFileSync(join(root, ".workflow", "config.json"), JSON.stringify({
+    session_schema: { schema_version: "session-schema-selection/1.0", writer: "session/1.3", features: { session_statusless: false } },
+  }));
+}
 
 const roots: string[] = [];
 
 function root(): string {
   const value = mkdtempSync(join(tmpdir(), 'maestro-runtime-topic-'));
+
+  v2Workspace(value);
   roots.push(value);
   return value;
+}
+
+function enableV20(projectRoot: string): void {
+  mkdirSync(join(projectRoot, '.workflow'), { recursive: true });
+  writeFileSync(join(projectRoot, '.workflow', 'config.json'), JSON.stringify({
+    session_schema: {
+      schema_version: 'session-schema-selection/1.0',
+      writer: 'session/2.0',
+      features: { session_statusless: true },
+    },
+  }));
 }
 
 function commandFile(projectRoot: string, name: string, contract: string, argumentHint?: string): void {
@@ -49,6 +82,22 @@ produces: []
 gates:
   entry: []
   exit: []`;
+
+function executionClaim(started: ReturnType<typeof startExecution>): ExecutionLeaseClaim {
+  return {
+    ownerId: started.lease_claim.owner_id,
+    ownerKind: started.lease_claim.owner_kind,
+    epoch: started.lease_claim.epoch,
+    leaseId: started.lease_claim.lease_id,
+  };
+}
+
+function readyReport(store: SessionStore, sessionId: string, runId: string): void {
+  writeFileSync(join(store.runDir(sessionId, runId), 'report.md'), [
+    '---', 'verdict: ready', 'summary: complete', 'constraints: []',
+    'decisions: []', 'concerns: []', 'next: []', '---', '',
+  ].join('\n'));
+}
 
 function sealContext(projectRoot: string, sessionId: string, runId: string, value: string): void {
   const outputs = join(projectRoot, '.workflow', 'sessions', sessionId, 'runs', runId, 'outputs');
@@ -95,6 +144,22 @@ describe('topic Session resolution', () => {
     expect(created.session_id).not.toBe('b');
   });
 
+  it('excludes archived statusless identities from automatic topic matching while retaining exact reads', () => {
+    const projectRoot = root();
+    enableV20(projectRoot);
+    const store = new SessionStore(projectRoot);
+    store.createSession('history', 'shared statusless topic');
+    expect(resolveTopicSessionId(projectRoot, 'shared statusless topic')).toBe('history');
+
+    archiveSession(projectRoot, 'history', {
+      requestId: 'archive-topic', actor: 'operator', reason: 'historical',
+      evidence: ['evidence/archive.json'], expectedIdentityRevision: 1, expectedActivityRevision: 0,
+      now: new Date('2026-08-05T00:00:00.000Z'),
+    });
+    expect(resolveTopicSessionId(projectRoot, 'shared statusless topic')).toBeNull();
+    expect(resolveTopicSessionId(projectRoot, 'shared statusless topic', 'history')).toBe('history');
+  });
+
   it('never allocates a second Run into a Session that already has an active Run', () => {
     const projectRoot = root();
     commandFile(projectRoot, 'demo', 'contract_version: 2.1\narguments: []\nconsumes: []\nproduces: []\ngates: { entry: [], exit: [] }');
@@ -107,6 +172,95 @@ describe('topic Session resolution', () => {
 });
 
 describe('same-Session reuse assessment', () => {
+  it('persists receipt-backed 1.1 through production prepare/create and revalidates it at complete', () => {
+    const projectRoot = root();
+    enableV20(projectRoot);
+    commandFile(projectRoot, 'produce', producerContract);
+    commandFile(projectRoot, 'consume', consumerContract);
+    const store = new SessionStore(projectRoot);
+    store.createSession('s', 'receipt-backed reuse', { command: 'produce' });
+
+    const first = startExecution(projectRoot, 's', {
+      requestId: 'reuse-start-1', ownerId: 'producer', ownerKind: 'codex',
+    });
+    const producer = createExecutionRun({
+      projectRoot, command: 'produce', sessionId: 's', intent: 'receipt-backed reuse',
+      executionId: first.execution.execution_id, generation: first.execution.generation,
+      expectedExecutionRevision: 1, executionLease: executionClaim(first), requestId: 'reuse-create-1',
+    });
+    writeFileSync(join(store.runDir('s', producer.run_id), 'outputs', 'context.json'), JSON.stringify({
+      _meta: { kind: 'context', schema: 'context/1.0', role: 'primary', alias: 'current-context' },
+      value: 'sealed authority',
+    }));
+    readyReport(store, 's', producer.run_id);
+    expect(completeExecutionRun(projectRoot, producer.run_id, {
+      sessionId: 's', executionId: first.execution.execution_id, generation: first.execution.generation,
+      expectedExecutionRevision: 2, executionLease: executionClaim(first), requestId: 'reuse-complete-1',
+    }).sealed).toBe(true);
+    sealExecution(projectRoot, {
+      sessionId: 's', executionId: first.execution.execution_id, requestId: 'reuse-seal-1',
+      expectedExecutionRevision: 3, lease: executionClaim(first), summary: 'producer sealed', outcome: 'done',
+    });
+
+    const second = startExecution(projectRoot, 's', {
+      requestId: 'reuse-start-2', ownerId: 'consumer', ownerKind: 'codex',
+    });
+    const prepared = prepareStep(projectRoot, 'consume', undefined, 's');
+    expect(prepared.previous?.reuse_assessments[0]).toMatchObject({
+      schema_version: 'reuse-assessment/1.1',
+      source_fence: {
+        schema_version: 'reuse-source-fence/1.1',
+        execution_seal_receipt: { execution_id: first.execution.execution_id, generation: 1 },
+      },
+    });
+    const consumer = createExecutionRun({
+      projectRoot, command: 'consume', sessionId: 's', intent: 'receipt-backed reuse',
+      executionId: second.execution.execution_id, generation: second.execution.generation,
+      expectedExecutionRevision: 1, executionLease: executionClaim(second), requestId: 'reuse-create-2',
+    });
+    expect(consumer.upstream['current-context']).toBeDefined();
+    const persisted = store.readExecutionRun('s', consumer.run_id);
+    expect(persisted).toMatchObject({
+      schema_version: 'command-run/1.4',
+      input: { reuse_assessments: [{ schema_version: 'reuse-assessment/1.1' }] },
+    });
+    readyReport(store, 's', consumer.run_id);
+    expect(briefRun(projectRoot, consumer.run_id, 's')).toMatchObject({
+      schema_version: 'brief-result/1.2',
+      execution_contract: {
+        schema_version: 'execution-contract/1.2',
+        reuse_assessments: [{ schema_version: 'reuse-assessment/1.1' }],
+      },
+    });
+    expect(completeExecutionRun(projectRoot, consumer.run_id, {
+      sessionId: 's', executionId: second.execution.execution_id, generation: second.execution.generation,
+      expectedExecutionRevision: 2, executionLease: executionClaim(second), requestId: 'reuse-complete-2',
+    })).toMatchObject({ sealed: true, errors: [] });
+    sealExecution(projectRoot, {
+      sessionId: 's', executionId: second.execution.execution_id, requestId: 'reuse-seal-2',
+      expectedExecutionRevision: 3, lease: executionClaim(second), summary: 'consumer sealed', outcome: 'done',
+    });
+
+    const third = startExecution(projectRoot, 's', {
+      requestId: 'reuse-start-3', ownerId: 'consumer-2', ownerKind: 'codex',
+    });
+    const drifted = createExecutionRun({
+      projectRoot, command: 'consume', sessionId: 's', intent: 'receipt-backed reuse',
+      executionId: third.execution.execution_id, generation: third.execution.generation,
+      expectedExecutionRevision: 1, executionLease: executionClaim(third), requestId: 'reuse-create-3',
+    });
+    readyReport(store, 's', drifted.run_id);
+    const artifact = Object.values(store.readBundle('s').artifacts.artifacts)
+      .find(item => item.producer_run_id === producer.run_id)!;
+    writeFileSync(join(store.sessionDir('s'), artifact.relative_path), '{"tampered":true}');
+    const rejected = completeExecutionRun(projectRoot, drifted.run_id, {
+      sessionId: 's', executionId: third.execution.execution_id, generation: third.execution.generation,
+      expectedExecutionRevision: 2, executionLease: executionClaim(third), requestId: 'reuse-complete-3',
+    });
+    expect(rejected.sealed).toBe(false);
+    expect(rejected.errors.some(error => /reuse fence|artifact|content hash/i.test(error))).toBe(true);
+  }, 20_000);
+
   it('binds only REUSE and exposes the same assessment provenance in brief', () => {
     const projectRoot = root();
     commandFile(projectRoot, 'produce', producerContract);
@@ -204,6 +358,90 @@ describe('same-Session reuse assessment', () => {
     const conflict = createRun({ projectRoot: conflictRoot, command: 'consume-no-alias', sessionId: left.session_id, topic: 'conflict' });
     expect(conflict.upstream).toEqual({});
     expect(conflict.reuse_assessments.every(item => item.decision === 'CONFLICT')).toBe(true);
+  });
+
+  it('binds the previous sealed generation when a command consumes and produces the same alias', () => {
+    const selfReuseContract = `contract_version: 2.1
+arguments: []
+consumes:
+  - kind: context
+    alias: current-context
+    required: false
+    require_status: sealed
+    schema: context/1.0
+    role: primary
+produces:
+  - kind: context
+    path: outputs/context.json
+    alias: current-context
+    role: primary
+    required: true
+    schema: context/1.0
+gates:
+  entry: []
+  exit: []`;
+    const projectRoot = root();
+    commandFile(projectRoot, 'self-reuse', selfReuseContract);
+
+    const first = createRun({ projectRoot, command: 'self-reuse', sessionId: 's', intent: 'self' });
+    expect(first.upstream).toEqual({});
+    expect(first.reuse_warnings).toEqual([]);
+    sealContext(projectRoot, 's', first.run_id, 'gen-1');
+
+    const store = new SessionStore(projectRoot);
+    const gen1Id = Object.entries(store.readBundle('s').artifacts.artifacts)
+      .find(([, artifact]) => artifact.producer_run_id === first.run_id)?.[0]!;
+    const second = createRun({ projectRoot, command: 'self-reuse', sessionId: 's', intent: 'self' });
+    expect(second.upstream['current-context']?.artifact_id).toBe(gen1Id);
+    expect(second.reuse_assessments).toEqual([expect.objectContaining({ decision: 'REUSE' })]);
+    sealContext(projectRoot, 's', second.run_id, 'gen-2');
+
+    const gen2Id = Object.entries(store.readBundle('s').artifacts.artifacts)
+      .find(([, artifact]) => artifact.producer_run_id === second.run_id)?.[0]!;
+    const third = createRun({ projectRoot, command: 'self-reuse', sessionId: 's', intent: 'self' });
+    expect(third.upstream['current-context']?.artifact_id).toBe(gen2Id);
+    expect(third.reuse_assessments[0]).toMatchObject({ decision: 'REUSE' });
+  });
+
+  it('binds a producer through an explicit schema_range major-compatible consume', () => {
+    const rangeConsumer = `contract_version: 2.1
+arguments: []
+consumes:
+  - kind: context
+    alias: current-context
+    required: true
+    require_status: sealed
+    schema_range: context/1.x
+    role: primary
+produces: []
+gates:
+  entry: []
+  exit: []`;
+    const projectRoot = root();
+    commandFile(projectRoot, 'produce', producerContract);
+    commandFile(projectRoot, 'consume-range', rangeConsumer);
+    const producer = createRun({ projectRoot, command: 'produce', sessionId: 's', intent: 'range' });
+    sealContext(projectRoot, 's', producer.run_id, 'v');
+
+    const consumer = createRun({ projectRoot, command: 'consume-range', sessionId: 's', intent: 'range' });
+    expect(consumer.upstream['current-context']).toBeDefined();
+    expect(consumer.reuse_assessments[0]).toMatchObject({
+      decision: 'REUSE',
+      reason_codes: expect.arrayContaining(['ARTIFACT_SCHEMA_MAJOR_COMPATIBLE']),
+    });
+    expect(consumer.entry_gates.blocking).toEqual([]);
+  });
+
+  it('warns when a consume alias has same-kind artifacts but no registered alias', () => {
+    const projectRoot = root();
+    commandFile(projectRoot, 'produce', producerContract);
+    commandFile(projectRoot, 'consume-other', consumerContract.replace('alias: current-context', 'alias: other-context'));
+    const producer = createRun({ projectRoot, command: 'produce', sessionId: 's', intent: 'warn' });
+    sealContext(projectRoot, 's', producer.run_id, 'v');
+
+    const consumer = createRun({ projectRoot, command: 'consume-other', sessionId: 's', intent: 'warn' });
+    expect(consumer.upstream).toEqual({});
+    expect(consumer.reuse_warnings.some(warning => warning.includes("'other-context'") && warning.includes('context artifact'))).toBe(true);
   });
 });
 

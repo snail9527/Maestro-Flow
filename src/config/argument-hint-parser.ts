@@ -191,9 +191,9 @@ function parseToken(token: string): SkillParamDef[] {
     const paramName = inner.slice(0, spaceIdx);
     const valueSpec = inner.slice(spaceIdx + 1).trim();
 
-    // Enum: val1|val2|val3 (no angle brackets, no N)
+    // Enum: val1|val2|val3 (no angle brackets, no N); strip <> like the positional enum branch
     if (valueSpec.includes('|') && !valueSpec.startsWith('<')) {
-      const choices = valueSpec.split('|').map(c => c.trim());
+      const choices = valueSpec.split('|').map(c => c.trim().replace(/[<>\[\]]/g, ''));
       return [{ name: paramName, type: 'enum', choices, required: isRequired }];
     }
 
@@ -208,11 +208,13 @@ function parseToken(token: string): SkillParamDef[] {
 
   // Handle special: nested brackets like <create|list|status|...>
   if (inner.includes('|') && !inner.startsWith('-')) {
-    // Positional enum
-    const choices = inner.split('|').map(c => c.trim().replace(/[<>\[\]]/g, ''));
-    const name = choices.join('|').length > 30
-      ? choices[0]
-      : inner.replace(/[<>\[\]]/g, '');
+    // Positional enum, optionally with an explicit parameter name prefix:
+    // `<target: file|dir|HEAD>` → name='target', choices=['file','dir','HEAD'].
+    // Without the prefix the first alternative is the name (stable, unlike the
+    // historical length-thresholded whole-expression name).
+    const enumMatch = inner.match(/^([A-Za-z][\w-]*)\s*:\s*(.+)$/);
+    const choices = (enumMatch?.[2] ?? inner).split('|').map(c => c.trim().replace(/[<>\[\]]/g, ''));
+    const name = enumMatch ? enumMatch[1] : choices[0] ?? 'arg';
     return [{ name, type: 'enum', choices, positional: true, required: isRequired }];
   }
 
@@ -225,7 +227,9 @@ function parseToken(token: string): SkillParamDef[] {
     return [{ name: first, type: 'string', positional: true, required: isRequired }];
   }
 
-  return [{ name: cleaned, type: 'string', positional: true, required: isRequired }];
+  // <idea or @file> — keep only the first word as the parameter name so error
+  // messages and fallback keys do not carry prose.
+  return [{ name: cleaned.split(/\s+/)[0] || cleaned, type: 'string', positional: true, required: isRequired }];
 }
 
 // ---------------------------------------------------------------------------

@@ -15,12 +15,11 @@ Maestro 提供 35+ 个终端命令，通过 `maestro <command>` 直接调用。�
 | `install` | -- | 安装 Maestro 资源（交互式） |
 | `uninstall` | -- | 卸载已安装资源 |
 | `update` | -- | 检查/安装最新版本 |
-| `view` | -- | ~~启动 Dashboard 看板~~ (已废弃) |
-| `stop` | -- | ~~停止 Dashboard 服务~~ (已废弃) |
 | `delegate` | -- | 委派任务给 AI 智能体 |
 | `explore` | -- | 轻量并行代码搜索（API 端点驱动） |
 | `load` | -- | 统一知识加载（spec/knowhow/session/domain 等） |
 | `search` | -- | 统一知识搜索（wiki + code 混合） |
+| `knowledge` | -- | Run 知识关系、候选审查/晋升、统计与安全剪枝 |
 | `search-daemon` | -- | 搜索守护进程管理（start/stop/status） |
 | `embedding` | -- | 嵌入模型管理（status/warmup/rebuild） |
 | `coordinate` | `coord` | 图工作流协调器 |
@@ -99,14 +98,15 @@ maestro update --check         # 仅检查
 
 ---
 
-## Dashboard (已废弃)
+## Dashboard（已退役）
 
-> **⚠️ 废弃通知**: Dashboard 前端已在 v0.5.36 移除。`maestro view` 和 `maestro stop` 命令仅保留为向后兼容占位符，调用时会显示废弃警告并退出。
->
-> 如需查看工作流状态，请使用：
-> - `maestro collab status` — 查看团队协作状态
-> - `maestro delegate status <id>` — 查看委派任务状态
-> - `maestro ralph status` — 查看 Ralph 会话状态
+Dashboard UI 不再发布，`maestro view` 和 `maestro stop` 已从命令帮助中隐藏。为兼容旧脚本，这两个命令仍可解析旧参数，但只显示退役提示，不会启动或终止进程。
+
+查看当前工作流状态请使用：
+
+- `maestro run brief` — 查看当前 Run 的恢复信息
+- `maestro run check` — 检查当前 Run 的门禁与完成指引
+- `maestro session status` — 查看 canonical Session/Run 状态
 
 ---
 
@@ -148,9 +148,30 @@ maestro delegate "continue" --to gemini --resume
 ## 知识管理
 
 <details>
+<summary>maestro knowledge</summary>
+
+Run 知识生命周期与项目知识维护：
+
+```bash
+maestro knowledge stage knowhow "事务写入配方" "统一通过 SessionStore transaction 写入" --run <run-id> --category recipe
+maestro knowledge stage knowhow "长文配方" --content-file recipe.md --run <run-id>
+maestro knowledge stage spec "规则" "内容" --run <run-id> --signal validated --signal-ids spec:S-1
+maestro knowledge record spec:S-1 knowhow:K-9 --signal consumed --source search --run <run-id>
+maestro knowledge review <session-id> [--refresh]
+maestro knowledge review <session-id> --resolve KDC-... --as related --target <knowledge-id> --reason "确认关联"
+maestro knowledge promote <session-id> --candidate KDC-...
+maestro knowledge promote <session-id> --all
+maestro knowledge audit --scope all --prune
+```
+
+`search` 和自动注入只代表 exposure；显式 `load` 自动记录为 consumed。`stage --signal --signal-ids` 在暂存 candidate 的同时记录 `cited` / `validated` / `contradicted` 等 Run 关系。`session done` 返回精确 candidate receipt，但不会直接写项目 spec/knowhow。`review` 展示 diversified matches、证据和可复制的下一步命令；`--refresh` 内含 reconcile；`--resolve` 内含裁决。`promote --all` 晋升所有 eligible 候选（observed-only 输出警告）。
+
+</details>
+
+<details>
 <summary>maestro load</summary>
 
-统一知识加载命令 — 替代旧版 `maestro-spec load`/`wiki load`/`session load`，支持 9 种类型。
+统一知识加载命令 — 替代旧版 `spec load`/`wiki load`/`session load`，支持 9 种类型。
 
 ```bash
 maestro load --type spec --category coding           # 加载 coding 类 spec
@@ -186,7 +207,7 @@ maestro search "auth" --type spec                 # 仅搜索 spec 类型
 maestro search "login" --code                     # 仅代码图搜索
 maestro search "api" --wiki-only                  # 仅 wiki 搜索
 maestro search "domain term" --kg                 # KG 全源统一搜索
-maestro search "hook" --category coding --limit 5 # 按类别过滤，限制 5 条
+maestro search "hook" --category coding # 按类别过滤
 ```
 
 | 选项 | 说明 |
@@ -259,7 +280,7 @@ maestro embedding rebuild   # 重建嵌入索引
 领域知识术语管理 — 项目术语表的增删改查。
 
 ```bash
-maestro domain init --project myapp              # 初始化术语表
+maestro domain init                          # 初始化术语表
 maestro domain add "API Gateway" "统一入口服务"   # 添加术语
 maestro domain list                              # 列出所有术语
 maestro domain show api-gateway                  # 查看术语详情
@@ -359,24 +380,97 @@ maestro serve --port 3600 --host localhost
 <details>
 <summary>maestro run / maestro session</summary>
 
-`run` 管理一次 command invocation 的生命周期；`session` 管理 canonical Session 的 paused recovery、chain 与 orchestration meta。Runtime writer 当前固定写出 `session/1.3` + `command-run/1.3`。
+`run` 管理一次 command invocation；`session` 管理 canonical Session identity 与兼容管理，bounded lifecycle 和 orchestration authority 由 `execution` 持有。Wave 2 仍是 additive：capabilities 支持 Session writes `session/1.3` + `session/2.0`，但默认 writer 仍是 `session/1.3`，绝不会静默切换默认值。statusless `session/2.0` 只有在 `.workflow/config.json` 显式配置 `session-schema-selection/1.0`、`writer: "session/2.0"` 与 `session_statusless: true` 后才启用；只有带完整 Execution authority 的 Run mutation 写 `command-run/1.4`，并绑定 strict `execution/1.0` / `execution-lease/1.0`。
+
+Schema compatibility 必须区分读取与写入。历史 `session/1.0`-`session/1.3` 与 `command-run/1.0`-`command-run/1.4` 继续走各自 strict compatibility path。未知未来 Session/Run 版本采用 opaque/best-effort read compatibility：passthrough reader 保留字段供旧 CLI 尽力投影，但命令仍可能因缺少旧 shape 所需字段而失败。read acceptance 既不代表完整语义兼容，也不代表所有未知读取都 fail closed。mutation 跨越 fail-closed mutation boundary，必须通过显式选择的 strict writer schema；Execution mutation 还必须带 exact locator、revision fence 与 lease claim。
+
+先用 capability discovery 选择协议面：
 
 ```bash
+maestro capabilities --json
+```
+
+它输出一行原始 `maestro-capabilities/1.0`：`session_schema_writes` exact 为 `session/1.3` + `session/2.0`，Execution writes 只有 `execution/1.0`，response writes 是 `run-response/1.0` + `run-response/1.1`；features exact 为 `execution_generation=true`、`core_execution_lease=true`、`execution_handoff=true`、`execution_operation_drain=true`、`session_statusless=true`、`legacy_session_aliases=true`。capability 支持不等于项目 writer 选择；没有下面的显式配置时，新 Session 仍写 `session/1.3`。
+
+```json
+{
+  "session_schema": {
+    "schema_version": "session-schema-selection/1.0",
+    "writer": "session/2.0",
+    "features": { "session_statusless": true }
+  }
+}
+```
+
+启用后，`maestro session create` 只能创建 identity：chain、engine、quality、auto 和 platform 都属于 Execution。已有 1.x Session 还必须通过独立的显式 migration gate；只改配置不会迁移已有 authority。
+
+```bash
+maestro session create "statusless topic" --id <id> --json
+maestro session migrate --session <id> --to session/2.0
+maestro session archive --session <id> --request-id <id> --actor <actor> \
+  --reason "<reason>" --evidence <ref> \
+  --expected-identity-revision <n> --expected-activity-revision <n> --json
+maestro session unarchive --session <id> --request-id <id> --actor <actor> \
+  --reason "<reason>" --evidence <ref> \
+  --expected-identity-revision <n> --expected-activity-revision <n> --json
+```
+
+`session/2.0` identity 不存 Session `status` 或 `active_run_id`，只存 `current_execution_id`、`latest_execution_id` 与 archive metadata。`session list|show|status` 从 canonical Execution authority 输出 `derived_status`/derived availability、Execution status 与 active Run。archive/unarchive 使用 `session-archive-receipt/1.0`，要求两个 CAS revision 与 audit evidence，按 request ID replay，并用 `previous_receipt_hash` 串联 immutable receipt chain。
+
+Execution generation 与 lease 的 canonical commands：
+
+```bash
+maestro execution start --session <id> --request-id <id> \
+  --owner-id <owner> --owner-kind codex --json
+maestro execution status --session <id> --execution <execution-id> --json
+maestro execution lease heartbeat --session <id> --execution <execution-id> \
+  --request-id <id> --expected-execution-revision <n> \
+  --owner-id <owner> --owner-kind codex --lease-epoch <n> --lease-id <token> --json
+maestro execution handoff prepare --session <id> --execution <execution-id> \
+  --request-id <id> --expected-execution-revision <n> \
+  --owner-id <owner> --owner-kind codex --lease-epoch <n> --lease-id <token> \
+  --to-owner-id <owner> --claim-output <private-path>
+maestro execution lease recover --session <id> --execution <execution-id> \
+  --request-id <id> --expected-execution-revision <n> \
+  --owner-id <owner> --owner-kind manual --stale-after-ms <n> --json
+```
+
+Command tree 是 `execution start|attach|status|pause|resolve|resume|seal`、`execution handoff prepare|accept|cancel`、`execution lease status|heartbeat|release|recover`。所有 mutation 要求 exact locator、idempotent request 与 `--expected-execution-revision`；leased mutation 还要求完整 owner/kind/`--lease-epoch`/private `--lease-id`。acquisition surface 可用 `--claim-output` 写 mode-0600 claim；status、普通 response 与 receipt 只显示 public lease/hash。`maestro execution seal` 只关闭一个 generation，不永久封闭 Session identity，并写入 immutable `execution-seal-receipt/1.0`，快照 sealed Runs、chain、gates、Artifact registry/content hashes、Evidence 与 corpus refs。receipt-backed recall/import 使用 `source-fence/1.1`，receipt-backed reuse 使用 `reuse-source-fence/1.1`；二者可跨后续 Session activity 保持有效，但 receipt、Run、Artifact、generation 或跨 Session 漂移都会 fail closed。Artifact aliases 始终是 Session-global，不冻结在某个 Execution 内。`session ... --execution` 与 `run status --execution` 是 deprecated aliases，新调用应使用 `maestro execution ...`。
+
+session-source knowledge 也不依赖 permanent Session seal（永久 Session seal）。`maestro knowledge stage ... --session <id> --evidence <ref>` 写入 candidate snapshot；session-level reconciliation fresh 后，显式 `maestro knowledge promote <session-id> ...` 可在不 seal Session 的情况下提升。run-source candidate 仍要求 source Run sealed。Execution seal 或历史 Session seal 都不会隐式 promotion。
+
+Execution-aware `run create|next|complete|decide` 还要求 `--execution <id> --generation <n>` 加上述 revision/lease options，输出 `run-response/1.1` 并写 `command-run/1.4`。整组 Execution options 都省略时保留 legacy `run-response/1.0` + `command-run/1.3`；partial options 返回 `COMMANDER_USAGE`，不会静默回退。
+
+人类入口优先使用 `run start` / `run done` / `run edit`；`run create` / `run complete` 保留为稳定 machine protocol 和兼容面。
+
+```bash
+maestro run start "理解认证流程" --cmd learn --session 20260721-learn-auth --arg "src/auth"
+maestro run start "修复登录链路" --chain analyze plan execute verify
+maestro session create "修复登录链路" --chain analyze plan execute verify --engine manual
+maestro run edit test review --after latest
+maestro run done --verdict done-with-concerns --note "后续补充文档镜像"
+
 maestro run prepare <step> --platform codex
 maestro run create <command> --session <id> --intent "<intent>" --json
 maestro run brief <run-id> --session <id> --json
 maestro run check <run-id> --session <id> --json
-maestro run complete <run-id> --session <id> --json
+maestro run complete <run-id> --session <id> --chain-proposal outputs/chain-proposal.json --json
 maestro run seal-session <session-id> --json
+maestro session status <session-id>
+maestro session check <session-id>
+maestro session evidence <session-id> --status accepted
+maestro skills --platform codex --steps --json
 ```
 
-`run brief` 的成功结果固定为 `brief-result/1.0`：`session`/`run` 是 durable authority，
+`run brief` 的成功结果固定为 `brief-result/1.1`（读取兼容 `1.0`）：`session`/`run` 是 durable authority，
 `guidance` 携带 prepare、workflow、完整 run-mode 以及 captured/current hash drift，
 `execution_contract` 是 invocation、inputs、outputs、gates、reuse 的唯一结构化执行视图，
 `continuity` 携带 handoff/anchor，`recovery.next` 与外层 envelope `next` 必须完全一致。
 顶层只保留 human locator（`session_id/run_id/run_dir`）和 Pi bridge 使用的 canonical
 `upstream` map；不再重复输出 args、argument requirements、reuse assessments、gate summary
 或 outputs。
+
+所有入口共享一种 Session 和一种 chain；历史 `engine` 只作兼容元数据。声明 `orchestration.chain_effects` 的 Skill 可产出 typed proposal，orchestrator 决定 accept/reject/revise，Runtime 通过 `run complete --chain-proposal` 将 Run seal、verdict 与链变更原子提交。`/maestro` 与 `/maestro-ralph` 可双向继续同一 Session，无需 promotion 或 engine rewrite。
 
 Canonical paused recovery 必须按 `resolve` → `resume` 执行：
 
@@ -394,31 +488,42 @@ maestro run next --session <id> --json
 
 `resolve` 每次只处置一个 escalated decision（`--decision` + `proceed|retry`）或 failed step（`--step` + `retry|skip`），成功后 Session 仍为 `paused`。`resume` 只在所有 blocker 清空后转为 `running`。两者都不创建 Run；`run next` 是恢复后唯一的 chain allocator。若 Session 有 lease，两条命令都必须同时提供 `--execution-owner`、`--owner-epoch`、`--lease-id`。
 
-#### `run-response/1.0` operation matrix
+#### Machine operation matrix（1.0 legacy + 1.1 additive）
 
 | `operation` | CLI surface | 关键参数 / 行为 |
 |-------------|-------------|-----------------|
+| human wrapper | `run start` | 手写入口；单 Run 模式包装 `create`，链模式创建 Session 并可 dispatch 第一条 `next` |
+| human wrapper | `run done` | 手写入口；包装 `complete --verdict`，完成当前 Run 后只返回 suggest-only next |
+| human wrapper | `run edit` | 手写入口；插入/替换/跳过 pending chain step，不创建 Run |
 | `create` | `run create`；legacy confirmed `run new` | `create` 需要 command；Session identity 建议显式传 `--session` |
 | `next` | `run next` | 可选 `--session`/`--pick`；选择 pending step 并分配 chain Run |
-| `complete` | `run complete` | 可选 run ID；verdict path 支持 request/revision/lease guards |
-| `brief` | `run brief <run-id>` | 返回强校验的 `brief-result/1.0` Resume Packet；外层与结果层 next 一致 |
+| `complete` | `run complete` | 可选 run ID；支持 `--chain-proposal` 原子应用已接受 Skill proposal，并保留 request/revision/lease guards |
+| `brief` | `run brief <run-id>` | 返回强校验的 `brief-result/1.1` Resume Packet（含 `knowledge_context`，读取兼容 `1.0`）；外层与结果层 next 一致 |
 | `recall` | `run recall <command> --intent <text>` | 只读 advisory projection，不授权 mutation |
 | `fork` | legacy `run recall-confirm fork` / `run fork` | confirmation-token 管理兼容面 |
 | `import` | legacy `run recall-confirm import` / `run import` | confirmation-token 管理兼容面 |
 | `check` | `run check <run-id>` | 幂等扫描 outputs 并求值 gates |
 | `decide` | `run decide <point-id>` | 必填 `--session --verdict --confidence`；receipt-backed |
-| `seal-session` | `run seal-session <session-id>` | Session seal；非 receipt-backed，成功时 `replay: null` |
+| `seal-session` | `run seal-session <session-id>` | 仅历史 `session/1.x` 兼容；不是 Wave 2 completion 或 promotion gate |
+| `execution-seal` | `execution seal` | seal 一个 Execution generation 并写 `execution-seal-receipt/1.0` snapshot；Session identity 可继续复用 |
+| `execution-operation-claim` / `execution-operation-heartbeat` / `execution-operation-release` / `execution-operation-status` | `execution operation claim|heartbeat|release|status` | 用 Execution revision + operation registry revision CAS 管理 root/child lineage；只有 claim success 返回 raw `operation_token`，registry/receipt/status 与持久化或日志投影只保留 hash 或删除 token |
+| `session-archive` / `session-unarchive` | `session archive` / `session unarchive` | statusless identity lifecycle，要求 audited CAS flags 与 hash-linked receipt chain |
 | `resolve` | `session resolve` | 必填 audit/revision flags 和且仅一个 recovery target；保持 paused |
 | `resume` | `session resume` | 必填 audit/revision flags；只执行 paused → running |
+| session creation | `session create --chain` | 简单命令链建 Session；`--chain-file` 仅用于高级 JSON definition |
+| session query | `session status/check/evidence` | engine-neutral Session 状态、一致性检查与 Evidence Registry 查询 |
 | `chain-insert` | `session chain insert` | 必填 `--session --after --command`；receipt-backed |
 | `chain-replace` | `session chain replace` | 必填 `--session --step`；仅 pending step |
 | `chain-skip` | `session chain skip` | 必填 `--session --step`；仅 pending step |
 | `meta-update` | `session meta update` | 必填 `--session`，且至少一个 `--position-file`/`--decomposition-file` |
 | `accept-reuse` | `run accept-reuse <run-id>` | 必填 request/revision guards、`--actor`、`--reason` 和至少一个 `--evidence`；receipt-backed |
+| `plan-publish` | `plan publish <path>` | 发布不可变的 approved Markdown 为 `plan/1.0` `current-plan`；可绑定 running Session 或自动创建 `execute -> verify` Session；按 handoff key 幂等且 receipt-backed |
 
 对 `decide`、recovery、chain 与 meta mutation，`--request-id` 提供幂等 transition receipt；`--expected-identity-revision`、`--expected-activity-revision` 与完整 lease triple 提供 fence。`resolve`/`resume` 将这些 audit/revision 字段设为必填；chain/meta mutation 接受同一组 guard options。
 
-显式 `--json` 时，表中所有 surface 的 success、business error、replay 和 Commander usage 都只向 stdout 写出 **一行** `run-response/1.0`，stderr 为空，process status 与 envelope 的 `exit_code` 一致。统一字段为 `operation`、`request_id`、`locator`、suggest-only `next`、`replay`、`result`/`error`；usage error 为 `COMMANDER_USAGE`、exit 2。
+显式 `--json` 时，legacy/default surface 的 success、business error、replay 和 Commander usage 继续只写一行 strict `run-response/1.0`；stderr 为空，process status 与 envelope `exit_code` 一致。
+
+Execution lifecycle、Execution-aware Run mutation 与 deprecated Execution aliases 使用 strict `run-response/1.1`。它接受全部 1.0 operations，并加入 `capabilities`、`session-create`、`session-archive`、`session-unarchive`、`execution-start`、`execution-attach`、`execution-status`、`execution-pause`、`execution-resolve`、`execution-resume`、`execution-seal`、`execution-handoff-prepare`、`execution-handoff-accept`、`execution-handoff-cancel`、`execution-lease-status`、`execution-lease-heartbeat`、`execution-lease-release`、`execution-lease-recover`、`execution-operation-claim`、`execution-operation-heartbeat`、`execution-operation-release`、`execution-operation-status`。1.1 增加 `disposition`、Execution locator、revision/lease fence 与 warnings，同样保持一行 stdout、空 stderr、exit parity；usage error 是 `COMMANDER_USAGE`、exit 2。`maestro capabilities --json` 则直接输出一行 capability JSON。
 
 </details>
 
@@ -454,7 +559,7 @@ maestro spec list                              # 列出文件
 maestro spec status                            # 状态
 maestro spec add <category> "<title>" "<content>" --json  # --json 返回 sid
 maestro spec supersede <old-sid> --by <new-sid>          # 演化替代
-maestro spec history <sid> [--json]                      # 查看演化链
+maestro spec history <sid>                          # 查看演化链
 maestro spec health [--json]                             # 知识健康报告
 maestro spec backfill-sid                                # 回填存量无 sid 条目
 ```
@@ -491,14 +596,14 @@ maestro wiki health | orphans | hubs --limit 10 | backlinks <id> | forward <id> 
 
 > **写保护**：`specs/*.md` 的 body 通过 `wiki update` 禁止修改（403），需使用 `wiki append` / `wiki remove-entry`。`memory/*.md` 支持 CRUD。虚拟条目（issue、codebase、KG）完全只读。
 >
-> **KG 集成**：当 `.workflow/codebase/knowledge-graph.json` 存在时，KG 节点、架构层、代码导览自动作为虚拟条目索引到 wiki，可通过 `wiki search`、`wiki list --keyword kg` 发现。
+> **KG 集成**：当 `.workflow/codebase/knowledge-graph.json` 存在时，KG 节点、架构层、代码导览自动作为虚拟条目索引到 wiki，可通过 `wiki search`、`wiki list --query kg` 发现。
 
 </details>
 
 <details>
 <summary>maestro kg</summary>
 
-代码知识图谱查询。操作 `.workflow/codebase/knowledge-graph.json`（由 `/manage-codebase-rebuild` 的 KG 管道生成）。
+代码知识图谱查询。操作 `.workflow/codebase/knowledge-graph.json`（由 `maestro kg index` 的 KG 管道生成）。
 
 ```bash
 # 统计
@@ -670,26 +775,25 @@ maestro tool exec read_file '{"path":"README.md"}'
 ## 智能路由
 
 <details>
-<summary>maestro ralph</summary>
+<summary>maestro-ralph policy 与兼容 CLI</summary>
 
-Ralph CLI 子命令族 — 管理 Ralph 自适应生命周期引擎的 session、skill 和执行。
+`/maestro-ralph` 是 canonical Session/Run 之上的 closed-loop policy，不拥有 Ralph 专属 Session。通用辅助能力使用中立 namespace；旧 `maestro ralph ...` 仅保留兼容窗口。
 
 ```bash
-maestro ralph session              # 列出活跃 ralph session
-maestro ralph skills               # 列出可用 skill
-maestro ralph skills --platform codex  # 按平台过滤
-maestro ralph next                 # 加载下一步（注入 skill defaults）
-maestro ralph check                # 检查当前 step 状态
-maestro ralph complete N --status DONE  # 标记 step 完成
+maestro session status <session-id>     # 通用 Session 状态
+maestro session check <session-id>      # 通用 chain/Run/decision 检查
+maestro session evidence <session-id>   # canonical Evidence Registry
+maestro skills --platform codex --steps # 通用 Skill/step scanner
+maestro run next --session <session-id> # 分配下一条 chain-bound Run
+maestro run complete --session <session-id> --verdict done
 ```
 
 | 子命令 | 说明 |
 |--------|------|
-| `session` | 列出活跃 session 及状态 |
-| `skills` | 扫描可用 skill（支持 `--platform` 过滤） |
-| `next` | 加载下一步 SKILL.md 并注入 config defaults |
-| `check` | 查询当前 step 执行状态 |
-| `complete` | 标记 step 完成并写入 emit 结果 |
+| `maestro session status/check/evidence` | 查询任意 compatible Session，不按 engine 分型 |
+| `maestro skills` | 扫描可用 Skill 与 Run-resolvable steps |
+| `maestro run next/complete` | 所有 orchestrator 共享的 canonical Run lifecycle |
+| `maestro ralph skills/session/check/next/complete` | deprecated compatibility aliases；新调用不要使用 |
 
 </details>
 

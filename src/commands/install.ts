@@ -111,13 +111,14 @@ function registerMcpSubcommand(install: Command): void {
 function registerWorkflowsSubcommand(install: Command): void {
   install
     .command('workflows')
-    .description('Install step content (workflows, prepare, ref) to ~/.maestro (non-interactive)')
+    .description('Install step content (workflows, prepare, ref, arch-kb) to ~/.maestro (non-interactive)')
     .action(() => {
       const pkgRoot = getPackageRoot();
-      const { workflows, prepare, ref } = installAllStepContent(pkgRoot);
+      const { workflows, prepare, ref, archKb } = installAllStepContent(pkgRoot);
       console.error(`  ✓ workflows: ${workflows.filesInstalled} files → ${workflows.targetDir}`);
       console.error(`  ✓ prepare: ${prepare.filesInstalled} files → ${prepare.targetDir}`);
       console.error(`  ✓ ref: ${ref.filesInstalled} files → ${ref.targetDir}`);
+      console.error(`  ✓ arch-kb: ${archKb.filesInstalled} files → ${archKb.targetDir}`);
     });
 }
 
@@ -126,7 +127,7 @@ function registerWorkflowsSubcommand(install: Command): void {
 function registerEntryCommandsSubcommand(install: Command): void {
   install
     .command('entry-commands')
-    .description('Generate entry slash commands (thin `maestro run` wrappers) for selected steps')
+    .description('Generate entry skills (thin `maestro run` SKILL.md wrappers) for selected steps')
     .option('--steps <list>', 'Comma-separated step names (default: grill,collab)')
     .option('--list', 'List eligible steps without generating')
     .option('--global', 'Generate into ~/.claude/commands (default)')
@@ -152,8 +153,8 @@ function registerEntryCommandsSubcommand(install: Command): void {
 
       const { mode, projectPath } = resolveMode(opts);
       const targetDir = mode === 'global'
-        ? join(homedir(), '.claude', 'commands')
-        : join(projectPath, '.claude', 'commands');
+        ? join(homedir(), '.pi', 'skills')
+        : join(projectPath, '.pi', 'skills');
       const steps = opts.steps
         ? opts.steps.split(',').map((s) => s.trim()).filter(Boolean)
         : undefined;
@@ -175,7 +176,11 @@ function registerToggleSubcommand(install: Command): void {
     .option('--enable <names>', 'Non-interactive: enable items (comma-separated)')
     .option('--disable <names>', 'Non-interactive: disable items (comma-separated)')
     .option('--list', 'List all items with their status (no TUI)')
-    .action(async (opts: { global?: boolean; path?: string; type?: string; enable?: string; disable?: string; list?: boolean }) => {
+    .action(async (opts: { global?: boolean; path?: string; type?: string; enable?: string; disable?: string; list?: boolean }, cmd: Command) => {
+      // The parent `install` command also declares --path/--global and consumes
+      // them before the subcommand — merge via optsWithGlobals so toggle targets
+      // the requested project instead of always defaulting to the global install.
+      opts = { ...opts, ...cmd.optsWithGlobals() };
       const { homedir } = await import('node:os');
       const { scanToggleItems, applyToggle, updateManifestDisabledItems } = await import('./install-backend.js');
 
@@ -263,7 +268,7 @@ export function registerInstallCommand(program: Command): void {
     .option('--plugin', 'Register as native plugin instead of file copy (with --force)')
     .option('--export [path]', 'Export current install config as profile JSON')
     .option('--import <path>', 'Import profile and install non-interactively')
-    .option('--upgrade', 'With --import: merge new default-selected components (used by update)')
+    .option('--upgrade', 'With --import: merge new defaults and prune obsolete owned files (used by update)')
     .option('--load <path>', 'Load profile into interactive TUI (pre-fill state)')
     .action(async (opts: { force?: boolean; allPlatforms?: boolean; global?: boolean; path?: string; hooks?: string; mcp?: boolean; codexHooks?: string; codexMcp?: boolean; agyHooks?: string; extraMcp?: string; components?: string; statusline?: boolean | string; plugin?: boolean; export?: boolean | string; import?: string; upgrade?: boolean; load?: string }) => {
       const pkgRoot = getPackageRoot();
@@ -324,6 +329,7 @@ export function registerInstallCommand(program: Command): void {
           pluginCodex: profilePluginPlatformState(profile.plugin, 'codex'),
           backupClaudeMd: profile.backup.claudeMd,
           backupAll: profile.backup.all,
+          pruneObsoleteOwnedFiles: !!opts.upgrade,
         });
         return;
       }
@@ -447,6 +453,7 @@ interface ForceInstallOpts {
   backupClaudeMd?: boolean;
   backupAll?: boolean;
   genericHookLevels?: Record<string, HookLevel>;
+  pruneObsoleteOwnedFiles?: boolean;
 }
 
 type ProfileHookSelection = InstallProfile['claude']['hooks'];
@@ -472,7 +479,7 @@ async function forceInstall(
   opts: ForceInstallOpts,
 ): Promise<void> {
   const { executeInstallPipeline } = await import('../core/install-executor.js');
-  const { migrateComponentIds } = await import('./install-backend.js');
+  const { migrateComponentIds, partitionRequestedComponentIds } = await import('./install-backend.js');
   const { findManifest } = await import('../core/manifest.js');
   const { paths } = await import('../config/paths.js');
 
@@ -500,15 +507,24 @@ async function forceInstall(
     throw new Error('--components requires at least one component ID.');
   }
 
-  const invalidComponentIds = rawComponentIds?.filter((id) => {
-    const migrated = migrateComponentIds([id]);
-    return migrated.length === 0 || migrated.some((candidate) => !availableIds.has(candidate));
-  }) ?? [];
-  if (invalidComponentIds.length > 0) {
-    throw new Error(`Unknown or unavailable component IDs: ${invalidComponentIds.join(', ')}`);
+  // Distinguish truly-unknown IDs (hard error) from IDs that name a defined
+  // component whose source files are absent from this package build (soft skip).
+  // Reinstall/upgrade flows replay the prior manifest selection, so a component
+  // that became unavailable (empty source dir, or not shipped in this build)
+  // must not abort the whole install — `toInstall` below already intersects the
+  // selection with `available`.
+  const partition = rawComponentIds
+    ? partitionRequestedComponentIds(rawComponentIds, availableIds)
+    : undefined;
+  if (partition && partition.unknown.length > 0) {
+    throw new Error(`Unknown component IDs: ${partition.unknown.join(', ')}`);
   }
-
-  const requestedIds = rawComponentIds ? migrateComponentIds(rawComponentIds) : undefined;
+  if (partition && partition.unavailable.length > 0) {
+    console.error(
+      `Warning: skipping component(s) not available in this package build: ${partition.unavailable.join(', ')}`,
+    );
+  }
+  const requestedIds = partition?.requested;
   const priorIds = prior?.selectedComponentIds === undefined
     ? undefined
     : migrateComponentIds(prior.selectedComponentIds);
@@ -622,6 +638,7 @@ async function forceInstall(
     mcpProjectRoot: opts.mcpProjectRoot ?? '',
     backupClaudeMd: opts.backupClaudeMd ?? true,
     backupAll: opts.backupAll ?? false,
+    pruneObsoleteOwnedFiles: opts.pruneObsoleteOwnedFiles,
     claudeHooksSelection: claudeHooksSelection as import('../tui/install-ui/HooksConfig.js').HooksSelection,
     codexHooksSelection: codexHooksSelection as import('../tui/install-ui/HooksConfig.js').HooksSelection,
     agyHooksSelection: agyHooksSelection as import('../tui/install-ui/HooksConfig.js').HooksSelection,
@@ -658,6 +675,8 @@ async function forceInstall(
   const parts = [`${result.filesInstalled} files`];
   if (result.dirsCreated > 0) parts.push(`${result.dirsCreated} dirs`);
   if (result.filesSkipped > 0) parts.push(`${result.filesSkipped} preserved`);
+  if (result.obsoleteFilesRemoved > 0) parts.push(`${result.obsoleteFilesRemoved} obsolete removed`);
+  if (result.obsoleteFileErrors > 0) parts.push(`${result.obsoleteFileErrors} cleanup errors`);
   console.error(t.install.forceResult.replace('{summary}', parts.join(', ')));
 
   if (result.migrationWarnings.length > 0) {

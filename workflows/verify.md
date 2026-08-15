@@ -41,7 +41,21 @@ constraint_violations[] merged into the final verification.json
 
 ### Establish must-haves
 
-Priority: `current-plan`'s success_criteria (primary contract, each is a testable truth) > each task's convergence.criteria > 3-7 observable behaviors derived from the session goal.
+Normalize the verification contract before deriving must-haves:
+
+```
+IF current-plan.source_format == "pi-markdown":
+  authoritativeBody = current-plan.markdown
+  criteria = every explicit acceptance, verification, success, boundary, and risk statement
+  add task-local checks derived from ordered/checklist implementation items
+  if no explicit acceptance section exists, derive 3-7 observable truths from the complete Markdown goal without adding scope
+  normalizedContract = { criteria, source:"pi-markdown" }
+ELSE:
+  normalizedContract.criteria = current-plan.success_criteria
+    followed by each structured task's convergence.criteria
+```
+
+For `pi-markdown`, the Markdown remains authoritative: the normalized criteria list is an in-memory verification projection, must preserve every prose criterion, and must not require absent `task_ids`, `wave_ids`, or structured task files. Use `normalizedContract.criteria` as the primary contract; only fall back to 3-7 observable behaviors from the Session goal when it is empty.
 
 Split each must-have into three layers:
 
@@ -169,7 +183,7 @@ blocked — critical path cannot be verified (missing dependency/environment)
 score = verified_truths / total_truths
 ```
 
-When an old file exists, archive first → `outputs/.history/verification-{YYYY-MM-DDTHH-mm-ss}.json`. Artifact paths and metadata are declared in `prepare/verify.md` contract.
+When an old file exists, archive first → `outputs/.history/verification-{YYYY-MM-DDTHH-mm-ss}.json`.
 
 ```
 Write outputs/verification.json:
@@ -193,7 +207,7 @@ Every criterion must have method + status + evidence, and the verdict must be re
 
 ## report.md
 
-Write `report.md` with standard frontmatter + fixed sections. frontmatter records scope, verdict, criteria counts, gap counts, coverage_score. Body references verification values via aref, does not copy content.
+Write `report.md` with standard frontmatter + fixed sections. frontmatter records scope, verdict, criteria counts, gap counts, coverage_score. report.md frontmatter `verdict` 使用 report 层 ready 词表（pass→ready、warn→ready_with_concerns、fail/blocked→blocked/failed）；pass|warn|fail|blocked 仅用于 verification.json 与正文。 Body references verification values via aref, does not copy content.
 
 ```
 === VERIFICATION RESULTS ===
@@ -269,3 +283,8 @@ BLOCKED conditions: `verification.json` missing, or a criterion not verified, or
 | W002 | No test framework detected | Skip coverage computation, warn the user |
 | W003 | Coverage command failed | Do requirement mapping only, mark coverage [LOW CONFIDENCE] |
 | W004 | Verifier/auditor agent failed | Retry once, if still failing write partial results, mark [LOW CONFIDENCE] |
+
+## Knowledge Hooks
+
+- Verification results against canonical rules: `maestro knowledge record <ids...> --signal validated|contradicted --source manual`.
+- Stage reusable verification recipes before completion.

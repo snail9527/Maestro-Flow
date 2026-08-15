@@ -720,7 +720,7 @@ function buildTree(
 
 const AGY_PROFILE: ConversionProfile = {
   bodyReplacements: [
-    [/ralph skills --platform claude\b/g, 'ralph skills --platform agy'],
+    [/maestro skills --platform claude\b/g, 'maestro skills --platform agy'],
     [/<task_tracking>[\s\S]*?<\/task_tracking>/g, ''],
     [/\bmaestro run (prepare|skill|brief)\b(?![^\n`]*--platform)/g, 'maestro run $1 --platform agy'],
     [/\bmcp__exa__web_search_exa\b/g, 'search_web'],
@@ -786,9 +786,11 @@ const CODEX_TASK_TRACKING_BLOCK = `<task_tracking>
 
 const CODEX_PROFILE: ConversionProfile = {
   bodyReplacements: [
-    [/ralph skills --platform claude\b/g, 'ralph skills --platform codex'],
+    [/maestro skills --platform claude\b/g, 'maestro skills --platform codex'],
     [/<task_tracking>[\s\S]*?<\/task_tracking>/g, CODEX_TASK_TRACKING_BLOCK],
-    [/\bmaestro run (prepare|skill|brief)\b(?![^\n`]*--platform)/g, 'maestro run $1 --platform codex'],
+    // v3 removed the standalone run prepare/skill dispatchers and the
+    // --platform option on run brief; only the skills catalog keeps a platform.
+    [/\bmaestro run (prepare|skill)\b(?![^\n`]*--platform)/g, 'maestro run $1 --platform codex'],
     [/\bAskUserQuestion\b/g, 'request_user_input'],
     [/\bSendMessage\s*\(\s*\{\s*to:/g, 'followup_task({ target:'],
     [/\bSendMessage\b/g, 'send_message'],
@@ -861,11 +863,34 @@ const PI_HOST_MIRROR_BLOCK = `<host_mirror>
 
 </host_mirror>`;
 
+const PI_TEAMMATE_CONTRACT_BLOCK = `<teammate_contract>
+
+- \`background: false\` is the default. Use foreground dispatch whenever the result determines the current answer or next action.
+- Use \`background: true\` only for independent work. If this turn must consume a background result, call \`observe\` exactly once with \`action: "wait"\` and a bounded timeout before continuing; never continue independently while the result is pending.
+- Otherwise end the turn and wait for the automatic \`teammate-complete\` notification. Do not rely on \`SendMessage\`, \`team_msg\`, or hook callbacks as completion signals.
+- Never silently ignore an unfinished dispatch.
+
+</teammate_contract>`;
+
 const PI_PROFILE: ConversionProfile = {
   bodyReplacements: [
-    [/ralph skills --platform claude\b/g, 'ralph skills --platform pi'],
+    [
+      /\b(maestro skills\b[^\n`]*?--platform)\s+(?:claude|\{target_platform\})/g,
+      '$1 pi',
+    ],
     [/<task_tracking>[\s\S]*?<\/task_tracking>/g, PI_HOST_MIRROR_BLOCK],
-    [/\bmaestro run (prepare|skill|brief)\b(?![^\n`]*--platform)/g, 'maestro run $1 --platform pi'],
+    [
+      /\b(maestro (?:run (?:start|create|prepare|skill|brief)|session (?:start|create)))\b([^\n`]*?--platform)\s+(?:claude|\{target_platform\})/g,
+      '$1$2 pi',
+    ],
+    [
+      /\bmaestro run (start|create|prepare|skill|brief)\b(?![^\n`]*--platform)/g,
+      'maestro run $1 --platform pi',
+    ],
+    [
+      /\bmaestro session (start|create)\b(?![^\n`]*--platform)/g,
+      'maestro session $1 --platform pi',
+    ],
     [/\bTaskCreate\s*\(\s*\{([^}]*)\}\s*\)/g, (_m: string, params: string) => `todo({ action: "create", ${params.trim()} })`],
     [/\bTaskUpdate\s*\(\s*\{([^}]*)\}\s*\)/g, (_m: string, params: string) => `todo({ action: "update", ${params.trim()} })`],
     [/\bTaskCreate\b/g, 'todo({ action: "create" })'],
@@ -896,7 +921,7 @@ const PI_PROFILE: ConversionProfile = {
     'ToolSearch', 'LSP',
     'PowerShell',
   ]),
-  subagentTools: ['teammate'],
+  subagentTools: ['teammate', 'observe'],
   rewriteAgentCalls: true,
   rewriteSkillCalls: false,
   snakeCaseUnknown: false,
@@ -906,27 +931,296 @@ const PI_PROFILE: ConversionProfile = {
 // Pi-specific: Agent() → teammate() call-site rewriting
 // ---------------------------------------------------------------------------
 
+// Claude-era subagent_type names → current teammate-agent-catalog roles.
+// Unknown names pass through (they may be project-registered roles).
+const SUBAGENT_AGENT_MAP: Record<string, string> = {
+  'universal-executor': 'general',
+  'general-purpose': 'general',
+  'Explore': 'explorer',
+  'delegate': 'general',
+  'cli-explore-agent': 'cli-explore-agent',
+  'team-worker': 'team-worker',
+  'team-supervisor': 'team-supervisor',
+};
+
+function mapSubagentAgent(name: string | undefined): string {
+  return name ? (SUBAGENT_AGENT_MAP[name] ?? name) : 'general';
+}
+
+function extractQuotedFieldPi(source: string, fieldName: string): string | null {
+  const match = new RegExp(`\\b${fieldName}\\s*[:=]\\s*`).exec(source);
+  if (!match) return null;
+  const start = match.index + match[0].length;
+
+  if (source.startsWith('\\`', start)) {
+    const end = source.lastIndexOf('\\`');
+    return end > start ? source.slice(start, end + 2) : null;
+  }
+
+  const quote = source[start];
+  if (quote !== '"' && quote !== "'" && quote !== '`') return null;
+  if (quote === '`') {
+    const end = source.lastIndexOf('`');
+    return end > start ? source.slice(start, end + 1) : null;
+  }
+
+  let escaped = false;
+  for (let index = start + 1; index < source.length; index++) {
+    const char = source[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (char === quote) return source.slice(start, index + 1);
+  }
+  return null;
+}
+
+function rewriteLegacyTeammateInnerPi(inner: string): string | null {
+  const hasSubagent = /\bsubagent_type\s*[:=]/.test(inner);
+  const isDelegate = /\bagent\s*[:=]\s*["']delegate["']/.test(inner);
+  const hasLegacyTask = /\btask\s*[:=]/.test(inner) && !/\btasks\s*[:=]/.test(inner);
+  if (!hasSubagent && !isDelegate && !hasLegacyTask) return null;
+
+  const subType = inner.match(/\bsubagent_type\s*[:=]\s*["']([^"']+)["']/)?.[1];
+  const agentField = inner.match(/\bagent\s*[:=]\s*["']([^"']+)["']/)?.[1];
+  const agent = subType
+    ? mapSubagentAgent(subType)
+    : (agentField && agentField !== 'delegate' ? mapSubagentAgent(agentField) : 'general');
+
+  const taskType = extractQuotedFieldPi(inner, 'taskType');
+  const name = extractQuotedFieldPi(inner, 'name');
+  const description = extractQuotedFieldPi(inner, 'description');
+  const background = inner.match(/\b(?:run_in_background|background)\s*[:=]\s*([^,\r\n]+)/)?.[1]?.trim();
+  const cwd = extractQuotedFieldPi(inner, 'cwd');
+  const model = extractQuotedFieldPi(inner, 'model');
+  const thinking = extractQuotedFieldPi(inner, 'thinking');
+  const task = extractQuotedFieldPi(inner, 'task');
+  const prompt = extractQuotedFieldPi(inner, 'prompt');
+
+  const parts: string[] = [`agent: "${agent}"`];
+  if (taskType) parts.push(`taskType: ${taskType}`);
+
+  const taskParts: string[] = [];
+  if (name) taskParts.push(`name: ${name}`);
+  const bodyVal = task ?? prompt;
+  if (bodyVal) taskParts.push(`prompt: ${bodyVal}`);
+  if (description) taskParts.push(`description: ${description}`);
+  if (taskParts.length) parts.push(`tasks: [{ ${taskParts.join(', ')} }]`);
+
+  if (task && prompt) parts.push(`/* --rule ${prompt} */`);
+  if (background) parts.push(`background: ${background}`);
+  if (cwd) parts.push(`cwd: ${cwd}`);
+  if (model) parts.push(`model: ${model}`);
+  if (thinking) parts.push(`thinking: ${thinking}`);
+
+  return `teammate({ ${parts.join(', ')} })`;
+}
+
 function rewriteAgentCallSitesPi(body: string): string {
-  let out = body.replace(
-    /Agent\s*\(\s*(\{[^}]*\})\s*\)/g,
-    (_full, inner: string) => {
-      const promptMatch = inner.match(/prompt\s*[:=]\s*["']([^"']*)["']/);
-      const descMatch = inner.match(/description\s*[:=]\s*["']([^"']*)["']/);
-      const nameMatch = inner.match(/\bname\s*[:=]\s*["']([^"']+)["']/);
-      const typeMatch = inner.match(/\bsubagent_type\s*[:=]\s*["']([^"']+)["']/);
-      const bgMatch = inner.match(/\brun_in_background\s*[:=]\s*(true|false)/);
+  const normalized = body.replace(/\bAgent\s*\(/g, 'teammate(');
+  const newline = normalized.includes('\r\n') ? '\r\n' : '\n';
+  const lines = normalized.split(/\r?\n/);
+  const out: string[] = [];
+  let index = 0;
 
-      const parts: string[] = [];
-      if (typeMatch) parts.push(`agent: "${typeMatch[1]}"`);
-      if (nameMatch) parts.push(`name: "${nameMatch[1]}"`);
-      if (descMatch) parts.push(`description: "${descMatch[1]}"`);
-      if (promptMatch) parts.push(`prompt: "${promptMatch[1]}"`);
-      if (bgMatch?.[1] === 'true') parts.push('context: "fresh"');
+  while (index < lines.length) {
+    const line = lines[index] ?? '';
+    const singleLine = line.replace(
+      /teammate\(\s*\{(.*?)\}\)/g,
+      (_full: string, inner: string) => rewriteLegacyTeammateInnerPi(inner) ?? _full,
+    );
+    if (singleLine !== line) {
+      out.push(singleLine);
+      index++;
+      continue;
+    }
 
+    const open = line.match(/^(\s*)(.*?)\bteammate\(\s*\{\s*$/);
+    if (!open) {
+      out.push(line);
+      index++;
+      continue;
+    }
+
+    const indent = open[1] ?? '';
+    const prefix = open[2] ?? '';
+    let inTemplate = false;
+    let cursor = index + 1;
+    let suffix = '';
+    let closed = false;
+    while (cursor < lines.length) {
+      const current = lines[cursor] ?? '';
+      for (let charIndex = 0; charIndex < current.length; charIndex++) {
+        if (current[charIndex] !== '`') continue;
+        let slashCount = 0;
+        for (let prev = charIndex - 1; prev >= 0 && current[prev] === '\\'; prev--) slashCount++;
+        if (slashCount % 2 === 0) inTemplate = !inTemplate;
+      }
+      const close = !inTemplate ? current.match(/^\s*\}\)\s*(.*)$/) : null;
+      if (close) {
+        suffix = close[1] ?? '';
+        closed = true;
+        break;
+      }
+      cursor++;
+    }
+
+    if (!closed) {
+      out.push(line);
+      index++;
+      continue;
+    }
+
+    const inner = lines.slice(index + 1, cursor).join('\n');
+    const rewritten = rewriteLegacyTeammateInnerPi(inner);
+    if (!rewritten) out.push(...lines.slice(index, cursor + 1));
+    else out.push(`${indent}${prefix}${rewritten}${suffix}`);
+    index = cursor + 1;
+  }
+
+  return out.join(newline);
+}
+
+// ---------------------------------------------------------------------------
+// Pi-specific: maestro delegate/explore CLI → teammate() tool rewriting
+// ---------------------------------------------------------------------------
+
+/** Parse `--key value` pairs from a delegate CLI options string. */
+function parseDelegateOptions(optsStr: string): Record<string, string> {
+  const opts: Record<string, string> = {};
+  // Value chars include <> for placeholders like issue-<issueId> and <tool>
+  const re = /--([\w][\w-]*)(?:\s+((?!--)[\w./${}"'\\:@<>-]+(?:\s+(?!--)[\w./${}"'\\:@<>-]+)*))?/g;
+  let m;
+  while ((m = re.exec(optsStr)) !== null) {
+    // Strip trailing quotes/backslashes that leak from Bash string delimiters
+    const val = m[2]?.trim().replace(/["'`\\]+$/, '') ?? 'true';
+    opts[m[1]] = val;
+  }
+  return opts;
+}
+
+/** Map delegate `--mode` to teammate `taskType`. */
+function delegateModeToTaskType(mode: string | undefined): string {
+  if (mode === 'write') return 'development';
+  return 'analysis';
+}
+
+/** Format a `teammate({...})` call from a parsed delegate prompt + options. */
+function formatTeammateCall(prompt: string, opts: Record<string, string>): string {
+  const taskType = delegateModeToTaskType(opts['mode']);
+  const parts: string[] = ['agent: "general"'];
+
+  parts.push(`taskType: "${taskType}"`);
+
+  const taskParts: string[] = [];
+  if (opts['id']) taskParts.push(`name: "${opts['id']}"`);
+
+  const cleanPrompt = prompt.trim();
+  if (cleanPrompt && cleanPrompt !== '<PROMPT>') {
+    const escaped = cleanPrompt.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+    taskParts.push(`prompt: "${escaped}"`);
+  } else {
+    taskParts.push('prompt: "<PROMPT>"');
+  }
+
+  parts.push(`tasks: [{ ${taskParts.join(', ')} }]`);
+
+  if (opts['cd']) parts.push(`cwd: "${opts['cd']}"`);
+  if (opts['rule']) parts.push(`/* --rule ${opts['rule']}: inline the template content into prompt */`);
+  if (opts['to']) parts.push(`/* --to ${opts['to']}: set model via model-availability */`);
+  if (opts['resume']) parts.push('/* --resume: no teammate equivalent; re-dispatch or use resident agent */');
+
+  return `teammate({ ${parts.join(', ')} })`;
+}
+
+/**
+ * Rewrite `maestro delegate` / `maestro explore` CLI calls → `teammate()` tool calls.
+ *
+ * Handles three tiers:
+ *   1. Full CLI call with quoted prompt: `maestro delegate "..." --to agy --mode analysis`
+ *   2. Prose / table inline without prompt: `` `maestro delegate --mode analysis` ``
+ *   3. `maestro explore "..."` → `teammate({ agent: "explorer" })`
+ *
+ * Also normalises `run_in_background` → `background` and prose mentions.
+ */
+function rewriteDelegateCallsPi(body: string): string {
+  let out = body;
+
+  // Tier 0: escaped-quote delegate calls — Bash("maestro delegate \\\"...\\\" ...")
+  // Must run BEFORE tier 1 because the general regex backtracks incorrectly on \\\" delimiters.
+  out = out.replace(
+    /maestro delegate\s+\\+"([\s\S]*?)\\+"((?:\s+--[\w-]+(?:\s+(?!--)[\S]+)?)*)/g,
+    (_full, prompt, optsStr: string) => {
+      const opts = parseDelegateOptions(optsStr);
+      return formatTeammateCall(prompt, opts);
+    },
+  );
+
+  // Tier 1: maestro delegate "PROMPT" [options] — full CLI call with quoted prompt
+  // Supports single, double, and backtick quotes; prompt may span lines.
+  out = out.replace(
+    /maestro delegate\s+(["'`])([\s\S]*?)\1((?:\s+--[\w-]+(?:\s+(?!--)[\S]+)?)*)/g,
+    (_full, _q, prompt, optsStr: string) => {
+      const opts = parseDelegateOptions(optsStr);
+      return formatTeammateCall(prompt, opts);
+    },
+  );
+
+  // Tier 2: maestro explore "PROMPT" [options]
+  out = out.replace(
+    /maestro explore\s+(["'`])([\s\S]*?)\1((?:\s+--[\w-]+(?:\s+(?!--)[\S]+)?)*)/g,
+    (_full, _q, prompt, _optsStr: string) => {
+      const escaped = prompt.trim().replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+      return `teammate({ agent: "explorer", tasks: [{ prompt: "${escaped}" }] })`;
+    },
+  );
+
+  // Tier 3: prose / table inline — `maestro delegate --mode analysis` (no quoted prompt)
+  // Must run AFTER tier 1 so it only catches residual references.
+  // Value chars include <> for placeholders like issue-<issueId>.
+  out = out.replace(
+    /maestro delegate((?:\s+--[\w-]+(?:\s+[\w./${}"'<>-]+)?)*)/g,
+    (_full, optsStr: string) => {
+      if (!optsStr.trim()) return 'teammate';
+      const opts = parseDelegateOptions(optsStr);
+      const parts: string[] = [`agent: "general"`, `taskType: "${delegateModeToTaskType(opts['mode'])}"`];
+      if (opts['rule']) parts.push(`/* --rule ${opts['rule']} */`);
+      if (opts['to']) parts.push(`/* --to ${opts['to']} */`);
+      if (opts['id']) parts.push(`/* --id ${opts['id']} */`);
       return `teammate({ ${parts.join(', ')} })`;
     },
   );
-  out = out.replace(/\bAgent\s*\(/g, 'teammate(');
+
+  // Tier 4: bare `maestro explore` prose reference (no quoted prompt)
+  out = out.replace(/\bmaestro explore\b/g, 'teammate({ agent: "explorer" })');
+
+  // Tier 5: Bash({ command: "maestro delegate ...", run_in_background: true })
+  // → the delegate part is already rewritten by tier 1/3; fix the wrapper.
+  out = out.replace(/\brun_in_background\s*:\s*true/g, 'background: true');
+  out = out.replace(/\brun_in_background\s*:\s*false/g, 'background: false');
+
+  // Tier 6: section headers / prose mentions
+  out = out.replace(/Execute via maestro delegate (\w+)/gi, 'Execute via teammate ($1)');
+  out = out.replace(/via maestro delegate/g, 'via teammate');
+  out = out.replace(/maestro delegate message/g, 'teammate-send');
+
+  return out;
+}
+
+function rewriteTeammateWaitSemanticsPi(body: string): string {
+  let out = body;
+  const waitText = 'wait for the automatic teammate-complete notification (or call observe exactly once with action="wait" when this turn must consume the result)';
+  out = out.replace(/wait for hook callback/gi, waitText);
+  out = out.replace(/\bSendMessage callback\b/g, 'teammate-complete notification');
+  out = out.replace(/\bOn callback\b/g, 'On teammate-complete notification');
+  out = out.replace(/\bworker callbacks\b/gi, 'teammate-complete notifications');
+  out = out.replace(/\bworker callback\b/gi, 'teammate-complete notification');
+  out = out.replace(/\bwait for callbacks\b/gi, 'wait for teammate-complete notifications');
   return out;
 }
 
@@ -943,9 +1237,12 @@ function convertTextPi(
   }
 
   let convertedBody = rewriteAgentCallSitesPi(body);
+  convertedBody = rewriteDelegateCallsPi(convertedBody);
+  convertedBody = rewriteTeammateWaitSemanticsPi(convertedBody);
   convertedBody = applyBodyReplacements(convertedBody, profile);
 
   let newFrontmatter: ParsedFrontmatter | null = null;
+  let frontmatterUsesTeammate = false;
   if (frontmatter) {
     const fmOut = { ...frontmatter };
     if (fmOut['allowed-tools']) {
@@ -955,12 +1252,21 @@ function convertTextPi(
           for (const t of profile.subagentTools) {
             if (!r.tools.includes(t)) r.tools.push(t);
           }
-          r.tools.sort();
         }
+        if (r.tools.includes('teammate') && !r.tools.includes('observe')) {
+          r.tools.push('observe');
+        }
+        frontmatterUsesTeammate = r.tools.includes('teammate');
+        r.tools.sort();
         fmOut['allowed-tools'] = r.tools;
       }
     }
     newFrontmatter = fmOut;
+  }
+
+  const usesTeammate = frontmatterUsesTeammate || /\bteammate\s*\(/.test(convertedBody);
+  if (isSkillOrCommand && frontmatter && usesTeammate && !convertedBody.includes('<teammate_contract>')) {
+    convertedBody = `${PI_TEAMMATE_CONTRACT_BLOCK}\n\n${convertedBody.replace(/^\r?\n/, '')}`;
   }
 
   const fmBlock = newFrontmatter ? serializeFrontmatter(newFrontmatter) : '';
@@ -987,7 +1293,7 @@ const STD_TASK_TRACKING_BLOCK = `<task_tracking>
 
 const AGENTS_STANDARD_PROFILE: ConversionProfile = {
   bodyReplacements: [
-    [/ralph skills --platform claude\b/g, 'ralph skills --platform agent'],
+    [/maestro skills --platform claude\b/g, 'maestro skills --platform agent'],
     [/<task_tracking>[\s\S]*?<\/task_tracking>/g, STD_TASK_TRACKING_BLOCK],
     [/\bmaestro run (prepare|skill|brief)\b(?![^\n`]*--platform)/g, 'maestro run $1 --platform agents-standard'],
     [/\bAskUserQuestion\b/g, 'ask_user'],

@@ -14,9 +14,10 @@ import { mkdtempSync } from 'node:fs';
 import { Command } from 'commander';
 import { createSessionState } from './defaults.js';
 import { sessionStateSchema } from './schemas.js';
-import { briefResultV10Schema, commandRebindAuditSchema, executionContractSchema } from './protocol-schemas.js';
+import { briefResultV11Schema, commandRebindAuditSchema, executionContractSchema } from './protocol-schemas.js';
 import { SessionStore } from './store.js';
 import {
+  acceptRunReuse,
   briefRun,
   checkRun,
   completeRun,
@@ -27,10 +28,33 @@ import {
   sealSession,
 } from './runtime.js';
 import { registerRunCommand } from '../commands/run.js';
-import { resolveCommandSource } from './contract.js';
+import { invalidateResolutionCache, resolveCommandSource } from './contract.js';
 import { migrateV1toV2, readStateJson, writeStateJson } from '../utils/state-schema.js';
 
+function v2Workspace(root: string): void {
+  mkdirSync(join(root, ".workflow"), { recursive: true });
+  writeFileSync(join(root, ".workflow", "config.json"), JSON.stringify({
+    session_schema: { schema_version: "session-schema-selection/1.0", writer: "session/1.3", features: { session_statusless: false } },
+  }));
+}
+
 const roots: string[] = [];
+
+interface LegacyAttachmentFixture {
+  producer: { command: string; sealed_contract: string; current_contract: string };
+  review: { command: string; contract: string; required_role: 'primary' };
+  authority: {
+    output: { _meta: { kind: string; schema: string; role: 'attachment'; alias: string }; changes: unknown[] };
+    contract_snapshot: { normalized: { produces: Array<{ role: 'attachment' }> } };
+    registry: { kind: string; schema_version: string; role: 'attachment'; status: 'sealed' };
+  };
+  expected_reason_codes: string[];
+}
+
+const legacyAttachmentFixture = JSON.parse(readFileSync(
+  new URL('./__fixtures__/sealed-legacy-attachment-execution.json', import.meta.url),
+  'utf8',
+)) as LegacyAttachmentFixture;
 
 const migratedStepAssociations = {
   'maestro-analyze': 'analyze',
@@ -50,6 +74,8 @@ const migratedStepAssociations = {
 
 function root(): string {
   const path = mkdtempSync(join(tmpdir(), 'maestro-run-'));
+
+  v2Workspace(path);
   roots.push(path);
   return path;
 }
@@ -113,6 +139,11 @@ describe('Session/Run runtime', () => {
     registerRunCommand(program);
     const run = program.commands.find(command => command.name() === 'run');
     expect(run?.commands.map(command => command.name())).toEqual([
+      'start',
+      'status',
+      'recover',
+      'done',
+      'edit',
       'prepare',
       'next',
       'create',
@@ -134,12 +165,45 @@ describe('Session/Run runtime', () => {
     ]);
   });
 
+  it('projects session/1.x status and active Run without 2.0 Execution pointers', () => {
+    const projectRoot = root();
+    commandFile(projectRoot, 'projection', 'consumes: []\nproduces: []\ngates: { entry: [], exit: [] }');
+    const created = createRun({ projectRoot, command: 'projection', intent: 'legacy projection' });
+    const entry = readStateJson(projectRoot)?.sessions?.find(item => item.session_id === created.session_id);
+    expect(entry).toMatchObject({
+      session_schema_version: 'session/1.3', status: 'running', active_run_id: created.run_id,
+    });
+    expect(entry).not.toHaveProperty('current_execution_id');
+    expect(entry).not.toHaveProperty('latest_execution_id');
+  });
+
   it('parses every migrated core command contract', () => {
     for (const [command, step] of Object.entries(migratedStepAssociations)) {
       const source = resolveCommandSource(process.cwd(), command);
-      expect(source.path.replaceAll('\\', '/')).toMatch(new RegExp(`/prepare/${step}\\.md$`));
+      // Pin the PROJECT source: a migrated command must resolve to the repo's
+      // own prepare file, never a user-global ~/.maestro mirror.
+      expect(source.relativePath).toBe(`prepare/${step}.md`);
       expect(source.contract.produces.length).toBeGreaterThan(0);
+      for (const consume of source.contract.consumes) {
+        expect(consume.schema, `${command} consumes ${consume.kind} must declare schema`).toBeTruthy();
+        expect(consume.role, `${command} consumes ${consume.kind} must declare role`).toBeTruthy();
+      }
     }
+  });
+
+  it('declares schema and role on every v2/v2.1 consumes entry across all prepare contracts', () => {
+    const prepareDir = join(process.cwd(), 'prepare');
+    let checked = 0;
+    for (const file of readdirSync(prepareDir).filter((name) => name.endsWith('.md'))) {
+      const contract = resolveCommandSource(process.cwd(), file.replace(/\.md$/, '')).contract;
+      if ((contract.contract_version ?? 1) === 1) continue;
+      for (const consume of contract.consumes) {
+        checked++;
+        expect(consume.schema, `${file} consumes ${consume.kind} must declare schema`).toBeTruthy();
+        expect(consume.role, `${file} consumes ${consume.kind} must declare role`).toBeTruthy();
+      }
+    }
+    expect(checked).toBeGreaterThan(10);
   });
 
   it('loads installed global Claude contracts without losing project precedence', () => {
@@ -409,8 +473,8 @@ gates:
   it('resolves every migrated command through workflow YAML associations', () => {
     for (const [command, step] of Object.entries(migratedStepAssociations)) {
       const prepared = prepareStep(process.cwd(), command);
-      expect(prepared.prepare?.path.replaceAll('\\', '/')).toMatch(new RegExp(`/prepare/${step}\\.md$`));
-      expect(prepared.workflow?.path.replaceAll('\\', '/')).toMatch(new RegExp(`/workflows/${step}\\.md$`));
+      expect(prepared.prepare?.path).toBe(join(process.cwd(), 'prepare', `${step}.md`));
+      expect(prepared.workflow?.path).toBe(join(process.cwd(), 'workflows', `${step}.md`));
     }
   });
 
@@ -438,10 +502,11 @@ gates:
     output.mockRestore();
   });
 
-  it('uses strict protocol schemas', () => {
+  it('uses strict protocol schemas with passthrough fallback for unknown versions', () => {
     const valid = createSessionState('20260713-demo', 'demo');
     expect(sessionStateSchema.parse(valid).schema_version).toBe('session/1.3');
-    expect(() => sessionStateSchema.parse({ ...valid, unexpected: true })).toThrow(/unrecognized/i);
+    // Known version with unknown top-level field → strict rejection
+    expect(() => sessionStateSchema.parse({ ...valid, unexpected: true })).toThrow(/unrecognized|passthrough fallback/i);
     const ralph = structuredClone(valid);
     ralph.ralph_authority = { schema_version: 'ralph-authority/1.0', engine: 'ralph', canonical_complete: true };
     expect(sessionStateSchema.parse(ralph).ralph_authority?.canonical_complete).toBe(true);
@@ -458,7 +523,12 @@ gates:
       max_retries: 2,
       evidence_ref: null,
     }];
-    expect(() => sessionStateSchema.parse(invalidDecision)).toThrow(/pending|passed|escalated/);
+    expect(() => sessionStateSchema.parse(invalidDecision)).toThrow(/pending|passed|escalated|passthrough fallback/);
+    // Unknown future version → passthrough fallback preserves all fields
+    const futureSession = { ...valid, schema_version: 'session/9.0', future_field: 'preserved' };
+    const parsed = sessionStateSchema.parse(futureSession);
+    expect(parsed.schema_version).toBe('session/9.0');
+    expect((parsed as any).future_field).toBe('preserved');
   });
 
   it('allocates stable per-session sequence numbers and creates protected authority files', () => {
@@ -692,9 +762,11 @@ finish:
     expect(clean.gates.blocking).toEqual([]);
     expect(clean.next?.command).toBe(`maestro run complete ${created.run_id}`);
     expect(clean.finish?.some(line => line.includes('finding ID'))).toBe(true);
-    expect(clean.finish?.some(line => line.includes('maestro spec add'))).toBe(true);
+    expect(clean.finish?.some(line => line.includes('maestro knowledge stage'))).toBe(true);
+    expect(clean.finish?.some(line => line.includes('--signal cited|validated|contradicted'))).toBe(true);
     expect(clean.finish?.some(line => line.includes('spec supersede'))).toBe(true);
     expect(clean.finish?.some(line => line.includes('spec conflict mark'))).toBe(true);
+    expect(clean.finish?.some(line => line.includes('Do not write project spec/knowhow directly'))).toBe(true);
     expect(clean.finish?.some(line => line.includes('handoff frontmatter is empty'))).toBe(false);
 
     completeRun(projectRoot, created.run_id);
@@ -719,6 +791,15 @@ finish:
     expect(completeRun(projectRoot, created.run_id).sealed).toBe(true);
     const sealed = sealSession(projectRoot, created.session_id, 'All work complete');
     expect(sealed.status).toBe('sealed');
+    expect(sealed.knowledge).toEqual({
+      pending_candidates: 0,
+      promoting_candidates: 0,
+      promoted_candidates: 0,
+      review_required_candidates: 0,
+      conflict_candidates: 0,
+      suppressed_candidates: 0,
+      review_command: `maestro knowledge review ${created.session_id}`,
+    });
     const session = new SessionStore(projectRoot).readBundle(created.session_id).session;
     const state = readStateJson(projectRoot);
     expect(session.lifecycle.seal_summary).toBe('All work complete');
@@ -733,7 +814,7 @@ finish:
     const value = JSON.parse(readFileSync(path, 'utf8'));
     value.extra = true;
     writeFileSync(path, JSON.stringify(value, null, 2));
-    expect(() => new SessionStore(projectRoot).readBundle(created.session_id)).toThrow(/unrecognized/i);
+    expect(() => new SessionStore(projectRoot).readBundle(created.session_id)).toThrow(/unrecognized|passthrough fallback/i);
   });
 
   it('brief exposes consumed upstream, the previous handoff, and the session anchor', () => {
@@ -859,12 +940,23 @@ gates:
     });
 
     const brief = briefRun(projectRoot, created.run_id, created.session_id);
-    expect(brief.schema_version).toBe('brief-result/1.0');
+    expect(brief.schema_version).toBe('brief-result/1.1');
     expect(brief.execution_contract.invocation.args).toEqual(['--target', 'core']);
     expect(brief.guidance.prepare).toBeNull();
     expect(brief.guidance.workflow?.content).toContain('Perform the bounded task');
     expect(brief.guidance.freshness).toMatchObject({ status: 'none', changed: [] });
-    expect(briefResultV10Schema.parse(brief)).toEqual(brief);
+    expect(brief.knowledge_context).toMatchObject({
+      schema_version: 'knowledge-reconciliation-card/1.0',
+      run: { unique_inputs: 0 },
+      session: { pending_candidates: 0 },
+      policy: {
+        search_and_injection: 'exposure_only',
+        explicit_load: 'consumed',
+        completion: 'stage_candidates',
+        promotion: 'explicit_review',
+      },
+    });
+    expect(briefResultV11Schema.parse(brief)).toEqual(brief);
     for (const removed of ['command', 'goal', 'args', 'argument_requirements', 'reuse_assessments', 'gates', 'outputs']) {
       expect(brief).not.toHaveProperty(removed);
     }
@@ -909,6 +1001,7 @@ gates:
     const created = createRun({ projectRoot, command: 'drift-demo', intent: 'drift-safe brief' });
 
     writeFileSync(join(workflowDir, 'drift-demo.md'), '# Workflow\n\nChanged guidance.\n', 'utf8');
+    invalidateResolutionCache();
     const store = new SessionStore(projectRoot);
     store.update(created.session_id, draft => {
       draft.session.orchestration.decision_points.push({
@@ -931,7 +1024,7 @@ gates:
 
     const brief = briefRun(projectRoot, created.run_id, created.session_id);
     expect(brief.guidance.workflow?.content).toContain('Changed guidance');
-    expect(brief.guidance.run_mode?.content).toContain('## Completion');
+    expect(brief.guidance.run_mode?.hash).toBeTruthy();
     expect(brief.guidance.freshness).toMatchObject({ status: 'changed', changed: ['workflow'] });
     expect(brief.session.open_decisions).toEqual([
       expect.objectContaining({ point_id: 'DP-BRIEF', status: 'pending' }),
@@ -970,20 +1063,192 @@ gates:
     const created = createRun({ projectRoot, command: 'strict-output', intent: 'strict output' });
     const runDir = join(projectRoot, '.workflow', 'sessions', created.session_id, 'runs', created.run_id);
     writeFileSync(join(runDir, 'outputs', 'result.json'), JSON.stringify({
-      _meta: { kind: 'result', schema: 'result/1.0', role: 'attachment', alias: 'strict-result' },
+      _meta: { kind: 'result', schema: 'result/1.0', role: 'attachment', alias: 'wrong-result' },
       ok: true,
     }, null, 2));
     const rejected = checkRun(projectRoot, created.run_id, created.session_id);
     expect(rejected.errors).toEqual(expect.arrayContaining([
       expect.stringContaining('_meta.schema result/1.0 does not match contract result/2.0'),
       expect.stringContaining('_meta.role attachment does not match contract primary'),
+      expect.stringContaining('_meta.alias wrong-result does not match contract strict-result'),
     ]));
+
+    const bypassed = checkRun(projectRoot, created.run_id, created.session_id, {
+      skipArtifactMetadataValidation: true,
+    });
+    expect(bypassed.errors).toEqual([]);
+    expect(bypassed.artifacts).toEqual([
+      expect.objectContaining({ kind: 'result', role: 'attachment', alias: 'wrong-result' }),
+    ]);
+    expect(bypassed.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining('artifact metadata validation skipped: outputs/result.json: _meta.schema'),
+      expect.stringContaining('artifact metadata validation skipped: outputs/result.json: _meta.role'),
+      expect.stringContaining('artifact metadata validation skipped: outputs/result.json: _meta.alias'),
+    ]));
+
+    rmSync(join(runDir, 'outputs', 'result.json'));
+    const missingRequired = checkRun(projectRoot, created.run_id, created.session_id, {
+      skipArtifactMetadataValidation: true,
+    });
+    expect(missingRequired.errors).toContain('Missing required contract v2 output: outputs/result.json');
 
     writeFileSync(join(runDir, 'outputs', 'result.json'), JSON.stringify({
       _meta: { kind: 'result', schema: 'result/2.0', role: 'primary', alias: 'strict-result' },
       ok: true,
     }, null, 2));
     expect(checkRun(projectRoot, created.run_id, created.session_id).errors).toEqual([]);
+  });
+
+  it('keeps artifact metadata skip diagnostic-only during completion', () => {
+    const projectRoot = root();
+    commandFile(projectRoot, 'strict-complete', `contract_version: 2
+consumes: []
+produces:
+  - kind: result
+    path: outputs/result.json
+    alias: strict-result
+    role: primary
+    required: true
+    schema: result/2.0
+gates:
+  entry: []
+  exit: []`);
+    const created = createRun({ projectRoot, command: 'strict-complete', intent: 'strict completion' });
+    const store = new SessionStore(projectRoot);
+    const runDir = join(projectRoot, '.workflow', 'sessions', created.session_id, 'runs', created.run_id);
+    const outputPath = join(runDir, 'outputs', 'result.json');
+    writeFileSync(outputPath, JSON.stringify({
+      _meta: { kind: 'legacy-result', schema: 'result/1.0', role: 'attachment', alias: 'wrong-result' },
+    }));
+
+    const strict = completeRun(projectRoot, created.run_id, created.session_id);
+    expect(strict.sealed).toBe(false);
+    expect(strict.errors).not.toEqual([]);
+    const registryBeforeDiagnosticCompletion = structuredClone(store.readBundle(created.session_id).artifacts);
+
+    const diagnosticOption = completeRun(projectRoot, created.run_id, created.session_id, {
+      skipArtifactMetadataValidation: true,
+    });
+    expect(diagnosticOption.sealed).toBe(false);
+    expect(diagnosticOption.primary_artifact_id).toBeNull();
+    expect(diagnosticOption.artifact_ids).toEqual([]);
+    expect(diagnosticOption.artifacts).toEqual([
+      expect.objectContaining({ kind: 'legacy-result', role: 'attachment', alias: 'wrong-result' }),
+    ]);
+    expect(diagnosticOption.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('_meta.kind legacy-result does not match contract result'),
+      expect.stringContaining('_meta.schema result/1.0 does not match contract result/2.0'),
+      expect.stringContaining('_meta.role attachment does not match contract primary'),
+      expect.stringContaining('_meta.alias wrong-result does not match contract strict-result'),
+    ]));
+    expect(diagnosticOption.warnings).not.toEqual(expect.arrayContaining([
+      expect.stringContaining('artifact metadata validation skipped'),
+    ]));
+    expect(store.readBundle(created.session_id).artifacts).toEqual(registryBeforeDiagnosticCompletion);
+    expect(JSON.parse(readFileSync(outputPath, 'utf8'))._meta).toEqual({
+      kind: 'legacy-result', schema: 'result/1.0', role: 'attachment', alias: 'wrong-result',
+    });
+  });
+
+  it('keeps sealed legacy attachment authority rejected when current review requires primary', () => {
+    const fixture = legacyAttachmentFixture;
+    const projectRoot = root();
+    commandFile(projectRoot, fixture.producer.command, fixture.producer.sealed_contract);
+    commandFile(projectRoot, fixture.review.command, fixture.review.contract);
+
+    const producer = createRun({
+      projectRoot,
+      command: fixture.producer.command,
+      sessionId: 'legacy-role',
+      intent: 'legacy execution role regression',
+    });
+    const store = new SessionStore(projectRoot);
+    const producerDir = store.runDir(producer.session_id, producer.run_id);
+    writeFileSync(
+      join(producerDir, 'outputs', 'execution.json'),
+      JSON.stringify(fixture.authority.output, null, 2),
+      'utf8',
+    );
+    writeFileSync(join(producerDir, 'report.md'), [
+      '---', 'verdict: ready', 'summary: sealed legacy execution', 'constraints: []',
+      'decisions: []', 'concerns: []', 'next: []', '---', '',
+    ].join('\n'), 'utf8');
+
+    const sealed = completeRun(projectRoot, producer.run_id, producer.session_id);
+    expect(sealed.sealed).toBe(true);
+    const producerRun = store.readRun(producer.session_id, producer.run_id);
+    const registered = store.readBundle(producer.session_id).artifacts.artifacts[sealed.artifact_ids[0]];
+    expect(fixture.authority.output._meta.role).toBe('attachment');
+    expect(producerRun.contract_snapshot?.normalized.produces[0]).toMatchObject({ role: 'attachment' });
+    expect(registered).toMatchObject(fixture.authority.registry);
+
+    commandFile(projectRoot, fixture.producer.command, fixture.producer.current_contract);
+    invalidateResolutionCache();
+    const review = createRun({
+      projectRoot,
+      command: fixture.review.command,
+      sessionId: producer.session_id,
+      intent: 'legacy execution role regression',
+    });
+    const assessment = review.reuse_assessments[0];
+    expect(assessment).toMatchObject({
+      decision: 'REJECT',
+      reason_codes: fixture.expected_reason_codes,
+      source_fence: { artifact_role: 'attachment' },
+      consumer: { role: fixture.review.required_role },
+    });
+    expect(review.upstream).toEqual({});
+
+    expect(() => acceptRunReuse(
+      projectRoot,
+      review.run_id,
+      assessment.assessment_hash,
+      review.session_id,
+      {
+        actor: 'reviewer',
+        reason: 'attempted force acceptance',
+        evidence: ['outputs/review.json'],
+      },
+    )).toThrow(/is REJECT, expected REVIEW/);
+    expect(store.readRun(review.session_id, review.run_id).input.consumes).toEqual([]);
+  });
+
+  it('matches required contract path templates against produced artifacts', () => {
+    const projectRoot = root();
+    commandFile(projectRoot, 'templated-output', `contract_version: 2
+consumes: []
+produces:
+  - kind: plan-task
+    path: outputs/tasks/TASK-{NNN}.json
+    role: attachment
+    required: true
+    schema: plan-task/1.0
+gates:
+  entry: []
+  exit: []`);
+    const created = createRun({ projectRoot, command: 'templated-output', intent: 'templated output' });
+    const runDir = join(projectRoot, '.workflow', 'sessions', created.session_id, 'runs', created.run_id);
+    mkdirSync(join(runDir, 'outputs', 'tasks'), { recursive: true });
+    writeFileSync(join(runDir, 'outputs', 'tasks', 'TASK-001.json'), JSON.stringify({
+      _meta: { kind: 'plan-task', schema: 'plan-task/1.0', role: 'attachment' },
+    }));
+    const secondTaskPath = join(runDir, 'outputs', 'tasks', 'TASK-002.json');
+    writeFileSync(secondTaskPath, JSON.stringify({
+      _meta: { kind: 'plan-task', schema: 'plan-task/2.0', role: 'attachment' },
+    }));
+
+    const rejected = checkRun(projectRoot, created.run_id, created.session_id);
+    expect(rejected.errors).toContain(
+      'outputs/tasks/TASK-002.json: _meta.schema plan-task/2.0 does not match contract plan-task/1.0',
+    );
+
+    writeFileSync(secondTaskPath, JSON.stringify({
+      _meta: { kind: 'plan-task', schema: 'plan-task/1.0', role: 'attachment' },
+    }));
+    const checked = checkRun(projectRoot, created.run_id, created.session_id);
+
+    expect(checked.errors).toEqual([]);
+    expect(checked.artifacts.filter(item => item.kind === 'plan-task')).toHaveLength(2);
   });
 
   it('brief of a sealed Run points next at run next to advance the chain (G4)', () => {
@@ -1030,6 +1295,7 @@ gates:
 
     const bare = prepareStep(projectRoot, 'demo-exec');
     expect(bare.previous).toBeUndefined();
+    expect(bare.session_guidance).toBeUndefined();
 
     const planRun = createRun({ projectRoot, command: 'demo-plan', intent: 'prepare session demo' });
     writePlanRun(projectRoot, planRun.session_id, planRun.run_id);
@@ -1043,6 +1309,24 @@ gates:
     expect(withSession.previous?.handoff?.run_id).toBe(planRun.run_id);
     const consume = withSession.previous?.consumes.find(c => c.alias === 'current-plan');
     expect(consume).toMatchObject({ kind: 'plan', required: true, present: true, status: 'sealed' });
+    expect(withSession.session_guidance).toMatchObject({
+      session_id: planRun.session_id,
+      status: 'running',
+      latest_completed_run_id: planRun.run_id,
+      current_step: null,
+      open_decisions: [],
+      knowledge: {
+        unique_inputs: 0,
+        pending_candidates: 2,
+        corroborated_candidates: 0,
+        promoting_candidates: 0,
+        review_command: `maestro knowledge review ${planRun.session_id}`,
+      },
+      next: {
+        command: `maestro run seal-session ${planRun.session_id}`,
+        reason: 'chain has no pending execution steps',
+      },
+    });
   });
 
   it('complete --note merges into handoff concerns with de-duplication', () => {
@@ -1091,6 +1375,36 @@ gates:
     expect(extra.role).toBe('evidence');
   });
 
+  it('complete --artifact accepts a CWD-relative path that lands inside the run directory', () => {
+    const projectRoot = root();
+    commandFile(projectRoot, 'art-cwd', `consumes: []\nproduces: []\ngates:\n  entry: []\n  exit: []`);
+    const created = createRun({ projectRoot, command: 'art-cwd', intent: 'cwd relative evidence' });
+    const runDir = join(projectRoot, '.workflow', 'sessions', created.session_id, 'runs', created.run_id);
+    writeFileSync(join(runDir, 'evidence', 'trace.log'), 'trace lines\n', 'utf8');
+
+    // Callers pass shell-CWD-relative paths by habit; the run-relative reading
+    // misses, but the CWD reading reaches a file inside the run directory.
+    const prevCwd = process.cwd();
+    process.chdir(projectRoot);
+    try {
+      const completed = completeRun(projectRoot, created.run_id, undefined, {
+        extraArtifacts: [join('.workflow', 'sessions', created.session_id, 'runs', created.run_id, 'evidence', 'trace.log')],
+      });
+      expect(completed.sealed).toBe(true);
+    } finally {
+      process.chdir(prevCwd);
+    }
+  });
+
+  it('complete --artifact errors name the run-directory resolution base', () => {
+    const projectRoot = root();
+    commandFile(projectRoot, 'art-msg', `consumes: []\nproduces: []\ngates:\n  entry: []\n  exit: []`);
+    const created = createRun({ projectRoot, command: 'art-msg', intent: 'error message base' });
+    expect(() => completeRun(projectRoot, created.run_id, undefined, {
+      extraArtifacts: ['evidence/missing.log'],
+    })).toThrow(/relative paths resolve against the run directory/i);
+  });
+
   it('surfaces complete --note as a review assessment and in the next prev handoff', () => {
     const projectRoot = root();
     commandFile(projectRoot, 'demo-plan', `consumes: []
@@ -1124,5 +1438,126 @@ gates:
       expect.objectContaining({ decision: 'REVIEW', reason_codes: expect.arrayContaining(['QUALITY_MEDIUM']) }),
     ]);
     expect(brief.continuity.prev_handoff?.concerns).toContain('watch the migration order');
+  });
+
+  // -----------------------------------------------------------------------
+  // v3.1 forward-compatibility: state.json must not be silently downgraded
+  // -----------------------------------------------------------------------
+
+  it('readStateJson preserves v3.1 fields without downgrade', () => {
+    const projectRoot = root();
+    mkdirSync(join(projectRoot, '.workflow'), { recursive: true });
+    const v31 = {
+      version: '3.1',
+      project_name: 'fwd-compat',
+      status: 'active',
+      current_milestone: null,
+      current_task_id: null,
+      milestones: [{
+        id: 'M1', name: 'alpha', title: 'Alpha', status: 'active', phases: [1, 2],
+        type: 'standard', phase_slugs: { 1: 'setup', 2: 'build' },
+        roadmap_ref: 'roadmap-001', created_at: '2026-07-01T00:00:00+08:00',
+      }],
+      artifacts: [],
+      accumulated_context: { key_decisions: [], blockers: [], deferred: [] },
+      transition_history: [],
+      milestone_history: [],
+      last_updated: '2026-07-20T00:00:00+08:00',
+      _milestone_schema: '{ id, name, type, status, phases[], phase_slugs{}, roadmap_ref, created_at }',
+      current_phase: 1,
+      phases_summary: { total: 2, completed: 0, in_progress: 1, pending: 1 },
+    };
+    writeFileSync(join(projectRoot, '.workflow', 'state.json'), JSON.stringify(v31, null, 2), 'utf8');
+
+    const state = readStateJson(projectRoot);
+    expect(state).not.toBeNull();
+    expect(state!.version).toBe('3.1');
+    expect(state!._milestone_schema).toBe(v31._milestone_schema);
+    expect(state!.current_phase).toBe(1);
+    expect(state!.phases_summary).toEqual(v31.phases_summary);
+    expect(state!.milestones[0].type).toBe('standard');
+    expect(state!.milestones[0].phase_slugs).toEqual({ 1: 'setup', 2: 'build' });
+    expect(state!.milestones[0].roadmap_ref).toBe('roadmap-001');
+    expect(state!.milestones[0].created_at).toBe('2026-07-01T00:00:00+08:00');
+  });
+
+  it('writeStateJson round-trips v3.1 state without losing extension fields', () => {
+    const projectRoot = root();
+    mkdirSync(join(projectRoot, '.workflow'), { recursive: true });
+    const v31 = {
+      version: '3.1',
+      project_name: 'round-trip',
+      status: 'active',
+      current_milestone: null,
+      current_task_id: null,
+      milestones: [],
+      artifacts: [],
+      accumulated_context: { key_decisions: [], blockers: [], deferred: [] },
+      transition_history: [],
+      milestone_history: [],
+      last_updated: '2026-07-20T00:00:00+08:00',
+      _milestone_schema: 'hint-string',
+      current_phase: null,
+      phases_summary: { total: 0, completed: 0, in_progress: 0, pending: 0 },
+    };
+    // Write v3.1 directly, then read + write through the API
+    writeFileSync(join(projectRoot, '.workflow', 'state.json'), JSON.stringify(v31, null, 2), 'utf8');
+    const state = readStateJson(projectRoot)!;
+    writeStateJson(projectRoot, state);
+
+    // Re-read from disk
+    const onDisk = JSON.parse(readFileSync(join(projectRoot, '.workflow', 'state.json'), 'utf8'));
+    expect(onDisk.version).toBe('3.1');
+    expect(onDisk._milestone_schema).toBe('hint-string');
+    expect(onDisk.phases_summary).toEqual(v31.phases_summary);
+  });
+
+  it('migrateV1toV2 preserves unknown fields from legacy state', () => {
+    const v1 = {
+      version: '1.0',
+      project_name: 'legacy',
+      status: 'active',
+      current_phase: 3,
+      phases_summary: { total: 5, completed: 2, in_progress: 1, pending: 2 },
+      custom_extension: 'must-survive',
+    };
+    const v2 = migrateV1toV2(v1 as any);
+    expect(v2.version).toBe('2.0');
+    // Unknown fields from v1 should be preserved
+    expect((v2 as any).custom_extension).toBe('must-survive');
+    // Legacy fields should also survive (not silently dropped)
+    expect((v2 as any).current_phase).toBe(3);
+    expect((v2 as any).phases_summary).toEqual(v1.phases_summary);
+  });
+
+  it('createRun on v3.1 workspace does not downgrade state.json', () => {
+    const projectRoot = root();
+    mkdirSync(join(projectRoot, '.workflow'), { recursive: true });
+    const v31 = {
+      version: '3.1',
+      project_name: 'no-downgrade',
+      status: 'active',
+      current_milestone: null,
+      current_task_id: null,
+      milestones: [],
+      artifacts: [],
+      accumulated_context: { key_decisions: [], blockers: [], deferred: [] },
+      transition_history: [],
+      milestone_history: [],
+      last_updated: '2026-07-20T00:00:00+08:00',
+      _milestone_schema: 'schema-hint',
+      phases_summary: { total: 0, completed: 0, in_progress: 0, pending: 0 },
+    };
+    writeFileSync(join(projectRoot, '.workflow', 'state.json'), JSON.stringify(v31, null, 2), 'utf8');
+    commandFile(projectRoot, 'empty', `produces: []
+gates:
+  entry: []
+  exit: []`);
+
+    createRun({ projectRoot, command: 'empty', intent: 'v3.1 compat' });
+
+    const onDisk = JSON.parse(readFileSync(join(projectRoot, '.workflow', 'state.json'), 'utf8'));
+    expect(onDisk.version).toBe('3.1');
+    expect(onDisk._milestone_schema).toBe('schema-hint');
   });
 });

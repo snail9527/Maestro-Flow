@@ -129,7 +129,7 @@ Commit: `"odyssey-improve({slug}): DIAGNOSE — root cause analysis complete"`
 
 **A_ESCALATE_DIAGNOSIS** — `retries++`. < 3: `maestro delegate --role analyze`, new hypotheses, → S_DIAGNOSE. >= 3: Normal → [@ask] AskUserQuestion | `-y` → INCONCLUSIVE → S_RECORD.
 
-**A_FIX** — (1) Exhaustive fix: ALL diagnosed issues by severity tier (critical → high → medium → low within fix_threshold), one dimension at a time. After each tier, re-verify **current tier's dimension only** (not all dimensions); new findings at same or higher severity append to current tier. Cross-dimension regression checks run once at S_VERIFY after all tiers. **No partial-tier advancement** — each tier fully addressed (fixed or individually classified) before advancing; blanket "pre-existing" skip forbidden. (2) For each fix: implement → evidence phase=fix. (3) Normal: [@ask] AskUserQuestion per-fix | `-y`: auto-proceed, record `deferred`.
+**A_FIX** — (1) Exhaustive fix: ALL diagnosed issues by severity tier (critical → high → medium → low within fix_threshold), one dimension at a time. After each tier, re-verify **current tier's dimension only** (not all dimensions); new findings at same or higher severity append to current tier. Cross-dimension regression checks run once at S_VERIFY after all tiers. **No partial-tier advancement** — each tier fully addressed (fixed or individually classified) before advancing; blanket "pre-existing" skip forbidden. (2) For each fix: implement → **run tests covering the modified area immediately** → evidence phase=fix. **Incremental verification** — each discrete fix step verified before proceeding; NEVER batch unrelated changes. **Rollback safety** — if tests fail after a fix step, revert that specific change (`git checkout -- {file}`) before attempting alternatives; NEVER proceed with failing tests. **Behavioral equivalence** — fixes MUST preserve existing behavior; no API changes, no new functionality. Beneficial changes discovered during fixing → evidence phase=decision as recommendations, NOT applied. **Scope lock** — once tier plan confirmed, no scope expansion without re-confirmation. (3) Normal: [@ask] AskUserQuestion per-fix | `-y`: auto-proceed, record `deferred`.
 
 Commit: `"odyssey-improve({slug}): FIX — {dimension} {tier} tier addressed"`
 
@@ -149,14 +149,17 @@ Diagnosed root causes + applied fixes across all dimensions. **Discover routing:
 
 ## Knowledge Persistence (§9)
 
+Follow-up = governed candidate staging, NEVER a direct corpus write: `maestro knowledge stage spec "<title>" --content-file <path|-> --run {run_id} --category <cat>` (stage BEFORE seal; promote only after seal with a fresh receipt).
+
+
 A_RECORD extra: §8 improvement metrics — re-capture and build before/after comparison table from `baseline_metrics` vs current.
 
 | Category | Content | Follow-up |
 |----------|---------|-----------|
-| Performance pattern | Bottleneck type + fix approach + measurement | `/maestro-spec add coding` |
-| Security rule | Vulnerability class + fix + prevention | `/maestro-spec add debug` |
-| Architecture constraint | Violation + correct boundary + check | `/maestro-spec add arch` |
-| Reliability pattern | Failure mode + handling strategy + verification | `/maestro-spec add coding` |
+| Performance pattern | Bottleneck type + fix approach + measurement | `stage spec → coding` |
+| Security rule | Vulnerability class + fix + prevention | `stage spec → debug` |
+| Architecture constraint | Violation + correct boundary + check | `stage spec → arch` |
+| Reliability pattern | Failure mode + handling strategy + verification | `stage spec → coding` |
 
 ---
 
@@ -199,7 +202,7 @@ Goals:       {done}/{total} ({skipped} skipped)
 
 - **Discovery gate** (SURVEY): evidence for the phase logged, understanding.md updated. Survey requires all scan types attempted.
 - **Audit gate** (DIAGNOSE): all dimension agents completed, findings merged with severity classification. Zero dimensions reviewed is BLOCKED (W002 partial allowed).
-- **FIX gate:** current severity tier fully addressed. Per-fix evidence phase=fix logged. Auto-commit per tier. No partial-tier advancement.
+- **FIX gate:** current severity tier fully addressed. Per-fix evidence phase=fix logged. **Per-change test verification** — each fix step runs tests before proceeding. **Rollback on failure** — failed fix reverted immediately. **Behavioral equivalence** — no API/behavior changes; beneficial changes logged as recommendations only. Auto-commit per tier. No partial-tier advancement.
 - **VERIFY gate:** tests pass; metrics re-captured; confirmation written, understanding.md updated, verify goal marked. needs_rework → route back to FIX.
 
 ---
@@ -225,7 +228,7 @@ Goals:       {done}/{total} ({skipped} skipped)
 - [ ] understanding.md sections written progressively (§1–§9)
 - [ ] Fix + verify (unless --skip-fix); zero-residual — every finding has concrete action
 - [ ] Multi-layer generalization + discovery triage (unless --skip-generalize)
-- [ ] phase_goals derived, tracked, and hardened-audited; Goal Prompt once
+- [ ] phase_goals derived, tracked, and hardened-audited; goal_mode injected via prepare goal:true
 - [ ] §8 improvement metrics: before/after comparison table from baseline_metrics
 - [ ] Session resumable via -c; completion summary emitted
 
@@ -235,11 +238,11 @@ Goals:       {done}/{total} ({skipped} skipped)
 
 | Condition | Next |
 |-----------|------|
-| Discovery issues created | `/maestro-manage issue list --source improve-odyssey` |
+| Discovery issues created | `/maestro-issue list --source improve-odyssey` |
 | Deeper debug needed | `/maestro-odyssey <finding> --mode debug` |
 | Formal review of changes | `/maestro-odyssey <changed-files> --mode review` |
 | UI-related findings | `/maestro-odyssey <component> --mode ui` |
 | Document pattern | `/maestro-learn decompose <module>` |
 | Second opinion | `/maestro-learn consult <understanding.md>` |
-| Design/perf/arch pattern to persist | `/maestro-spec add coding\|arch "..."` |
+| Design/perf/arch pattern to persist | `stage spec → coding|arch` |
 | Pending decisions | Filter evidence phase=decision status=pending |

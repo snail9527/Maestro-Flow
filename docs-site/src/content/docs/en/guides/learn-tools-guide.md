@@ -10,16 +10,16 @@ A complete reference for Maestro's learning toolkit, covering the principles, us
 
 The learning toolkit is Maestro's **interactive deep learning** module, focused on extracting structured knowledge from code, documentation, and decision history. Each command follows the scientific method -- hypothesis, evidence, verification, codification -- transforming implicit engineering experience into reusable explicit knowledge.
 
-### Comparison with /maestro-manage knowledge capture
+### Comparison with /maestro-knowhow
 
-| Dimension | /maestro-learn subcommands | /maestro-manage knowledge capture |
+| Dimension | /maestro-learn subcommands | /maestro-knowhow |
 |-----------|-----------------|-------------|
 | Interaction mode | Interactive deep learning, multi-round guidance | Atomic operation, single capture |
 | Goal | Systematic acquisition of deep understanding | Quick recording of a single insight |
 | Output | Structural reports, pattern catalog, evidence trail | Single `<spec-entry>` |
 | Duration | Minutes, multi-agent parallel | Seconds, instant completion |
 
-Simple rule: **Use /maestro-learn when you need to think, use /maestro-manage knowledge capture when you need to record**.
+Simple rule: **Use /maestro-learn when you need to think, use /maestro-knowhow when you need to record**.
 
 ---
 
@@ -135,7 +135,7 @@ Systematically decompose complex code into a reusable design pattern catalog, wi
 |-----------|-------------|---------|
 | `<target>` | File path / directory / module name | Required |
 | `--patterns <list>` | Comma-separated pattern name list for focused analysis | Detect all |
-| `--save-spec` | Auto-call `/maestro-spec add` for each new pattern | Off |
+| `--save-spec` | Auto-call `/maestro-spec "<constraint>"` for each new pattern | Off |
 | `--save-wiki` | Create wiki notes per dimension | Off |
 
 <details>
@@ -310,7 +310,7 @@ Uses the `<spec-entry>` closed-tag format with `category`, `keywords`, `date`, `
 ```
 maestro-learn follow -> maestro-learn decompose      # From understanding to pattern extraction
 maestro-learn follow -> maestro-learn consult        # From understanding to multi-perspective validation
-maestro-learn decompose -> /maestro-spec add         # From pattern discovery to spec inclusion
+maestro-learn decompose -> /maestro-spec "<constraint>"         # From pattern discovery to spec inclusion
 maestro-learn consult -> maestro-learn investigate   # From retrospective finding to deep investigation
 maestro-learn investigate -> maestro-learn follow    # From problem identification to deep reading
 maestro-learn consult -> maestro-learn decompose     # From challenge to systematic decomposition

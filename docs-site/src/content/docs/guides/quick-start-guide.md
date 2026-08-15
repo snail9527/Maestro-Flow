@@ -27,13 +27,11 @@ maestro hooks install --level standard
 
 ### 可选技能包（按需安装）
 
-`maestro install` 交互界面中，以下 3 个技能包默认不选中，按需勾选。每个技能在文档站都有单独介绍页（Team / Scholar / Meta 分类下可查），完整说明见[安装指南](/guides/install)。
+`maestro install` 交互界面中，**skills-scholar** 技能包默认不选中，按需勾选；完整说明见[安装指南](/guides/install)。
 
-**skills-extra-team（16 个团队协作技能）**：team-arch-opt、team-brainstorm、team-designer、team-frontend、team-frontend-debug、team-interactive-craft、team-issue、team-motion-design、team-perf-opt、team-planex、team-roadmap-dev、team-ui-polish、team-uidesign、team-ultra-analyze、team-ux-improve、team-visual-a11y
+> v0.5.61 起 skill 面大幅精简：20 个零使用团队/辅助 skill 已删除，原 skills-extra-team / skills-meta 成员或并入核心、或移除；skills-extra-team、skills-meta 仅作为遗留空 bundle 保留。
 
-**skills-scholar（10 个学术技能）**：scholar-ideation、scholar-writing、scholar-experiment、scholar-citation-verify、scholar-anti-ai-writing、scholar-latex-organizer、scholar-review、scholar-rebuttal-pro、scholar-thesis-docx、scholar-publish
-
-**skills-meta（5 个元技能）**：skill-generator、skill-simplify、skill-tuning、prompt-generator、delegation-check
+**skills-scholar（10 个学术技能，选装）**：scholar-ideation、scholar-writing、scholar-experiment、scholar-citation-verify、scholar-anti-ai-writing、scholar-latex-organizer、scholar-review、scholar-rebuttal-pro、scholar-thesis-docx、scholar-publish
 
 ```bash
 # 安装组包后，逐个启用/禁用单个技能
@@ -41,7 +39,7 @@ maestro install toggle --type skill --list
 maestro install toggle --type skill --enable scholar-writing
 ```
 
-> 9 个内置团队技能（team-coordinate、team-executor、team-lifecycle-v4、team-quality-assurance、team-review、team-swarm、team-tech-debt、team-testing、team-adversarial-swarm）随核心组件自动安装，无需单独选择。
+> 8 个内置团队技能（team-arch-opt、team-coordinate、team-issue、team-lifecycle-v4、team-perf-opt、team-review、team-swarm、team-testing）随核心组件自动安装，无需单独选择。
 
 ---
 
@@ -51,85 +49,85 @@ maestro install toggle --type skill --enable scholar-writing
 
 ```bash
 /maestro-init                          # 初始化 .workflow/ 目录
-/maestro-ralph --roadmap "项目名称和目标" -y  # 生成路线图
+/maestro "从需求开始做整个项目" -y      # spec-driven 链：init → roadmap --mode full → plan → execute → harvest
 ```
 
 ### 从头脑风暴开始
 
 ```bash
-/maestro-ralph --engine swarm --script wf-brainstorm "在线教育平台"  # 多角色头脑风暴
-/maestro-init --from brainstorm:ANL-xxx                           # 基于头脑风暴初始化
-/maestro-ralph --roadmap "创建路线图" -y
+/maestro "brainstorm 在线教育平台"      # 多角色头脑风暴（brainstorm-driven 链）
+/maestro-init --from-brainstorm SESSION-ID                  # 基于头脑风暴初始化
+/maestro "创建路线图" -y                # roadmap-driven 链
 ```
 
 ### 完整规范蓝图（大型项目）
 
 ```bash
 /maestro-init
-/maestro "生成规范蓝图"                   # 6 阶段规范蓝图（产品简报 + PRD + 架构 + 史诗）
+/maestro "生成规范蓝图"                   # blueprint-driven 链：7 阶段规范蓝图（产品简报 + PRD + 架构 + 史诗）
 ```
 
 ---
 
 ## 3. Phase 管线
 
-项目的核心推进流程，每个 Phase 走 `分析 → 规划 → 执行 → 验证` 生命周期：
+项目的核心推进流程，每个 Phase 走 `分析 → 规划 → 执行 → 审查 → 测试` 生命周期（验证已内聚于 `post-execute` 决策门）：
 
 ```bash
-# 全量模式——覆盖当前里程碑所有 Phase
-/maestro-ralph --engine swarm --script wf-analyze  # 分析
-/maestro-next                                      # 规划
-/maestro-ralph continue                            # 执行
+# 闭环模式——/maestro-ralph 构建完整生命周期链 + decision gate
+/maestro-ralph "实现用户认证系统"     # analyze → plan → execute → ◆ → review → ◆ → test → seal
+
+# 逐步模式（经 /maestro 路由单步链）
+/maestro "analyze"                    # 分析
+/maestro "plan phase 1"               # 规划
+/maestro "execute"                    # 执行
 # 注：/maestro-verify 已于 v0.5.51 退役，验证集成进 maestro-ralph 决策门
 
 # 逐 Phase 模式（micro 层：Phase 级深度分析）
-/maestro-ralph --engine swarm --script wf-analyze 1  # 只分析 Phase 1（6 维度评分）
-/maestro-next 1                                      # 只规划 Phase 1
-/maestro-ralph continue 1                            # 只执行 Phase 1
+/maestro "analyze phase 1"            # 只分析 Phase 1
+/maestro "plan phase 1"               # 只规划 Phase 1
+/maestro "execute phase 1"            # 只执行 Phase 1
 
 # 宏观探索模式（macro 层：roadmap 之前使用）
-/maestro "实现多租户架构"                            # 需求影响面探索 → scope_verdict 路由
+/maestro "实现多租户架构"              # analyze-macro → scope_verdict 路由
 ```
 
 ### 一键全自动
 
 ```bash
 /maestro -y "实现用户认证系统"
-# 自动执行完整生命周期
+# 自动分类意图 → 创建 canonical Session → 执行完整生命周期
 ```
 
 ### 免初始化模式（临时任务）
 
 ```bash
-/maestro "实现 JWT 认证"                 # scope=standalone，自动创建 state.json
-/maestro-next --dir scratch/20260420-analyze-jwt-...
-/maestro-ralph continue --dir scratch/20260420-plan-jwt-...
+/maestro "实现 JWT 认证"                 # analyze-plan-execute 链，scope=standalone
+maestro session start "实现 JWT 认证" --chain analyze plan execute   # CLI 直接建链
 ```
 
 ---
 
 ## 4. 质量管线
 
-执行后运行质量验证，三轨测试互补：
+执行后运行质量验证，质量门由 Ralph 策略作为 decision 节点插入链中：
 
 ```bash
-# 统一自动测试（智能路由：spec/gap/code）
-/maestro-ralph --engine swarm 1
+# 闭环模式（自动插入 quality gate）
+/maestro-ralph "实现 X"     # execute → ◆post-execute → review → ◆post-review → test → ◆post-test
 
-# 安全审计 / 测试
-/security-audit 1
-
-# 代码审查
-/maestro-ralph --engine swarm --script wf-review 1
+# 单步质量命令（经 /maestro 路由）
+/maestro "review phase 1"               # 代码审查
+/maestro "test phase 1"                 # UAT 测试
+/maestro-odyssey --mode security "phase 1"   # 安全审计
 ```
 
 ### 测试失败修复循环
 
 ```bash
 /maestro-odyssey --mode debug --from-uat 1      # 诊断失败
-/maestro-next 1 --gaps                  # 生成修复计划
-/maestro-ralph continue 1              # 执行修复
-/maestro-ralph --engine swarm 1 --re-run  # 重跑失败场景
+/maestro "review 有问题需要修"            # review-fix 链：plan --gaps → execute → review
+/maestro "全面质量检查"                   # quality-loop 链：review → auto-test → test → debug → plan --gaps → execute
 ```
 
 ---
@@ -140,16 +138,14 @@ maestro install toggle --type skill --enable scholar-writing
 
 ```bash
 # 发现问题
-/maestro-manage issue discover by-prompt "检查 API 错误处理"
+/maestro-issue discover by-prompt "检查 API 错误处理"
 
 # 创建 Issue
-/maestro-manage issue create --title "内存泄漏" --severity high
+/maestro-issue create --title "内存泄漏" --severity high
 
-# 闭环处理
-/maestro-ralph --engine swarm --script wf-analyze --gaps ISS-001  # 根因分析
-/maestro-next --gaps                     # 方案规划
-/maestro-ralph continue                  # 执行修复
-/maestro-manage issue close ISS-001 --resolution "Fixed"
+# 闭环处理（issue-full 链）
+/maestro "fix issue ISS-001"     # analyze --gaps → plan --gaps → execute → review → close → harvest
+/maestro-issue close ISS-001 --resolution "Fixed"
 ```
 
 **Commander Agent** 可自动推进未分析的 Issue，无需手动干预。
@@ -161,14 +157,11 @@ maestro install toggle --type skill --enable scholar-writing
 跳过 Phase 管线，直接完成任务：
 
 ```bash
-# 最快路径
+# 最快路径（纯路由：分类意图 → 路由到 companion / 单 Run / /maestro）
 /maestro-next "修复登录页 Bug"
 
-# 带规划验证
-/maestro-next "重构 API 层" --full
-
-# 带决策提取
-/maestro-next --note "数据库迁移策略"
+# 轻量执行（最小 Run 生命周期）
+/maestro-companion "修复登录页 Bug"
 ```
 
 ---
@@ -215,19 +208,20 @@ maestro delegate "..." --rule development-implement-feature --mode write
 项目级知识自动注入，Agent 启动时无需手动粘贴上下文：
 
 ```bash
-# 初始化（扫描代码库生成规范文件）
-/maestro-spec setup                                     # 已有项目：扫描代码库填充 specs
+# 初始化
+maestro spec init                                       # 播种骨架文件（仅骨架，不扫描代码库）
+maestro run skill specs-setup                           # 已有项目：扫描代码库，用检出的约定填充 specs
 # 新项目可跳过 -- specs 由 analyze/plan/execute 渐进填充
 
-# 录入规范
-/maestro-spec add coding "所有 API 使用 Hono 框架"
-/maestro-spec add arch "通知模块使用事件驱动架构"
-/maestro-spec add learning "分页 offset=0 会越界"
+# 录入规范（/maestro-spec 只做录入，category 自动推断，也可显式指定）
+/maestro-spec coding "所有 API 使用 Hono 框架"
+/maestro-spec arch "通知模块使用事件驱动架构"
+/maestro-spec learning "分页 offset=0 会越界"
 
-# 加载规范
-/maestro-spec load --role implement
-/maestro-spec load --keyword auth
-/maestro-spec load --role implement --keyword auth
+# 加载规范（CLI）
+maestro spec load --category coding
+maestro spec load --keyword auth
+maestro spec load --category coding --keyword auth
 ```
 
 **自动注入**：Hook 在 Agent 启动时按类型自动注入对应规范（coder→coding, tester→test, debugger→debug）。
@@ -240,7 +234,7 @@ maestro delegate "..." --rule development-implement-feature --mode write
 
 ```bash
 # 自然语言创建
-/maestro-overlay "在 maestro-execute 后增加 CLI 验证"
+/maestro-overlay "在 execute 后增加 CLI 验证"
 
 # 管理
 maestro overlay list                    # 交互式 TUI 查看
@@ -282,7 +276,7 @@ maestro hooks toggle spec-injector off
 ```bash
 /maestro-fork -m 2                              # Fork M2 worktree
 cd .worktrees/m2-production/
-/maestro-ralph --engine swarm --script wf-analyze 3 && /maestro-next 3 && /maestro-ralph continue 3
+/maestro "analyze phase 3" && /maestro "plan phase 3" && /maestro "execute phase 3"
 
 cd /project
 /maestro-merge -m 2                             # 合并回 main
@@ -305,15 +299,15 @@ cd /project
 
 ---
 
-## 13. Dashboard 看板
+## 13. 工作流状态
 
 ```bash
-maestro view              # 浏览器看板
-maestro view --tui        # 终端 UI
-maestro stop              # 停止服务
+maestro run brief          # 当前 Run 的恢复信息
+maestro run check          # 当前 Run 的门禁与完成指引
+maestro session status     # canonical Session/Run 状态
 ```
 
-展示 Phase 进度、Issue 状态（Backlog → In Progress → Review → Done），支持批量执行和 Agent 选择。
+Dashboard UI 已退役；工作流状态统一通过 Session/Run 命令查看。
 
 ---
 
@@ -356,12 +350,12 @@ maestro kg context "validateToken"                  # 调用者/被调用者
 | `maestro install` | 安装 |
 | `maestro search "query"` | 统一知识搜索 |
 | `maestro delegate "..." --to gemini` | 委托任务 |
-| `maestro coordinate run "..." --chain default -y` | 图协调器 |
+| `maestro session start "..." --chain analyze plan execute` | 建链并派发（人类入口） |
+| `maestro session status` | canonical Session/Run 状态 |
 | `maestro overlay list` | Overlay 管理 |
 | `maestro hooks status` | Hook 状态 |
 | `maestro spec load --category coding` | 加载规范 |
 | `maestro kg search "symbol"` | 代码图谱搜索 |
-| `maestro view` | Dashboard 看板 |
 | `maestro launcher -w my-project` | Claude Code 启动器 |
 
 ---
@@ -371,7 +365,8 @@ maestro kg context "validateToken"                  # 调用者/被调用者
 ### 新项目
 
 ```bash
-/maestro-init → /maestro-ralph --roadmap → /maestro-next 1 → /maestro-ralph continue 1 → /maestro-session-seal
+/maestro-init → /maestro "从需求开始做整个项目" → /maestro-session-seal
+# 或闭环：/maestro-ralph "实现 X" -y
 ```
 
 ### 一键全自动
@@ -383,13 +378,13 @@ maestro kg context "validateToken"                  # 调用者/被调用者
 ### Bug 修复
 
 ```bash
-/maestro-next "修复移动端登录页布局问题"
+/maestro-next "修复移动端登录页布局问题"    # 路由到 companion / 单 Run / /maestro
 ```
 
 ### 问题发现与修复
 
 ```bash
-/maestro-manage issue discover → /maestro-ralph --engine swarm --script wf-analyze --gaps ISS-xxx → /maestro-next --gaps → /maestro-ralph continue → /maestro-manage issue close
+/maestro-issue discover → /maestro "fix issue ISS-xxx" → /maestro-issue close
 ```
 
 ### 并行开发

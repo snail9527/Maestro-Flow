@@ -1,28 +1,99 @@
 ---
 name: plan
 description: Decompose confirmed analysis or requirements into an executable DAG, waves, and collision-free tasks
-argument-hint: "[scope] [--gaps] [--tdd] [--revise [instructions]] [--check <plan-dir>] [-y]"
+argument-hint: '[scope] [--gaps] [--tdd] [--revise [instructions]] [--check <plan-dir>] [-y]'
 contract:
   consumes:
-    - { kind: findings, alias: current-analysis, required: false }
-    - { kind: diagnosis, alias: latest-debug, required: false }
-    - { kind: blueprint, alias: current-blueprint, required: false }
-    - { kind: roadmap, alias: current-roadmap, required: false }
-    - { kind: plan, alias: current-plan, required: false }
-    - { kind: priors, alias: session-priors, required: false }
+  - kind: findings
+    alias: current-analysis
+    required: false
+    schema: findings/1.0
+    role: primary
+  - kind: diagnosis
+    alias: latest-debug
+    required: false
+    schema: diagnosis/1.0
+    role: primary
+  - kind: review-findings
+    alias: latest-review
+    required: false
+    schema: review-findings/1.0
+    role: primary
+    accepts_negative_evidence: true
+  - kind: verification
+    alias: latest-verification
+    required: false
+    schema: verification/1.0
+    role: primary
+    accepts_negative_evidence: true
+  - kind: blueprint
+    alias: current-blueprint
+    required: false
+    schema: blueprint/1.0
+    role: primary
+  - kind: roadmap
+    alias: current-roadmap
+    required: false
+    schema: roadmap/1.0
+    role: primary
+  - kind: plan
+    required: false
+    schema: plan/1.0
+    role: primary
+  - kind: priors
+    alias: session-priors
+    required: false
+    schema: priors/1.0
+    role: evidence
   produces:
-    - { path: outputs/plan.json, kind: plan, alias: current-plan, role: primary }
-    - { path: "outputs/tasks/TASK-{NNN}.json", kind: plan-task, role: attachment }
-    - { path: outputs/waves.json, kind: execution-waves, role: attachment }
-    - { path: outputs/dependency-graph.json, kind: dependency-graph, role: evidence }
-    - { path: outputs/collision-report.json, kind: collision-report, role: evidence }
-    - { path: outputs/plan-check.json, kind: plan-check, role: evidence, optional: true }
+  - path: outputs/plan.json
+    kind: plan
+    alias: current-plan
+    role: primary
+    required: true
+    schema: plan/1.0
+  - path: outputs/tasks/TASK-{NNN}.json
+    kind: plan-task
+    role: attachment
+    required: false
+    schema: plan-task/1.0
+  - path: outputs/waves.json
+    kind: execution-waves
+    role: attachment
+    required: false
+    schema: execution-waves/1.0
+  - path: outputs/dependency-graph.json
+    kind: dependency-graph
+    role: evidence
+    required: false
+    schema: dependency-graph/1.0
+  - path: outputs/collision-report.json
+    kind: collision-report
+    role: evidence
+    required: false
+    schema: collision-report/1.0
+  - path: outputs/plan-check.json
+    kind: plan-check
+    role: evidence
+    required: false
+    schema: plan-check/1.0
   gates:
-    exit: [context-collected, plan-generated, plan-checked, plan-confirmed]
+    exit:
+    - context-collected
+    - plan-generated
+    - plan-checked
+    - plan-confirmed
+  contract_version: 2.1
 refs:
-  - { path: ref/boundary-grill.md, when: Task boundary / file write conflicts need arbitration }
-  - { path: ref/tdd.md, when: --tdd mode, generating a RED-GREEN-REFACTOR task chain }
-  - { path: ref/finish-work.md, when: Wrapping up, archiving, and extracting spec/knowhow }
+- path: ref/boundary-grill.md
+  when: Task boundary / file write conflicts need arbitration
+- path: ref/tdd.md
+  when: --tdd mode
+  generating a RED-GREEN-REFACTOR task chain: null
+- path: ref/finish-work.md
+  when: Wrapping up
+  archiving: null
+  and extracting spec/knowhow: null
 ---
 
 # Pre-task Thinking: plan
@@ -33,7 +104,7 @@ The output of plan is "task JSON an executor can follow to finish the work," not
 
 ## Input Interpretation
 
-- Where does the upstream come from? `current-analysis` (analyze's findings) takes priority; `--gaps` consumes `latest-debug`; no upstream reports E001. These aliases are injected by create — don't guess by mtime.
+- Where does the upstream come from? `current-analysis` (analyze's findings) takes priority; `--gaps` consumes registered issues plus injected `latest-review`, `latest-verification`, and `latest-debug` evidence; no usable source reports E001. These aliases are injected by create — don't guess by mtime.
 - How large is the scope? It determines single-agent vs 2+1 agent mode: ≤3 modules single agent (≤8 tasks); >3 modules 2+1 (2 parallel planners of ≤8 each + 1 synthesis agent, total ≤16). Module count is derived from milestone phase definitions and the analyze upstream.
 - Is it a special mode? `--revise` loads an existing plan for incremental changes (skips preceding phases); `--check` is read-only validation; `--tdd` generates a test-first task chain (read ref/tdd.md). All three bypass the standard create pipeline.
 
@@ -41,7 +112,7 @@ The output of plan is "task JSON an executor can follow to finish the work," not
 
 - With `session-priors` (injected by upstream): the spec / doc-index / wiki hits it lists are already resolved — reuse them directly and do **not** re-run `maestro spec load` or wiki search for the same ground. Only collect what priors does not cover (or when priors is absent).
 - With `current-analysis`: read `findings.json#decisions` — locked as inviolable constraints, free left to the implementer's discretion, deferred explicitly excluded; `findings[]` and recommendation as task-scope input. If upstream gave implementation_scope, 1 scope item → 1 task.
-- With `latest-debug` (--gaps): produce one fix task per gap, with issue_id bidirectionally back-linking issues.jsonl.
+- With `latest-review`/`latest-debug` (`--gaps`): preserve review finding IDs and severity, cluster shared root causes, and produce traceable fix tasks; issue-backed gaps keep bidirectional `issue_id` links.
 - Project specs (arch category): passed in as constraint context for the planner — load via `maestro spec load` only when `session-priors` did not already carry them.
 
 ## Boundaries and Invariants

@@ -11,16 +11,16 @@ Maestro 学习工具集的完整使用手册，涵盖 5 个 `/maestro-learn` 子
 
 学习工具集是 Maestro 的**交互式深度学习**模块，专注于从代码、文档、决策历史中提取结构化知识。每个命令都遵循科学方法——假设、证据、验证、沉淀——将隐性的工程经验转化为可复用的显性知识。
 
-### 与 /maestro-manage knowledge capture 的区别
+### 与 /maestro-knowhow 的区别
 
-| 维度 | /maestro-learn 子命令 | /maestro-manage knowledge capture |
+| 维度 | /maestro-learn 子命令 | /maestro-knowhow |
 |------|---------------|--------------|
 | 交互模式 | 交互式深度学习，多轮引导 | 原子操作，单次捕获 |
 | 目标 | 系统化获取深层理解 | 快速记录单个洞察 |
 | 产物 | 结构化报告、pattern catalog、evidence trail | 单条 `<spec-entry>` |
 | 耗时 | 数分钟，多 Agent 并行 | 数秒，即时完成 |
 
-简单规则：**需要思考用 /maestro-learn，需要记录用 /maestro-manage knowledge capture**。
+简单规则：**需要思考用 /maestro-learn，需要记录用 /maestro-knowhow**。
 
 ---
 
@@ -136,7 +136,7 @@ Maestro 学习工具集的完整使用手册，涵盖 5 个 `/maestro-learn` 子
 |------|------|--------|
 | `<target>` | 文件路径 / 目录 / 模块名 | 必填 |
 | `--patterns <list>` | 逗号分隔的模式名列表，聚焦分析 | 检测全部 |
-| `--save-spec` | 每个新模式自动调用 `/maestro-spec add` | 关闭 |
+| `--save-spec` | 每个新模式自动调用 `/maestro-spec "<约束>"` | 关闭 |
 | `--save-wiki` | 按维度创建 wiki 笔记 | 关闭 |
 
 <details>
@@ -311,7 +311,7 @@ specs/learnings.md                         # 统一学习沉淀
 ```
 maestro-learn follow → maestro-learn decompose      # 从理解到模式提取
 maestro-learn follow → maestro-learn consult        # 从理解到多视角验证
-maestro-learn decompose → /maestro-spec add         # 从模式发现到规范录入
+maestro-learn decompose → /maestro-spec "<约束>"         # 从模式发现到规范录入
 maestro-learn consult → maestro-learn investigate   # 从复盘发现到深入探究
 maestro-learn investigate → maestro-learn follow    # 从问题定位到深入阅读
 maestro-learn consult → maestro-learn decompose     # 从质疑到系统化拆解

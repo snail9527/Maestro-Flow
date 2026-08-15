@@ -41,6 +41,10 @@ export interface SpecAddResult {
   sid?: string;
 }
 
+export interface SpecAppendOptions {
+  allowDuplicateTitle?: boolean;
+}
+
 // ============================================================================
 // Auto-evidence: capture git HEAD as provenance
 // ============================================================================
@@ -141,6 +145,8 @@ export function appendSpecEntry(
   scope?: SpecScope,
   uid?: string,
   description?: string,
+  sidOverride?: string,
+  options?: SpecAppendOptions,
 ): SpecAddResult {
   const evidence = source ?? captureGitEvidence(projectPath);
 
@@ -150,7 +156,7 @@ export function appendSpecEntry(
     const summary = content.slice(0, 200).replace(/\s+/g, ' ').trim();
     console.log('[spec] Content exceeds 2KB, stored as knowhow with spec ref');
     const result = appendSpecEntryWithRef(
-      projectPath, category, title, summary, keywords, ref, evidence, scope, uid,
+      projectPath, category, title, summary, keywords, ref, evidence, scope, uid, sidOverride, options,
     );
     return { ...result, redirected: true, knowhowRef: ref, evidence };
   }
@@ -176,16 +182,18 @@ export function appendSpecEntry(
   // Lock-guarded read-modify-write (G-A4): the duplicate check and the
   // append must see the same content, so both run inside the lock.
   const date = new Date().toISOString().slice(0, 10);
-  const sid = generateSid();
+  const sid = sidOverride ?? generateSid();
   let isDuplicate = false;
   updateFileAtomic(filePath, existing => {
     const current = existing ?? '';
     // Parsed duplicate check: exact title match against parsed entries
     const { entries, legacy } = parseSpecEntries(current);
-    isDuplicate = entries.some(
-      e => e.title.toLowerCase().trim() === title.toLowerCase().trim()
-    ) || legacy.some(
-      e => e.title.toLowerCase().trim() === title.toLowerCase().trim()
+    isDuplicate = !options?.allowDuplicateTitle && (
+      entries.some(
+        e => e.title.toLowerCase().trim() === title.toLowerCase().trim()
+      ) || legacy.some(
+        e => e.title.toLowerCase().trim() === title.toLowerCase().trim()
+      )
     );
     if (isDuplicate) return null;
 
@@ -214,6 +222,8 @@ export function appendSpecEntryWithRef(
   source?: string,
   scope?: SpecScope,
   uid?: string,
+  sidOverride?: string,
+  options?: SpecAppendOptions,
 ): SpecAddResult {
   const specsDir = resolveSpecDir(projectPath, scope ?? 'project', uid);
 
@@ -234,16 +244,18 @@ export function appendSpecEntryWithRef(
 
   // Lock-guarded read-modify-write (G-A4) — same protocol as appendSpecEntry.
   const date = new Date().toISOString().slice(0, 10);
-  const sid = generateSid();
+  const sid = sidOverride ?? generateSid();
   let isDuplicateRef = false;
   updateFileAtomic(filePath, existing => {
     const current = existing ?? '';
     // Parsed duplicate check: exact title match against parsed entries
     const { entries: existingEntries, legacy: existingLegacy } = parseSpecEntries(current);
-    isDuplicateRef = existingEntries.some(
-      e => e.title.toLowerCase().trim() === title.toLowerCase().trim()
-    ) || existingLegacy.some(
-      e => e.title.toLowerCase().trim() === title.toLowerCase().trim()
+    isDuplicateRef = !options?.allowDuplicateTitle && (
+      existingEntries.some(
+        e => e.title.toLowerCase().trim() === title.toLowerCase().trim()
+      ) || existingLegacy.some(
+        e => e.title.toLowerCase().trim() === title.toLowerCase().trim()
+      )
     );
     if (isDuplicateRef) return null;
 

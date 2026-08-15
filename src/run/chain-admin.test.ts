@@ -8,7 +8,7 @@
 // nextPendingIndex; replace only pending; deriveSessionId slug vs explicit id.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync,} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -24,10 +24,19 @@ import {
 import { nextPendingIndex } from './chain.js';
 import { SessionStore } from './store.js';
 
+function v2Workspace(root: string): void {
+  mkdirSync(join(root, ".workflow"), { recursive: true });
+  writeFileSync(join(root, ".workflow", "config.json"), JSON.stringify({
+    session_schema: { schema_version: "session-schema-selection/1.0", writer: "session/1.3", features: { session_statusless: false } },
+  }));
+}
+
 const roots: string[] = [];
 
 function root(): string {
   const path = mkdtempSync(join(tmpdir(), 'chain-admin-'));
+
+  v2Workspace(path);
   roots.push(path);
   return path;
 }
@@ -157,6 +166,19 @@ describe('createChainSession — predefined chain', () => {
     const projectRoot = root();
     expect(() => createChainSession(projectRoot, 'noi', {})).toThrow(/intent is required/);
   });
+
+  it('validates nested decomposition before allocating the explicit Session ID', () => {
+    const projectRoot = root();
+    const sessionId = 'invalid-nested-20260723-000000';
+    expect(() => createChainSession(projectRoot, sessionId, {
+      definition: {
+        intent: 'invalid nested goal',
+        steps: [{ command: 'plan' }],
+        decomposition: { goals: [{}] },
+      } as any,
+    })).toThrow();
+    expect(new SessionStore(projectRoot).sessionExists(sessionId)).toBe(false);
+  });
 });
 
 describe('chainDefinitionSchema — input validation', () => {
@@ -279,6 +301,16 @@ describe('insertChainStep', () => {
     expect(chain[2].command).toBe('extra');
   });
 
+  it('accepts a start sentinel for inserting at the pending head', () => {
+    const projectRoot = root();
+    const sessionId = seededSession(projectRoot, ['pending', 'pending']);
+    const inserted = insertChainStep(projectRoot, sessionId, { after: 'start', command: 'prep', insertedBy: 'manual' });
+    const store = new SessionStore(projectRoot);
+    const chain = store.readBundle(sessionId).session.orchestration.chain;
+    expect(inserted.step_id).toBe('step-000-prep');
+    expect(chain.map(step => step.command)).toEqual(['prep', 'cmd0', 'cmd1']);
+  });
+
   it('rejects inserting before the active position', () => {
     const projectRoot = root();
     const sessionId = seededSession(projectRoot, ['completed', 'running', 'pending']);
@@ -288,6 +320,32 @@ describe('insertChainStep', () => {
     expect(() =>
       insertChainStep(projectRoot, sessionId, { after: completedStepId, command: 'x', insertedBy: 'manual' }),
     ).toThrow(/cannot insert before the active position/);
+  });
+
+  it('ignores sparse skipped markers after the pending head', () => {
+    const projectRoot = root();
+    const sessionId = seededSession(projectRoot, ['completed', 'completed', 'pending', 'pending', 'skipped']);
+    const store = new SessionStore(projectRoot);
+    const after = store.readBundle(sessionId).session.orchestration.chain[1].step_id;
+
+    const inserted = insertChainStep(projectRoot, sessionId, {
+      after, command: 'repair-plan', insertedBy: 'post-review',
+    });
+    const chain = store.readBundle(sessionId).session.orchestration.chain;
+    expect(inserted.step_id).toBe('step-002-repair-plan');
+    expect(chain[2]).toMatchObject({ command: 'repair-plan', status: 'pending' });
+    expect(chain.at(-1)?.status).toBe('skipped');
+  });
+
+  it('still protects a running step that appears after an inconsistent pending step', () => {
+    const projectRoot = root();
+    const sessionId = seededSession(projectRoot, ['completed', 'pending', 'running', 'skipped']);
+    const store = new SessionStore(projectRoot);
+    const after = store.readBundle(sessionId).session.orchestration.chain[0].step_id;
+
+    expect(() => insertChainStep(projectRoot, sessionId, {
+      after, command: 'repair-plan', insertedBy: 'post-review',
+    })).toThrow(/cannot insert before the active position/);
   });
 
   it('rejects an out-of-range index and an unknown step_id', () => {
@@ -395,6 +453,109 @@ describe('replaceChainStep', () => {
     const replaced = replaceChainStep(projectRoot, sessionId, targetId, { args: '--only-args' });
     expect(replaced.step_id).toBe(targetId);
     expect(replaced.args).toBe('--only-args');
+  });
+
+  it('rejects changing semantics after a recorded Run attempt', () => {
+    const projectRoot = root();
+    const sessionId = seededSession(projectRoot, ['pending']);
+    const store = new SessionStore(projectRoot);
+    const targetId = store.readBundle(sessionId).session.orchestration.chain[0].step_id;
+    store.update(sessionId, draft => {
+      draft.session.requests.push({
+        request_id: 'prior-complete',
+        type: 'transition',
+        status: 'applied',
+        payload: {
+          operation: 'complete',
+          subject: { session_id: sessionId, run_id: 'run-001', chain_step_id: targetId },
+        },
+        claimed_by_run_id: 'run-001',
+      });
+      return null;
+    });
+
+    expect(() => replaceChainStep(projectRoot, sessionId, targetId, {
+      args: 'repurpose this retry',
+      stage: 'repair-execute',
+    })).toThrow(/cannot replace semantics .* after a recorded Run attempt/);
+  });
+
+  it('requires an explicit valid goal_ref when changing stage in a decomposed Session', () => {
+    const projectRoot = root();
+    const { sessionId } = createChainSession(projectRoot, 'goal-edit', {
+      intent: 'goal-bound repair',
+      definition: {
+        intent: 'goal-bound repair',
+        steps: [{ command: 'execute', stage: 'execute', goal_ref: 'G1' }],
+        decomposition: {
+          execution_criteria: [],
+          goals: [{ id: 'G1', goal: 'foundation repaired', status: 'pending' }],
+          changelog: [],
+        },
+      },
+    });
+    const targetId = new SessionStore(projectRoot)
+      .readBundle(sessionId).session.orchestration.chain[0].step_id;
+
+    expect(() => insertChainStep(projectRoot, sessionId, {
+      after: 'start', command: 'plan', stage: 'repair-plan', insertedBy: 'test',
+    })).toThrow(/requires an explicit goal_ref/);
+    expect(() => insertChainStep(projectRoot, sessionId, {
+      after: 'start', command: 'plan', stage: 'repair-plan', goalRef: 'missing', insertedBy: 'test',
+    })).toThrow(/does not exist in Session decomposition/);
+    expect(() => replaceChainStep(projectRoot, sessionId, targetId, {
+      stage: 'repair-execute',
+    })).toThrow(/requires an explicit goal_ref/);
+    expect(() => replaceChainStep(projectRoot, sessionId, targetId, {
+      stage: 'repair-execute', goalRef: 'missing',
+    })).toThrow(/does not exist in Session decomposition/);
+
+    const replaced = replaceChainStep(projectRoot, sessionId, targetId, {
+      stage: 'repair-execute', goalRef: 'G1',
+    });
+    expect(replaced).toMatchObject({ stage: 'repair-execute', goal_ref: 'G1' });
+  });
+
+  it('permits a staged repair insert to inherit an explicitly unbound anchor', () => {
+    const projectRoot = root();
+    const { sessionId } = createChainSession(projectRoot, 'unbound-review', {
+      intent: 'repair unbound review',
+      definition: {
+        intent: 'repair unbound review',
+        steps: [{ command: 'review', stage: 'review' }],
+        decomposition: {
+          execution_criteria: [],
+          goals: [{ id: 'G1', goal: 'other scoped work', status: 'pending' }],
+          changelog: [],
+        },
+      },
+    });
+    const anchor = new SessionStore(projectRoot)
+      .readBundle(sessionId).session.orchestration.chain[0].step_id;
+
+    const inserted = insertChainStep(projectRoot, sessionId, {
+      after: anchor, command: 'plan', stage: 'repair-plan', insertedBy: 'post-review',
+    });
+    expect(inserted).toMatchObject({ command: 'plan', stage: 'repair-plan' });
+    expect(inserted.goal_ref).toBeUndefined();
+  });
+
+  it('rejects dangling goal_ref replacements when decomposition goals are empty', () => {
+    const projectRoot = root();
+    const { sessionId } = createChainSession(projectRoot, 'empty-goals', {
+      intent: 'empty decomposition',
+      definition: {
+        intent: 'empty decomposition',
+        steps: [{ command: 'execute', stage: 'execute' }],
+        decomposition: { execution_criteria: [], goals: [], changelog: [] },
+      },
+    });
+    const targetId = new SessionStore(projectRoot)
+      .readBundle(sessionId).session.orchestration.chain[0].step_id;
+
+    expect(() => replaceChainStep(projectRoot, sessionId, targetId, {
+      goalRef: 'missing',
+    })).toThrow(/does not exist in Session decomposition/);
   });
 
   it('rejects replacing a non-pending step', () => {

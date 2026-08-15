@@ -20,9 +20,9 @@ Maestro 的 step 内容分三层，各有既有规范管辖：
 | prepare（思考期契约） | `prepare/<step>.md` | **本规范** |
 | workflow（执行期手册） | `workflows/<step>.md` | **本规范** + command-authoring.md § 7 的格式规则 |
 
-**关键范围声明**：first-tier step 指有 prepare/workflows 成对文件的 step，现存 **19 对**。其中 **13 个**注册于 maestro-next step registry 且无任何专属 command 文件（经 maestro-next / maestro / ralph 入口调度）；5 个 odyssey-* 经 `/maestro-odyssey` 模式限定命令路由、grill 另有 `/maestro-grill` 独立命令——这两类的**入口命令文件**本身仍受 command-authoring.md 管辖（`maestro-next.md:56` 的 "13 first-tier steps" 指 registry 注册数，与 19 对文件数不矛盾）。
+**关键范围声明**：first-tier step 指有 prepare/workflows 成对文件的 step，现存 **22 对**。其中 **14 个**注册于 maestro-next 的候选池且无任何专属 command 文件（经 maestro-next / maestro / ralph 入口调度）；6 个 odyssey-* 经 `/maestro-odyssey --mode` 模式限定路由，grill 同样只是 step（无专属 command 文件），经 `/maestro "grill..."` 或 `/maestro-next` 进入——odyssey 的**入口命令文件** `maestro-odyssey.md` 本身仍受 command-authoring.md 管辖（`maestro-next.md:48` 的 "14 first-tier steps" 指候选池注册数，与 22 对文件数不矛盾）。
 
-对全部 19 对，step 级错误码 / Success Criteria 由 workflow 文件持有（现状实态，如 `workflows/analyze.md:364,386`）。这是对 command-authoring.md § 7「错误码/Success Criteria/completion 归 command」的**范围限定**——该矩阵适用于有专属 command 文件的命令，其 § 7 已加对应 scope note（见 § 九-8）。
+对全部 22 对，step 级错误码 / Success Criteria 由 workflow 文件持有（现状实态，如 `workflows/analyze.md:364,386`）。这是对 command-authoring.md § 7「错误码/Success Criteria/completion 归 command」的**范围限定**——该矩阵适用于有专属 command 文件的命令，其 § 7 已加对应 scope note（见 § 九-8）。
 
 三层所有权总表：
 
@@ -44,7 +44,7 @@ Maestro 的 step 内容分三层，各有既有规范管辖：
 |------|------|-----------|------|
 | `run prepare <step>` | **prepare 全文**、workflow 路径+行数、run-mode 摘要、refs(path+when) | workflow 全文 | `runtime.ts:884-904` |
 | `run create <step>` | session_id、run_id、run_dir、**upstream（alias→artifact 注入）**、entry_gates、**next（渐进提示，指向 brief）** | 任何文件内容 | `runtime.ts:539-620` |
-| `run brief <run-id>` | `brief-result/1.0`：Session/Run authority、**prepare + workflow + run-mode 全文**、guidance drift、canonical upstream、execution contract、handoff/anchor、recovery next | 顶层 args / requirements / reuse / gates / outputs 兼容副本 | `briefResultV10Schema`、`briefRun` |
+| `run brief <run-id>` | `brief-result/1.1`：Session/Run authority、**prepare + workflow + run-mode 全文**、guidance drift、canonical upstream、execution contract、knowledge reconciliation card、handoff/anchor、recovery next；读取兼容 `1.0` | 顶层 args / requirements / reuse / gates / outputs 兼容副本 | `briefResultV11Schema`（兼容 `briefResultV10Schema`）、`briefRun` |
 | `run skill <step>` | **prepare + workflow 全文**、refs | run-mode、session 状态 | `runtime.ts:906-923` |
 | `run check / complete` | gate 评估、artifact 扫描/注册结果 | 内容 | `runtime.ts:622+` |
 
@@ -181,9 +181,10 @@ name: <step>
 description: <一句话：动作 + 产出物>
 goal: true                # 可选。长周期 step 声明后，run prepare/skill 按平台返回 goal_mode 创建指引（用户加载即为显式启用；平台无 goal 工具时为 null）
 argument-hint: "[args] [flags]"
+contract_version: 2.1
 contract:
-  consumes:  [{ kind, alias, required }]
-  produces:  [{ path, kind, alias?, role }]
+  consumes:  [{ kind, alias, required, schema, role }]
+  produces:  [{ path, kind, alias?, role, schema, required }]
   gates:
     exit: [<gate-id>, ...]
 refs:
@@ -341,7 +342,7 @@ session-mode: inherited | run | none
 ### 1. 设计
 
 - 加载适用 specs：`maestro load --type spec --category arch`（+ 涉及确认门控/wave 的 step 加载相关 knowhow）。
-- 定 contract：consumes（上游 kind/alias）、produces（路径/kind/role/alias）、gates.exit（3–5 个出口条件 ID）。
+- 定 contract：`contract_version: 2.1`（v1 下 consumes 的 schema/role 是 metadata-only，不生效）。consumes 每条声明上游 kind/alias 以及 producer 声明的 artifact `schema`/`role`（缺失 schema 会产生 `ARTIFACT_SCHEMA_UNKNOWN` 复用评估，每次运行都需人工 `maestro run accept-reuse` 才能打开入口门）；需要容忍 producer minor 升级时用 `schema_range: <kind>/<major>.x` 代替 `schema`（显式 major-compatible 承诺，二者互斥；producer 永远只声明精确 schema）。仅当 blocked/failed 产物本身就是消费者所需的负面证据（例如 gap-plan 消费 BLOCK review 或 failed verification）时，consumes 可声明 `accepts_negative_evidence: true`；普通 execute/test 消费者禁止使用该字段。契约内 consumes+produce 的 alias 可相同（consume 绑定创建时的既有目标，seal 时才 supersede），produces 的 alias 必须唯一。produces 声明路径/kind/role/alias/schema；gates.exit（3–5 个出口条件 ID）。
 - 定 `commands:` alias 并确认全局唯一（与现有 step、独立命令、skill 无冲突）。
 
 ### 2. 三层写作（顺序固定：contract 先行，prepare 最后反推）
@@ -355,7 +356,8 @@ session-mode: inherited | run | none
 
 - [ ] gates.exit ID 在 contract / Gate Intent / Step Gates 三处一一对应
 - [ ] 每个 gate 全文件单一口径（注释/散文/Success Criteria 无第二种表述）
-- [ ] prepare 无步骤编号、无 agent prompt、无 schema
+- [ ] 每个 consumes 条目声明 `schema`/`role`（与 producer 声明一致）；`accepts_negative_evidence` 仅用于明确消费 blocked/failed 证据的规划或审计路径；consumes 与 produces 的 alias 全契约唯一
+- [ ] prepare 正文无步骤编号、无 agent prompt、无产物 JSON schema（产物 schema 属于 workflow 层；consumes 引用的 schema 标识符属于 contract 层）
 - [ ] workflow 无 contract 复制；frontmatter `prepare:` 无扩展名
 - [ ] 两层间逐字重复不超过一句
 - [ ] refs 的每个 when 在 workflow 正文有触发点

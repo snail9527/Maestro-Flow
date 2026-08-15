@@ -209,12 +209,15 @@ Audit findings + diverge ideas (severity >= medium OR impact = high).
 
 ## Knowledge Persistence (§8)
 
+Follow-up = governed candidate staging, NEVER a direct corpus write: `maestro knowledge stage spec "<title>" --content-file <path|-> --run {run_id} --category <cat>` (stage BEFORE seal; promote only after seal with a fresh receipt).
+
+
 | Category | Content | Follow-up |
 |----------|---------|-----------|
-| Design pattern | Component pattern + applicable scenarios + token references | `$maestro-spec add ui` |
-| Interaction spec | State definitions + transition rules + feedback patterns | `$maestro-spec add ui` |
-| Accessibility rule | WCAG requirement + implementation approach | `$maestro-spec add ui` |
-| Reusable generalization pattern | Pattern signature + application scope | `$maestro-spec add coding` |
+| Design pattern | Component pattern + applicable scenarios + token references | `stage spec → ui` |
+| Interaction spec | State definitions + transition rules + feedback patterns | `stage spec → ui` |
+| Accessibility rule | WCAG requirement + implementation approach | `stage spec → ui` |
+| Reusable generalization pattern | Pattern signature + application scope | `stage spec → coding` |
 
 ---
 
@@ -276,7 +279,7 @@ Goals:      {done}/{total} ({skipped} skipped)
 - [ ] understanding.md 8 sections written progressively (§1–§8)
 - [ ] Fix + verify (unless --skip-fix); all findings/ideas addressed by priority
 - [ ] Multi-layer generalization + discovery triage (unless --skip-generalize)
-- [ ] phase_goals derived, tracked, and hardened-audited; Goal Prompt once
+- [ ] phase_goals derived, tracked, and hardened-audited; goal_mode injected via prepare goal:true
 - [ ] Session resumable via -c; completion summary emitted
 
 ---
@@ -285,11 +288,11 @@ Goals:      {done}/{total} ({skipped} skipped)
 
 | Condition | Next |
 |-----------|------|
-| Discovery issues created | `$maestro-manage issue list --source ui-odyssey` |
+| Discovery issues created | `$maestro-issue list --source ui-odyssey` |
 | Backend/data issue found | `$maestro-odyssey <target> --mode planex` |
 | Deep bug investigation | `$maestro-odyssey <target> --mode debug` |
 | Code quality review | `$maestro-odyssey <changed-files> --mode review` |
 | Document pattern | `$maestro-learn decompose <component>` |
 | Second opinion | `$maestro-learn consult <understanding.md>` |
-| Design/interaction pattern to persist | `$maestro-spec add ui "..."` |
+| Design/interaction pattern to persist | `stage spec → ui` |
 | Pending decisions | Filter evidence phase=decision status=pending |

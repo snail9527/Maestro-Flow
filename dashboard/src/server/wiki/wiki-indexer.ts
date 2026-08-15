@@ -27,6 +27,7 @@ import type {
   WikiEntry,
   WikiFilters,
   WikiIndex,
+  WikiSearchFilters,
   WikiStatus,
   WikiNodeType,
   WikiScope,
@@ -35,7 +36,15 @@ import type {
 } from './wiki-types.js';
 import { recallSnapshotSchema, type RecallSnapshot } from './wiki-types.js';
 
-const SEARCH_CACHE_VERSION = 3;
+// v5: issue/codebase/legacy-kg wiki entries carry composed full bodies.
+const SEARCH_CACHE_VERSION = 5;
+const SEARCH_PARENT_CAP = 2;
+
+export interface WikiSearchOptions {
+  skipEmbedding?: boolean;
+  credibilityFactors?: Map<string, number>;
+  filters?: WikiSearchFilters;
+}
 
 function prefixLinkedEntries(entries: WikiEntry[], idPrefix: string, workspace: string): void {
   const idMap = new Map(entries.map(entry => [entry.id, `${idPrefix}${entry.id}`]));
@@ -73,6 +82,80 @@ export interface LinkedWorkspaceConfig {
 export interface WikiIndexerConfig {
   workflowRoot: string;
   linkedWorkspaces?: LinkedWorkspaceConfig[];
+  persistence?: 'filesystem' | 'memory-only';
+  evidenceRecorder?: (event: WikiEvidenceEvent) => void;
+}
+
+export type WikiEvidenceEventName =
+  | 'filesystem-cache-read'
+  | 'filesystem-cache-write'
+  | 'filesystem-index-write'
+  | 'embedding-build'
+  | 'embedding-save';
+
+export interface WikiEvidenceEvent {
+  event: WikiEvidenceEventName;
+  site: string;
+  queryId: null;
+}
+
+function matchesSearchFilters(entry: WikiEntry, filters: WikiSearchFilters): boolean {
+  if (!filters.includeDeprecated
+    && (entry.status === 'deprecated' || entry.ext.status === 'deprecated')) return false;
+  if (filters.type) {
+    if (filters.type === 'session') {
+      if (entry.category !== 'session') return false;
+    } else if (filters.type === 'scratch') {
+      if (entry.category !== 'scratch') return false;
+    } else if (entry.type !== filters.type) return false;
+  }
+  if (filters.category && entry.category !== filters.category) return false;
+  if (filters.tag && !entry.tags.includes(filters.tag.toLowerCase())) return false;
+  if (filters.keyword) {
+    const keyword = filters.keyword.toLowerCase();
+    if (!entry.title.toLowerCase().includes(keyword)
+      && !entry.body.toLowerCase().includes(keyword)) return false;
+  }
+  if (filters.workspace && entry.source.workspace !== filters.workspace) return false;
+  return true;
+}
+
+function finalizeSearchResults(
+  index: WikiIndex,
+  candidates: readonly { docId: string; score: number }[],
+  query: string,
+  limit: number,
+  includeDeprecated = false,
+): Array<{ entry: WikiEntry; score: number }> {
+  const resultLimit = Math.max(0, limit);
+  if (resultLimit === 0) return [];
+
+  let eligible: Array<{ entry: WikiEntry; score: number }> = [];
+  for (const candidate of candidates) {
+    const entry = index.byId[candidate.docId];
+    if (!entry || (!includeDeprecated
+      && (entry.status === 'deprecated' || entry.ext.status === 'deprecated'))) continue;
+    eligible.push({ entry, score: candidate.score });
+  }
+
+  eligible = rerankByPhraseProximity(eligible, query);
+  eligible = applyTimeDecay(eligible, Date.now());
+
+  const selected: Array<{ entry: WikiEntry; score: number }> = [];
+  const seen = new Set<string>();
+  const parentCounts = new Map<string, number>();
+  for (const result of eligible) {
+    if (seen.has(result.entry.id)) continue;
+    const parentKey = result.entry.parent ?? result.entry.id.replace(/-\d{2,3}$/, '');
+    const parentCount = parentCounts.get(parentKey) ?? 0;
+    if (parentCount >= SEARCH_PARENT_CAP) continue;
+    seen.add(result.entry.id);
+    parentCounts.set(parentKey, parentCount + 1);
+    selected.push(result);
+    if (selected.length >= resultLimit) break;
+  }
+
+  return selected.slice(0, resultLimit);
 }
 
 /**
@@ -88,6 +171,8 @@ export interface WikiIndexerConfig {
  */
 export class WikiIndexer {
   private readonly workflowRoot: string;
+  private readonly persistence: 'filesystem' | 'memory-only';
+  private readonly evidenceRecorder: ((event: WikiEvidenceEvent) => void) | undefined;
   private readonly linkedWorkspaces: Array<{
     name: string;
     workflowRoot: string;
@@ -105,6 +190,8 @@ export class WikiIndexer {
 
   constructor(config: WikiIndexerConfig) {
     this.workflowRoot = resolve(config.workflowRoot);
+    this.persistence = config.persistence ?? 'filesystem';
+    this.evidenceRecorder = config.evidenceRecorder;
     this.linkedWorkspaces = (config.linkedWorkspaces ?? []).map(lw => ({
       name: lw.name,
       workflowRoot: resolve(lw.workflowRoot),
@@ -116,6 +203,10 @@ export class WikiIndexer {
     return this.workflowRoot;
   }
 
+  private recordEvidence(event: WikiEvidenceEventName, site: string): void {
+    this.evidenceRecorder?.({ event, site, queryId: null });
+  }
+
   async get(): Promise<WikiIndex> {
     if (this.cache) {
       if (!await this.hasSourceChanges()) return this.cache;
@@ -124,7 +215,7 @@ export class WikiIndexer {
       this.searchCache = null;
       this.embeddingCache = null;
     }
-    if (await this.tryLoadSearchCache()) {
+    if (this.persistence === 'filesystem' && await this.tryLoadSearchCache()) {
       return this.cache!;
     }
     return this.rebuild();
@@ -146,13 +237,15 @@ export class WikiIndexer {
     }
 
     // Monitor CLI session directories for new session detection
-    const home = homedir();
-    const projectCwd = dirname(this.workflowRoot);
-    const projectSlug = cwdToClaudeProjectSlug(projectCwd);
-    const claudeProjectDir = join(home, '.claude', 'projects', projectSlug);
-    if (existsSync(claudeProjectDir)) dirs.push(claudeProjectDir);
-    const codexSessionsDir = join(home, '.codex', 'sessions');
-    if (existsSync(codexSessionsDir)) dirs.push(codexSessionsDir);
+    if (this.persistence === 'filesystem') {
+      const home = homedir();
+      const projectCwd = dirname(this.workflowRoot);
+      const projectSlug = cwdToClaudeProjectSlug(projectCwd);
+      const claudeProjectDir = join(home, '.claude', 'projects', projectSlug);
+      if (existsSync(claudeProjectDir)) dirs.push(claudeProjectDir);
+      const codexSessionsDir = join(home, '.codex', 'sessions');
+      if (existsSync(codexSessionsDir)) dirs.push(codexSessionsDir);
+    }
 
     const singletons = [
       join(this.workflowRoot, 'project.md'),
@@ -254,6 +347,7 @@ export class WikiIndexer {
     if (!existsSync(cachePath)) return false;
 
     try {
+      this.recordEvidence('filesystem-cache-read', 'WikiIndexer.tryLoadSearchCache.readFile');
       const raw = await readFile(cachePath, 'utf-8');
       const cached = JSON.parse(raw);
       if (cached.version !== SEARCH_CACHE_VERSION || !Array.isArray(cached.entries)) return false;
@@ -290,6 +384,10 @@ export class WikiIndexer {
     const target = join(this.workflowRoot, 'search-cache.json');
     const tmpTarget = target + '.tmp';
     try {
+      this.recordEvidence(
+        'filesystem-cache-write',
+        'WikiIndexer.persistSearchCache.createWriteStream',
+      );
       stream = createWriteStream(tmpTarget, { encoding: 'utf-8' });
       
       stream.on('error', (e) => {
@@ -485,11 +583,13 @@ export class WikiIndexer {
       // Snapshot mtimes of source directories for incremental staleness check
       this.mtimeSnapshot = await this.captureMtimeSnapshot();
 
-      // Persist lightweight index to disk (fire-and-forget).
-      this.persistIndex(index).catch((e) => {
-        if (process.env.MAESTRO_DEBUG === '1') console.warn('[wiki-indexer] persistIndex failed:', e?.message);
-      });
-      this.persistSearchCache(index);
+      if (this.persistence === 'filesystem') {
+        // Persist lightweight index to disk (fire-and-forget).
+        this.persistIndex(index).catch((e) => {
+          if (process.env.MAESTRO_DEBUG === '1') console.warn('[wiki-indexer] persistIndex failed:', e?.message);
+        });
+        this.persistSearchCache(index);
+      }
 
       return index;
     })();
@@ -556,14 +656,30 @@ export class WikiIndexer {
   }
 
   async getSearchIndex(): Promise<InvertedIndex> {
-    if (this.searchCache) return this.searchCache;
-    const index = await this.get();
-    this.searchCache = buildInvertedIndex(index.entries);
-    return this.searchCache;
+    return (await this.getSearchIndexWithMeta()).index;
   }
 
-  async searchWithScores(query: string, limit = 50): Promise<Array<{ entry: WikiEntry; score: number }>> {
-    return (await this.searchWithMeta(query, limit)).results;
+  async getSearchIndexWithMeta(): Promise<{
+    index: InvertedIndex;
+    cacheState: 'cold-build' | 'cache-hit';
+  }> {
+    if (this.searchCache) {
+      return { index: this.searchCache, cacheState: 'cache-hit' };
+    }
+    const index = await this.get();
+    if (this.searchCache) {
+      return { index: this.searchCache, cacheState: 'cache-hit' };
+    }
+    this.searchCache = buildInvertedIndex(index.entries);
+    return { index: this.searchCache, cacheState: 'cold-build' };
+  }
+
+  async searchWithScores(
+    query: string,
+    limit = 50,
+    options?: WikiSearchOptions,
+  ): Promise<Array<{ entry: WikiEntry; score: number }>> {
+    return (await this.searchWithMeta(query, limit, options)).results;
   }
 
   async recallSnapshot(query: string, asOf: string, limit = 50): Promise<RecallSnapshot> {
@@ -601,7 +717,7 @@ export class WikiIndexer {
     });
   }
 
-  async searchWithMeta(query: string, limit = 50, options?: { skipEmbedding?: boolean }): Promise<{
+  async searchWithMeta(query: string, limit = 50, options?: WikiSearchOptions): Promise<{
     results: Array<{ entry: WikiEntry; score: number }>;
     embeddingUsed: boolean;
     embeddingDocs: number;
@@ -611,17 +727,32 @@ export class WikiIndexer {
     // Parallel: BM25 index build + embedding index load
     const [bm25, embIdx] = await Promise.all([
       this.getSearchIndex(),
-      options?.skipEmbedding ? null : this.getEmbeddingIndex(),
+      options?.skipEmbedding || this.persistence === 'memory-only'
+        ? null
+        : this.getEmbeddingIndex(),
     ]);
-    const internalLimit = Math.ceil(limit * 1.5);
-    const bm25Results = searchBM25Planned(bm25, query, internalLimit);
+    const internalLimit = Math.min(500, Math.max(limit * 3, 60));
+    const allowedDocIds = options?.filters
+      ? new Set(index.entries
+          .filter(entry => matchesSearchFilters(entry, options.filters!))
+          .map(entry => entry.id))
+      : undefined;
+    const bm25Results = searchBM25Planned(
+      bm25,
+      query,
+      internalLimit,
+      options?.credibilityFactors,
+      allowedDocIds,
+    );
 
     if (embIdx && embIdx.docIds.length > 0) {
       try {
         const { embedQuery, vectorSearch, vectorSearchZvec, mergeHybrid } = await import('./embedding.js');
         const qVec = await embedQuery(query);
-        let rawVecResults = await vectorSearchZvec(qVec, this.workflowRoot, internalLimit);
-        if (rawVecResults.length === 0) {
+        let rawVecResults = allowedDocIds
+          ? vectorSearch(qVec, embIdx, internalLimit, allowedDocIds)
+          : await vectorSearchZvec(qVec, this.workflowRoot, internalLimit);
+        if (rawVecResults.length === 0 && !allowedDocIds) {
           rawVecResults = vectorSearch(qVec, embIdx, internalLimit);
         }
 
@@ -643,15 +774,18 @@ export class WikiIndexer {
           vecResults = Array.from(bestPerDoc.values());
         }
 
-        const merged = mergeHybrid(bm25Results, vecResults, internalLimit * 2);
-        let out: Array<{ entry: WikiEntry; score: number }> = [];
-        for (const r of merged) {
-          const entry = index.byId[r.docId];
-          if (entry) out.push({ entry, score: r.score });
-        }
-        out = rerankByPhraseProximity(out, query);
-        out = applyTimeDecay(out, Date.now());
-        return { results: out.slice(0, limit), embeddingUsed: true, embeddingDocs: embIdx.docIds.length };
+        const merged = mergeHybrid(bm25Results, vecResults, internalLimit);
+        return {
+          results: finalizeSearchResults(
+            index,
+            merged,
+            query,
+            limit,
+            options?.filters?.includeDeprecated === true,
+          ),
+          embeddingUsed: true,
+          embeddingDocs: embIdx.docIds.length,
+        };
       } catch (e: unknown) {
         if (process.env.MAESTRO_DEBUG === '1') {
           console.error(`[embedding] query failed: ${e instanceof Error ? e.message : e}`);
@@ -659,17 +793,21 @@ export class WikiIndexer {
       }
     }
 
-    let out: Array<{ entry: WikiEntry; score: number }> = [];
-    for (const r of bm25Results.slice(0, internalLimit)) {
-      const entry = index.byId[r.docId];
-      if (entry) out.push({ entry, score: r.score });
-    }
-    out = rerankByPhraseProximity(out, query);
-    out = applyTimeDecay(out, Date.now());
-    return { results: out.slice(0, limit), embeddingUsed: false, embeddingDocs: 0 };
+    return {
+      results: finalizeSearchResults(
+        index,
+        bm25Results,
+        query,
+        limit,
+        options?.filters?.includeDeprecated === true,
+      ),
+      embeddingUsed: false,
+      embeddingDocs: 0,
+    };
   }
 
   async getEmbeddingIndex(): Promise<EmbeddingIndex | null> {
+    if (this.persistence === 'memory-only') return null;
     if (this.embeddingCache) return this.embeddingCache;
     if (this.embeddingInflight) return this.embeddingInflight;
 
@@ -698,6 +836,10 @@ export class WikiIndexer {
         return null;
       }
 
+      this.recordEvidence(
+        'filesystem-cache-read',
+        'WikiIndexer.loadOrBuildEmbeddings.loadEmbeddingIndex',
+      );
       const cached = loadEmbeddingIndex(this.workflowRoot);
       if (signal?.aborted) return null;
       const index = await this.get();
@@ -760,8 +902,16 @@ export class WikiIndexer {
 
       try {
         if (signal?.aborted) return cached ?? null;
+        this.recordEvidence(
+          'embedding-build',
+          'WikiIndexer.loadOrBuildEmbeddings.buildEmbeddingIndex',
+        );
         const embIdx = await buildEmbeddingIndex(docs, cached, currentHashes);
         if (signal?.aborted) return null;
+        this.recordEvidence(
+          'embedding-save',
+          'WikiIndexer.loadOrBuildEmbeddings.saveEmbeddingIndex',
+        );
         await saveEmbeddingIndex(embIdx, this.workflowRoot);
         return embIdx;
       } catch (buildErr: unknown) {
@@ -815,8 +965,8 @@ export class WikiIndexer {
     };
   }
 
-  async search(query: string, limit = 50): Promise<WikiEntry[]> {
-    return (await this.searchWithScores(query, limit)).map(r => r.entry);
+  async search(query: string, limit = 50, options?: WikiSearchOptions): Promise<WikiEntry[]> {
+    return (await this.searchWithScores(query, limit, options)).map(r => r.entry);
   }
 
   // -------------------------------------------------------------------------
@@ -1156,8 +1306,10 @@ export class WikiIndexer {
     // Canonical Session/Run registry. Only sealed/archived Runs are indexed.
     out.push(...(await this.scanRunModeSessions()));
 
-    // CLI sessions: Claude Code (~/.claude/) and Codex (~/.codex/)
-    out.push(...(await this.scanCliSessions()));
+    // Memory-only probes are hermetic and never inspect user-level CLI session stores.
+    if (this.persistence === 'filesystem') {
+      out.push(...(await this.scanCliSessions()));
+    }
 
     return out;
   }
@@ -1638,6 +1790,7 @@ export class WikiIndexer {
     };
     const target = join(this.workflowRoot, 'wiki-index.json');
     await mkdir(dirname(target), { recursive: true });
+    this.recordEvidence('filesystem-index-write', 'WikiIndexer.persistIndex.writeFile');
     await writeFile(target, JSON.stringify(persisted, null, 2), 'utf-8');
   }
 

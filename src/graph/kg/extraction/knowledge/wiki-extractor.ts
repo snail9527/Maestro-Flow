@@ -31,7 +31,7 @@ export function extractWiki(
   const now = Date.now();
 
   if (!existsSync(knowhowDir)) {
-    return { nodes, edges, fileRecord: createEmptyFileRecord(knowhowDir) };
+    return { nodes, edges, fileRecord: createEmptyFileRecord(knowhowDir), references: [], structuralReferences: [] };
   }
 
   const mdFiles = readdirSync(knowhowDir)
@@ -42,7 +42,7 @@ export function extractWiki(
     const content = readFileSync(filePath, 'utf-8');
     const fm = parseKnowhowFrontmatter(content);
     const slug = basename(filePath, '.md');
-    const nodeId = makeNodeId('knowhow', slug);
+    const nodeId = makeNodeId('knowhow', slug.toLowerCase());
 
     // 解析 body (去掉 frontmatter)
     const body = extractBody(content);
@@ -77,6 +77,7 @@ export function extractWiki(
       status: fm.status ?? 'active',
       body: body,
       metadata: {
+        wikiId: `knowhow-${slug.toLowerCase()}`,
         type: fm.type ?? '',
         lang: fm.lang ?? '',
         source: fm.source ?? '',
@@ -91,6 +92,8 @@ export function extractWiki(
   return {
     nodes,
     edges,
+    references: [],
+    structuralReferences: [],
     fileRecord: {
       path: knowhowDir,
       contentHash: '',

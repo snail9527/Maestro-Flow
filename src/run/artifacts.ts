@@ -10,7 +10,7 @@ import {
   readdirSync,
   realpathSync,
 } from 'node:fs';
-import { basename, dirname, extname, join, relative } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
 import { artifactMetaSchema, type ArtifactMeta, type Artifact } from './schemas.js';
 import type { CommandContract } from './contract.js';
@@ -36,6 +36,17 @@ export interface ArtifactScanResult {
 
 export interface ArtifactScanHooks {
   afterFileInspection?: (path: string) => void;
+}
+
+export interface StrictArtifactValidationOptions {
+  skipArtifactMetadataValidation?: boolean;
+}
+
+export interface VerifiedContainedFile {
+  data: Buffer;
+  canonicalPath: string;
+  contentHash: string;
+  size: number;
 }
 
 type FileStat = NonNullable<ReturnType<typeof lstatSync>>;
@@ -187,6 +198,38 @@ function hashBuffer(data: Buffer): { hash: string; size: number } {
   return { hash: createHash('sha256').update(data).digest('hex'), size: data.byteLength };
 }
 
+/**
+ * Read one regular file through the same descriptor and containment fences used
+ * by artifact scanning. Relative inputs are resolved from `root`; absolute
+ * inputs are accepted only when their canonical path remains inside `root`.
+ */
+export function readVerifiedContainedFile(
+  root: string,
+  inputPath: string,
+  hooks?: ArtifactScanHooks,
+): VerifiedContainedFile {
+  let canonicalRoot: string;
+  let candidate: string;
+  let canonicalParent: string;
+  try {
+    canonicalRoot = realpathSync(resolve(root));
+    candidate = resolve(isAbsolute(inputPath) ? inputPath : join(root, inputPath));
+    canonicalParent = realpathSync(dirname(candidate));
+  } catch (error) {
+    throw unsafePath(inputPath, (error as NodeJS.ErrnoException).code ?? (error as Error).message);
+  }
+  const rootStat = lstatSync(canonicalRoot);
+  if (!rootStat.isDirectory()) throw unsafePath(root, 'containment root is not a directory');
+  const verified = readVerifiedFile(candidate, canonicalParent, canonicalRoot, undefined, hooks);
+  const hashed = hashBuffer(verified.data);
+  return {
+    data: verified.data,
+    canonicalPath: realpathSync(candidate),
+    contentHash: hashed.hash,
+    size: hashed.size,
+  };
+}
+
 function hashVerifiedDirectory(
   path: string,
   canonicalParent: string,
@@ -237,6 +280,19 @@ export function hashFile(path: string): { hash: string; size: number } {
   return hashBuffer(readVerifiedFile(path, canonicalParent, canonicalParent).data);
 }
 
+/**
+ * Read one file with the same verified fd/fstat/realpath containment fence as
+ * artifact scans: the path must resolve to a regular file directly inside its
+ * canonical parent, the opened descriptor must match the inspected identity,
+ * and the bytes must be stable across the read. Returns the content plus its
+ * plain sha256 hex digest.
+ */
+export function readContainedFile(path: string): { data: Buffer; hash: string } {
+  const canonicalParent = realpathSync(dirname(path));
+  const { data } = readVerifiedFile(path, canonicalParent, canonicalParent);
+  return { data, hash: createHash('sha256').update(data).digest('hex') };
+}
+
 export function hashDirectory(path: string): { hash: string; size: number } {
   const canonicalParent = realpathSync(dirname(path));
   const root = requireSafePath(path, canonicalParent, canonicalParent);
@@ -246,6 +302,8 @@ export function hashDirectory(path: string): { hash: string; size: number } {
 function inferMediaType(path: string): string {
   switch (extname(path).toLowerCase()) {
     case '.json': return 'application/json';
+    case '.ndjson':
+    case '.jsonl': return 'application/x-ndjson';
     case '.md': return 'text/markdown';
     case '.yaml':
     case '.yml': return 'application/yaml';
@@ -255,8 +313,27 @@ function inferMediaType(path: string): string {
   }
 }
 
+function jsonArtifactMeta(parsed: unknown): ArtifactMeta | null {
+  const hasMeta = typeof parsed === 'object' && parsed !== null && Object.hasOwn(parsed, '_meta');
+  if (!hasMeta) return null;
+
+  const rawMeta = (parsed as { _meta: unknown })._meta;
+  const result = artifactMetaSchema.safeParse(rawMeta);
+  if (!result.success) {
+    const detail = result.error.issues
+      .map(issue => `${issue.path.join('.') || '_meta'}: ${issue.message}`)
+      .join('; ');
+    throw new Error(`invalid _meta; expected non-empty kind and schema${detail ? ` (${detail})` : ''}`);
+  }
+  return result.data;
+}
+
+function stripUtf8Bom(raw: string): string {
+  return raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+}
+
 function markdownMeta(raw: string): ArtifactMeta | null {
-  const match = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
+  const match = stripUtf8Bom(raw).match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return null;
   const parsed = YAML.parse(match[1]);
   if (!parsed || typeof parsed !== 'object' || typeof parsed.kind !== 'string') return null;
@@ -276,7 +353,7 @@ function normalizeOutputPath(value: string): string {
   return value.replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '');
 }
 
-function declaredPathMatches(declaredPath: string, outputRelative: string): boolean {
+export function declaredPathMatches(declaredPath: string, outputRelative: string): boolean {
   const declared = normalizeOutputPath(declaredPath);
   const actual = normalizeOutputPath(outputRelative);
   if (!declared.includes('{')) return declared === actual;
@@ -288,6 +365,63 @@ function declaredPathMatches(declaredPath: string, outputRelative: string): bool
       : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
     .join('');
   return new RegExp(`^${pattern}$`).test(actual);
+}
+
+export function defaultArtifactAlias(kind: string, command: string): string | undefined {
+  const value = `${kind} ${command}`.toLowerCase();
+  if (value.includes('analy') || value.includes('finding')) return 'current-analysis';
+  if (value.includes('plan')) return 'current-plan';
+  if (value.includes('execut') || value.includes('change-manifest')) return 'latest-execution';
+  if (value.includes('verif')) return 'latest-verification';
+  if (value.includes('review')) return 'latest-review';
+  if (value.includes('test') || value.includes('acceptance')) return 'latest-test';
+  if (value.includes('debug') || value.includes('diagnos')) return 'latest-debug';
+  return undefined;
+}
+
+export function validateStrictArtifactContract(
+  runDir: string,
+  contract: CommandContract,
+  scan: ArtifactScanResult,
+  options: StrictArtifactValidationOptions = {},
+): void {
+  if (contract.contract_version !== 2 && contract.contract_version !== 2.1) return;
+  const reportMismatch = (message: string): void => {
+    if (options.skipArtifactMetadataValidation) {
+      scan.warnings.push(`artifact metadata validation skipped: ${message}`);
+    } else {
+      scan.errors.push(message);
+    }
+  };
+  for (const expected of contract.produces) {
+    const expectedPath = expected.path?.replaceAll('\\', '/').replace(/^\.\//, '');
+    const actuals = expectedPath
+      ? scan.artifacts.filter(item => declaredPathMatches(
+          expectedPath,
+          relative(runDir, item.absolutePath).replaceAll('\\', '/'),
+        ))
+      : [];
+    if (actuals.length === 0) {
+      if (expected.required) scan.errors.push(`Missing required contract v2 output: ${expectedPath ?? expected.kind}`);
+      continue;
+    }
+    for (const actual of actuals) {
+      const actualPath = relative(runDir, actual.absolutePath).replaceAll('\\', '/');
+      if (actual.kind !== expected.kind) {
+        reportMismatch(`${actualPath}: _meta.kind ${actual.kind} does not match contract ${expected.kind}`);
+      }
+      if (expected.schema && actual.schemaVersion !== expected.schema) {
+        reportMismatch(`${actualPath}: _meta.schema ${actual.schemaVersion} does not match contract ${expected.schema}`);
+      }
+      const expectedRole = expected.role ?? (expected.primary ? 'primary' : 'attachment');
+      if (actual.role !== expectedRole) {
+        reportMismatch(`${actualPath}: _meta.role ${actual.role} does not match contract ${expectedRole}`);
+      }
+      if (expected.alias && actual.alias !== expected.alias) {
+        reportMismatch(`${actualPath}: _meta.alias ${actual.alias ?? '(missing)'} does not match contract ${expected.alias}`);
+      }
+    }
+  }
 }
 
 function hasNestedDeclaredTemplate(contract: CommandContract, outputRelative: string): boolean {
@@ -410,25 +544,19 @@ export function scanOutputs(
           hooks,
         );
         const extension = extname(name).toLowerCase();
-        if (extension === '.json') {
-          const parsed = JSON.parse(data.toString('utf8')) as unknown;
-          const hasMeta = typeof parsed === 'object' && parsed !== null && Object.hasOwn(parsed, '_meta');
-          if (hasMeta) {
-            const rawMeta = (parsed as { _meta: unknown })._meta;
-            const result = artifactMetaSchema.safeParse(rawMeta);
-            if (!result.success) {
-              const detail = result.error.issues
-                .map(issue => `${issue.path.join('.') || '_meta'}: ${issue.message}`)
-                .join('; ');
-              throw new Error(`invalid _meta; expected non-empty kind and schema${detail ? ` (${detail})` : ''}`);
-            }
-            const meta = result.data;
+        if (extension === '.json' || extension === '.ndjson' || extension === '.jsonl') {
+          const raw = stripUtf8Bom(data.toString('utf8'));
+          const lineDelimited = extension === '.ndjson' || extension === '.jsonl';
+          const selfDescription = lineDelimited ? raw.split(/\r?\n/, 1)[0] : raw;
+          const parsed = selfDescription ? JSON.parse(selfDescription) as unknown : null;
+          const meta = jsonArtifactMeta(parsed);
+          if (meta) {
             kind = meta.kind;
             schemaVersion = meta.schema;
-            role = meta.role ?? (directJsonCount === 1 ? 'primary' : role);
+            role = meta.role ?? (extension === '.json' && directJsonCount === 1 ? 'primary' : role);
             alias = meta.alias ?? alias;
           } else {
-            role = directJsonCount === 1 ? 'primary' : role;
+            role = extension === '.json' && directJsonCount === 1 ? 'primary' : role;
             warning = `${outputRelative}: missing _meta; inferred kind=${kind}`;
           }
         } else if (extension === '.md') {

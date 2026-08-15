@@ -17,6 +17,7 @@ import { findManifest, type Manifest } from '../../core/manifest.js';
 import { exportProfile, importProfile, listProfiles, configToProfile, profileToStateValues } from '../../core/install-profile.js';
 import { paths } from '../../config/paths.js';
 import { buildGroupedHubItems } from './GroupedHub.js';
+import { scanEntrySteps, DEFAULT_ENTRY_STEPS, type EntryStepInfo } from '../../core/entry-command-generator.js';
 
 export type FlowStep =
   | 'platforms' | 'hub'
@@ -24,6 +25,7 @@ export type FlowStep =
   | 'codex_hooks_config' | 'codex_mcp_config'
   | 'agy_hooks_config' | 'extra_mcp_config'
   | 'statusline_config' | 'backup_config' | 'embedding_config'
+  | 'entry_commands_config'
   | 'confirm' | 'executing' | 'complete';
 
 export type FlowStepCompat = FlowStep | 'mode';
@@ -33,11 +35,11 @@ function isEmbeddingReady(): boolean {
   try {
     const { createRequire } = require('node:module');
     const localRequire = createRequire(import.meta.url);
-    const tjsMain = localRequire.resolve('@huggingface/transformers');
+    const tjsMain = localRequire.resolve('#maestro-transformers');
     const normalized = tjsMain.replace(/\\/g, '/');
-    const idx = normalized.indexOf('@huggingface/transformers');
+    const idx = normalized.indexOf('vendor/transformers');
     if (idx >= 0) {
-      const root = tjsMain.slice(0, idx + '@huggingface/transformers'.length);
+      const root = tjsMain.slice(0, idx + 'vendor/transformers'.length);
       return existsSync(join(root, '.cache', 'Xenova', 'multilingual-e5-small', 'onnx', 'model.onnx'));
     }
   } catch { /* ignore */ }
@@ -108,7 +110,7 @@ export function useInstallFlowState(opts: UseInstallFlowStateOptions) {
   const ALL_PLATFORMS: Platform[] = [
     'claude', 'codex', 'agy', 'agents-standard',
     'cursor', 'opencode', 'kiro', 'kilo', 'copilot',
-    'devin', 'qoder', 'codebuddy', 'droid', 'pi',
+    'devin', 'qoder', 'codebuddy', 'droid',
     'trae', 'roo',
     'aider-desk', 'amp', 'antigravity', 'antigravity-cli', 'astrbot',
     'autohand-code', 'augment', 'bob', 'cline', 'codearts-agent',
@@ -140,7 +142,7 @@ export function useInstallFlowState(opts: UseInstallFlowStateOptions) {
     const extraPlatDirs: [string, string][] = [
       ['cursor', '.cursor'], ['opencode', '.opencode'], ['kiro', '.kiro'],
       ['kilo', '.kilocode'], ['copilot', '.github'], ['devin', '.devin'],
-      ['qoder', '.qoder'], ['codebuddy', '.codebuddy'], ['droid', '.factory'], ['pi', '.pi'],
+      ['qoder', '.qoder'], ['codebuddy', '.codebuddy'], ['droid', '.factory'],
       ['trae', '.trae'], ['roo', '.roo'],
       ['aider-desk', '.aider-desk'], ['amp', '.amp'], ['antigravity', '.antigravity'],
       ['antigravity-cli', '.antigravity-cli'], ['astrbot', '.astrbot'], ['autohand-code', '.autohand'],
@@ -417,6 +419,10 @@ export function useInstallFlowState(opts: UseInstallFlowStateOptions) {
 
   // --- Derived values ---
   const scannedComponents = useMemo(() => scanComponents(pkgRoot, mode, projectPath), [pkgRoot, mode, projectPath]);
+  const eligibleEntrySteps = useMemo<EntryStepInfo[]>(() => scanEntrySteps(pkgRoot), [pkgRoot]);
+  const [selectedEntrySteps, setSelectedEntrySteps] = useState<string[]>(
+    () => DEFAULT_ENTRY_STEPS.filter((s) => eligibleEntrySteps.some((e) => e.step === s)),
+  );
   const selectedComponents = useMemo(
     () => scannedComponents.filter((c) => c.available && selectedComponentIds.includes(c.def.id)),
     [scannedComponents, selectedComponentIds],
@@ -457,13 +463,14 @@ export function useInstallFlowState(opts: UseInstallFlowStateOptions) {
     installPluginCodex: enabledSteps.pluginCodex,
     configureCodexMultiAgentV2: shouldInstallComponents && selectedComponentIds.some((id) =>
       COMPONENT_DEFS.some((def) => def.id === id && def.platform === 'codex')),
+    entryCommandSteps: selectedEntrySteps,
   }), [mode, projectPath, enabledSteps, shouldInstallComponents, hookLevel, selectedComponents.length,
     fileCount, mcpTools, mcpEnabled, selectedComponentIds, mcpProjectRoot,
     codexHookLevel, codexMcpEnabled, codexMcpTools, codexMcpProjectRoot,
     agyHookLevel, extraMcpTargetIds, genericHookLevels,
     installStatusline, statuslineTheme, backupClaudeMd, backupAll,
     claudeHooksSelection, codexHooksSelection, agyHooksSelection,
-    selectedPlatforms, codexDedupeAgents]);
+    selectedPlatforms, codexDedupeAgents, selectedEntrySteps]);
 
   // --- Hub groups ---
   const claudeAllHooks = useMemo(() => getAllHookNames('claude'), []);
@@ -471,8 +478,11 @@ export function useInstallFlowState(opts: UseInstallFlowStateOptions) {
   const agyAllHooks = useMemo(() => getAllHookNames('agy'), []);
 
   // --- Addon defs for hub display ---
+  // `commands-entry` is excluded: the dedicated Entry Commands hub group (with
+  // step multi-select) is the canonical menu entry, so the legacy addon row
+  // "Entry Commands (run steps)" is not shown here to avoid duplication.
   const addonDefs = useMemo(() =>
-    COMPONENT_DEFS.filter(d => ADDON_IDS.has(d.id)).map(d => ({
+    COMPONENT_DEFS.filter(d => ADDON_IDS.has(d.id) && d.id !== 'commands-entry').map(d => ({
       id: d.id, label: d.label, description: d.description,
       platform: d.platform ?? 'shared',
     })),
@@ -506,6 +516,8 @@ export function useInstallFlowState(opts: UseInstallFlowStateOptions) {
       addonDefs,
       embeddingMode: existsSync(join(homedir(), '.maestro', 'api-embedding.json')) ? 'api' as const : 'local' as const,
       embeddingCached: isEmbeddingReady(),
+      entryCommandSteps: selectedEntrySteps,
+      entryCommandEligible: eligibleEntrySteps.length,
     },
   ), [enabledSteps, selectedComponents.length, fileCount, hookLevel, mcpTools.length,
     mcpEnabled, codexHookLevel, codexMcpTools.length, codexMcpEnabled,
@@ -513,7 +525,7 @@ export function useInstallFlowState(opts: UseInstallFlowStateOptions) {
     statuslineDetected, statuslineTheme, backupClaudeMd, backupAll,
     claudeHooksSelection, codexHooksSelection, agyHooksSelection,
     claudeAllHooks, codexAllHooks, agyAllHooks,
-    selectedPlatforms, selectedAddons, chineseEnabled, addonDefs]);
+    selectedPlatforms, selectedAddons, chineseEnabled, addonDefs, selectedEntrySteps, eligibleEntrySteps.length]);
 
   // --- Actions ---
   const toggleStep = useCallback((id: string) => {
@@ -563,6 +575,7 @@ export function useInstallFlowState(opts: UseInstallFlowStateOptions) {
       agyHooks: 'agy_hooks_config', extraMcp: 'extra_mcp_config',
       statusline: 'statusline_config', backup: 'backup_config',
       embedding: 'embedding_config',
+      entryCommands: 'entry_commands_config',
     };
     if (map[id]) setStep(map[id]);
   }, []);
@@ -637,6 +650,7 @@ export function useInstallFlowState(opts: UseInstallFlowStateOptions) {
     // Derived
     lastManifest, scannedComponents, selectedComponents, fileCount, existingFileCount,
     flowConfig, hubGroups,
+    eligibleEntrySteps, selectedEntrySteps, setSelectedEntrySteps,
 
     // Result
     result, setResult, profileMessage,

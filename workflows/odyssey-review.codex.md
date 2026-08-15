@@ -202,12 +202,15 @@ Review findings with severity >= medium.
 
 ## Knowledge Persistence (§8)
 
+Follow-up = governed candidate staging, NEVER a direct corpus write: `maestro knowledge stage spec "<title>" --content-file <path|-> --run {run_id} --category <cat>` (stage BEFORE seal; promote only after seal with a fresh receipt).
+
+
 | Category | Content | Follow-up |
 |----------|---------|-----------|
-| Cross-dimension recurring pattern | Pattern + affected dimensions + coding standard | `$maestro-spec add review` |
-| Security finding | Vulnerability type + triggers + fix approach | `$maestro-spec add debug` |
-| Architecture violation pattern | Violation + correct boundary + verification | `$maestro-spec add arch` |
-| Reusable generalization pattern | Signature + risk + fix template + scope | `$maestro-spec add coding` |
+| Cross-dimension recurring pattern | Pattern + affected dimensions + coding standard | `stage spec → review` |
+| Security finding | Vulnerability type + triggers + fix approach | `stage spec → debug` |
+| Architecture violation pattern | Violation + correct boundary + verification | `stage spec → arch` |
+| Reusable generalization pattern | Signature + risk + fix template + scope | `stage spec → coding` |
 
 ---
 
@@ -276,7 +279,7 @@ Goals:      {done}/{total} ({skipped} skipped)
 
 | Condition | Next |
 |-----------|------|
-| Discovery issues | `$maestro-manage issue list --source review-odyssey` |
+| Discovery issues | `$maestro-issue list --source review-odyssey` |
 | Document pattern | `$maestro-learn decompose <module>` |
 | Debug root cause | `$maestro-odyssey <issue> --mode debug` |
 | Second opinion | `$maestro-learn consult <understanding.md>` |

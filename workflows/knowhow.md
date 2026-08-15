@@ -37,7 +37,7 @@ All types share `WikiNodeType = 'knowhow'`. The `type` field distinguishes subty
 
 ---
 
-## Part A: KnowHow Management (/maestro-manage knowledge knowhow)
+## Part A: KnowHow Management (internal — via `maestro run skill knowhow`)
 
 Operations: list, search, view, edit, delete, prune across both stores.
 
@@ -63,7 +63,7 @@ Verify stores exist. Neither → E001.
 
 ### Step 3: List
 
-Workflow: `maestro wiki list --type knowhow --json`, filter by `--keywords`, `--type`, `--role`.
+Workflow: `maestro wiki list --type knowhow --json`, filter by `--keyword`, `--type`, `--category`.
 System: Glob `*.md` files, extract titles.
 
 Display: ID/File, Type, Category, Date, Tags, Summary with navigation hints.
@@ -84,21 +84,33 @@ MANDATORY: execute View/Edit/Delete/Prune/Integrity-Check logic per spec; REQUIR
 
 ---
 
-## Part B: KnowHow Capture (/maestro-manage knowledge capture)
+## Part B: KnowHow Capture (/maestro-knowhow capture)
 
 Capture reusable knowledge into `.workflow/knowhow/`.
 
-### Step 1: Detect Type
+### Step 1: Detect Type from Intent
 
-| Token | Type |
+`$ARGUMENTS` is free-form capture intent. Determine the content type:
+
+1. Explicit keyword present → pin that type (deterministic shortcut):
+
+| Keyword | Type |
 |-------|------|
 | `compact`, `session`, `压缩` | session |
 | `template`, `tpl`, `模板` | template |
 | `recipe`, `rcp`, `配方`, `步骤` | recipe |
 | `reference`, `ref`, `参考` | reference |
 | `decision`, `dcs`, `决策`, `adr` | decision |
-| `tip`, `note`, `记录` | tip |
-| No arguments | AskUserQuestion (6 options) |
+| `tip`, `note`, `技巧` | tip |
+
+2. Otherwise infer from the intent, e.g.:
+   - “决定/决策/选用 X 因为…” → decision
+   - “这段代码/模板/可复用的…” → template
+   - “怎么部署/步骤/流程/配方…” → recipe
+   - “API/文档参考/速查…” → reference
+   - “踩坑/技巧/小记/redis 管道…” → tip
+   - “会话/压缩当前进度…” → session
+3. No clear signal → AskUserQuestion (6 options).
 
 ### Step 2: Generate Content by Type
 
@@ -347,7 +359,7 @@ maestro knowhow search "deploy auth"    # full-text
 maestro knowhow get knowhow-{slug}      # view one
 
 maestro wiki list --type knowhow --json # programmatic
-maestro wiki list --type knowhow --role plan  # decisions only
+maestro knowhow list --type decision  # decisions only
 ```
 
 ### MCP
@@ -420,7 +432,7 @@ Multiple workflows append `<spec-entry>` blocks to this container:
 
 | Workflow | Source value | When |
 |----------|-------------|------|
-| `/maestro-manage knowledge capture` | `manual` or `tip` | Manual capture during active work |
+| `/maestro-knowhow capture` | `manual` or `tip` | Manual capture during active work |
 | `retrospective` | `retrospective` | Phase retrospective insight distillation |
 | `learn-retro` | `retro-git` or `retro-decision` | Retrospective from git activity or decisions |
 | `wiki-connect` | `wiki-connect` | Graph connectivity insights |
@@ -429,6 +441,6 @@ Multiple workflows append `<spec-entry>` blocks to this container:
 ### Retrieval
 
 ```bash
-maestro wiki list --type knowhow --role implement    # list all insights
+maestro wiki list --type spec --category learning # list learning insights
 maestro wiki search "<query>"                           # full-text search
 ```

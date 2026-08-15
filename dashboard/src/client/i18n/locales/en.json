@@ -300,7 +300,9 @@
     "empty_desc": "Session data from .workflow/.maestro/ will appear here",
     "source_ralph": "Ralph",
     "source_maestro": "Maestro",
-    "source_coordinate": "Coordinate"
+    "source_coordinate": "Coordinate",
+    "sidebar_tip": "💡 Want a resident desktop view of agent calls, Session/Run state and knowledge stats? Try the Maestro Sidebar desktop app",
+    "sidebar_tip_dismiss": "Don't show again"
   },
   "settings": {
     "title": "Settings",
@@ -371,7 +373,8 @@
       "codex_desc": "OpenAI Codex CLI agent",
       "gemini_desc": "Google Gemini CLI agent",
       "qwen_desc": "Alibaba Qwen CLI agent",
-      "opencode_desc": "Open-source code agent"
+      "opencode_desc": "Open-source code agent",
+      "pi_desc": "Pi coding agent CLI"
     },
     "commander": {
       "profile_card": "Profile",

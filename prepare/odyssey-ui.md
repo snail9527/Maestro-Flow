@@ -1,21 +1,46 @@
 ---
 name: odyssey-ui
-description: "6-dimension visual experience audit with divergent exploration — survey design context, audit visual/interaction/a11y/responsive/motion/edge dimensions, diverge for polish+delight, fix, verify, generalize"
-goal: true
-argument-hint: "<target> [--dimensions <list>] [--skip-fix] [--skip-generalize] [-y] [-c]"
+description: 6-dimension visual experience audit with divergent exploration — survey design context, audit visual/interaction/a11y/responsive/motion/edge dimensions, diverge for polish+delight, fix, verify,
+  generalize
+argument-hint: <target> [--dimensions <list>] [--skip-fix] [--skip-generalize] [-y] [-c]
 contract:
   consumes:
-    - { kind: session, alias: prior-session, required: false }
+  - kind: ui-audit
+    required: false
+    schema: ui-audit/1.0
+    role: primary
   produces:
-    - { path: outputs/session.json, kind: ui-audit, alias: ui-audit-session, role: primary }
-    - { path: outputs/evidence.ndjson, kind: evidence, role: evidence }
-    - { path: outputs/understanding.md, kind: ui-audit-report, alias: ui-understanding, role: attachment }
+  - path: outputs/session.json
+    kind: ui-audit
+    alias: ui-audit-session
+    role: primary
+    required: true
+    schema: ui-audit/1.0
+  - path: outputs/evidence.ndjson
+    kind: evidence
+    role: evidence
+    required: false
+    schema: evidence/1.0
+  - path: outputs/understanding.md
+    kind: ui-audit-report
+    alias: ui-understanding
+    role: attachment
+    required: false
+    schema: ui-audit-report/1.0
   gates:
-    exit: [all-dimensions-audited, diverge-explored, zero-remaining-verified]
+    exit:
+    - all-dimensions-audited
+    - diverge-explored
+    - zero-remaining-verified
+  contract_version: 2.1
 refs:
-  - { path: workflows/odyssey-base.md, when: Shared back-half (GENERALIZE → DISCOVER → RECORD → END) needed }
-  - { path: ref/cli-supplementary.md, when: CLI-assisted survey or verification is needed }
-  - { path: ref/finish-work.md, when: Entering the RECORD phase for wrap-up }
+- path: workflows/odyssey-base.md
+  when: Shared back-half (GENERALIZE → DISCOVER → RECORD → END) needed
+- path: ref/cli-supplementary.md
+  when: CLI-assisted survey or verification is needed
+- path: ref/finish-work.md
+  when: Entering the RECORD phase for wrap-up
+goal: true
 ---
 
 # Pre-task Thinking: odyssey-ui
@@ -59,7 +84,7 @@ When prior UI sessions of the same target exist, check their audit results and d
 - **Priority-ordered fixing** — findings and ideas are fixed by priority tier (critical → high → medium → low + high-impact ideas). No partial-tier advancement.
 - **Evidence append-only** — evidence.ndjson entries are immutable observations; modifying or deleting them is forbidden.
 - **Fix scope** — source code modifications during fix phase are in-scope but MUST be committed per action. Session artifacts target `{run_dir}/outputs/` only.
-- **Generalize is mandatory** unless `skip_generalize == true`; generalize source is audit findings + diverge ideas (severity >= medium OR impact = high).
+- **Generalize is mandatory** unless `skip_generalize == true`; prior-phase convergence is NOT a valid skip reason.
 
 ## Risk Checklist
 

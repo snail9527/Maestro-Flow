@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync, appendFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { DashboardBridge } from './dashboard-bridge.js';
-import { CliHistoryStore, type EntryLike } from './cli-history-store.js';
+import { CliHistoryStore, assertValidCliExecId, type EntryLike } from './cli-history-store.js';
 import { loadTemplate, loadProtocol } from '../config/template-discovery.js';
 import { loadSpecs, type SpecCategory } from '../tools/spec-loader.js';
 import { NOTIFY_PREFIX } from '../hooks/constants.js';
@@ -103,6 +103,7 @@ const TOOL_TO_AGENT_TYPE: Record<string, AgentType> = {
   opencode: 'opencode',
   agy: 'agy',
   'api-explore': 'api-explore',
+  pi: 'pi',
 };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,7 @@ const AGENT_TYPE_TO_TERMINAL_CMD: Record<string, string> = {
   'opencode': 'opencode',
   'agy': 'agy',
   'api-explore': 'api-explore',
+  'pi': 'pi',
 };
 
 // ---------------------------------------------------------------------------
@@ -135,6 +137,7 @@ const TOOL_PREFIX: Record<string, string> = {
   opencode: 'opc',
   agy: 'agy',
   'api-explore': 'axp',
+  pi: 'pi',
 };
 
 export function generateCliExecId(tool: string): string {
@@ -531,6 +534,7 @@ export class CliAgentRunner {
 
     // Generate or use provided execution ID
     const execId = options.execId ?? generateCliExecId(options.tool);
+    assertValidCliExecId(execId);
     process.stderr.write(`[MAESTRO_EXEC_ID=${execId}]\n`);
 
     // History store for persistence and resume

@@ -3,9 +3,20 @@
 // 参考: codegraph/src/extraction/vue-extractor.ts
 
 import { createRequire } from 'node:module';
-import type { LanguageExtractionResult, ExtractedSymbol } from './tree-sitter-types.js';
+import {
+  makeFileNodeId,
+  makeImportReference,
+  type ExtractedReference,
+  type ExtractedSymbol,
+  type LanguageExtractionResult,
+} from './tree-sitter-types.js';
 import type { Language } from '../../db/types.js';
 import { getTreeSitterEngine } from './tree-sitter.js';
+import {
+  rebaseStructuralReferenceOrigin,
+  type ImportReference,
+  type StructuralReference,
+} from '../../resolution/structural-reference.js';
 
 const require = createRequire(import.meta.url);
 
@@ -63,11 +74,14 @@ function parseVueSFC(source: string): { blocks: VueSFCBlock[]; startLine: number
 export async function extractVueSFC(
   source: string,
   filePath: string,
+  onEmbeddedParseError: 'warn' | 'fail' = 'warn',
 ): Promise<LanguageExtractionResult> {
   const { blocks } = parseVueSFC(source);
   const allSymbols: ExtractedSymbol[] = [];
-  const references: import('./tree-sitter-types.js').ExtractedReference[] = [];
-  const edges: Array<{ source: string; target: string; kind: string }> = [];
+  const references: ExtractedReference[] = [];
+  const importReferences: ImportReference[] = [];
+  const structuralReferences: StructuralReference[] = [];
+  const edges: LanguageExtractionResult['edges'] = [];
 
   const engine = getTreeSitterEngine();
 
@@ -79,40 +93,64 @@ export async function extractVueSFC(
         : 'javascript' as Language;
 
       // 委托 tree-sitter 解析 script 块
-      if (engine.isAvailable()) {
-        try {
-          const tree = await engine.parse(block.content, lang);
-          if (tree) {
-            try {
-              const { typescriptExtractor } = await import('./languages/typescript.js');
-              const result = typescriptExtractor.extract(tree, block.content, filePath);
-
-              // 行号偏移校正: script 块在 SFC 中的起始行
-              for (const sym of result.symbols) {
-                sym.startLine += block.startLine - 1;
-                sym.endLine += block.startLine - 1;
-                allSymbols.push(sym);
-              }
-              for (const ref of result.references) {
-                ref.line += block.startLine - 1;
-                references.push(ref);
-              }
-            } finally {
-              tree.delete();
-            }
-          }
-        } catch (err) {
-          if (process.env.MAESTRO_DEBUG === '1') console.warn('[MaestroGraph] Vue script parse error:', err);
+      if (!engine.isAvailable()) {
+        if (onEmbeddedParseError === 'fail') {
+          throw new Error(`Vue embedded script parser unavailable (${lang}): ${filePath}`);
         }
+        continue;
+      }
+
+      try {
+        const tree = await engine.parse(block.content, lang);
+        if (!tree) {
+          throw new Error(`tree-sitter returned no ${lang} tree`);
+        }
+        try {
+          const { javascriptExtractor, typescriptExtractor } = await import('./languages/typescript.js');
+          const extractor = lang === 'typescript' ? typescriptExtractor : javascriptExtractor;
+          const result = extractor.extract(tree, block.content, filePath);
+
+          // 行号偏移校正: script 块在 SFC 中的起始行
+          for (const sym of result.symbols) {
+            sym.startLine += block.startLine - 1;
+            sym.endLine += block.startLine - 1;
+            allSymbols.push(sym);
+          }
+          for (const ref of result.references) {
+            ref.line += block.startLine - 1;
+            references.push(ref);
+          }
+          for (const ref of result.importReferences ?? []) {
+            importReferences.push({
+              ...ref,
+              line: ref.line + block.startLine - 1,
+            });
+          }
+          for (const ref of result.structuralReferences ?? []) {
+            structuralReferences.push(rebaseStructuralReferenceOrigin(ref, {
+              ...ref.origin,
+              line: ref.origin.line + block.startLine - 1,
+            }));
+          }
+          for (const edge of result.edges) {
+            edges.push({
+              ...edge,
+              ...(edge.line === undefined ? {} : { line: edge.line + block.startLine - 1 }),
+            });
+          }
+        } finally {
+          tree.delete();
+        }
+      } catch (err) {
+        if (onEmbeddedParseError === 'fail') {
+          throw new Error(`Vue embedded script parse failed (${lang}): ${filePath}`, { cause: err });
+        }
+        if (process.env.MAESTRO_DEBUG === '1') console.warn('[MaestroGraph] Vue script parse error:', err);
       }
     } else if (block.type === 'template') {
       // 从模板中提取 PascalCase 组件引用 → import edges
       const componentRegex = /<([A-Z][a-zA-Z0-9]*)/g;
       let compMatch: RegExpExecArray | null;
-      const lineOffsets = source.split('\n').reduce((acc, line, i) => {
-        acc[i + 1] = (acc[i] ?? 0) + line.length + 1;
-        return acc;
-      }, {} as Record<number, number>);
 
       const seen = new Set<string>();
       while ((compMatch = componentRegex.exec(block.content)) !== null) {
@@ -120,8 +158,8 @@ export async function extractVueSFC(
         if (!seen.has(componentName)) {
           seen.add(componentName);
           references.push({
-            fromSymbolName: '<template>',
-            fromSymbolId: `${filePath}:<template>`,
+            fromSymbolName: '<file>',
+            fromSymbolId: makeFileNodeId(filePath),
             referenceName: componentName,
             referenceKind: 'imports',  // 组件引用作为 import
             line: block.startLine,
@@ -129,10 +167,37 @@ export async function extractVueSFC(
             filePath,
             language: 'vue' as Language,
           });
+          importReferences.push(makeImportReference(
+            filePath,
+            componentName,
+            block.startLine,
+            compMatch.index + 1,
+            'component',
+          ));
         }
+      }
+
+      // 模板表达式函数调用 → calls 引用 ({{ fn() }} / @click="fn()" / v-on:click / :prop)
+      const templateCallRegex = /(?:^|[\s{}=:(,>"'])([A-Za-z_$][\w$]*)\s*\(/g;
+      const TEMPLATE_KEYWORDS = new Set(['if','for','while','switch','catch','function','return','new','typeof','instanceof','delete','void','in','of']);
+      let tplCall: RegExpExecArray | null;
+      while ((tplCall = templateCallRegex.exec(block.content)) !== null) {
+        const fnName = tplCall[1];
+        if (TEMPLATE_KEYWORDS.has(fnName)) continue;
+        const lineInBlock = block.content.substring(0, tplCall.index).split('\n').length;
+        references.push({
+          fromSymbolName: '<file>',
+          fromSymbolId: makeFileNodeId(filePath),
+          referenceName: fnName,
+          referenceKind: 'calls',
+          line: block.startLine + lineInBlock - 1,
+          col: tplCall.index + (tplCall[0].length - fnName.length) + 1,
+          filePath,
+          language: 'vue' as Language,
+        });
       }
     }
   }
 
-  return { symbols: allSymbols, references, edges };
+  return { symbols: allSymbols, references, importReferences, structuralReferences, edges };
 }

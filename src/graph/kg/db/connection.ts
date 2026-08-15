@@ -9,10 +9,13 @@ import { existsSync, mkdirSync, statSync } from 'node:fs';
 import type { Language, SourceType } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+/** applyMigrations 完成后应达到的最新 schema 版本。 */
+export const KG_SCHEMA_VERSION = 8 as const;
 
 export class KgDatabaseConnection {
   private db: DatabaseSync | null = null;
   private dbPath: string = '';
+  private readOnly = false;
 
   get raw(): DatabaseSync {
     if (!this.db) throw new Error('MaestroGraph database not open');
@@ -30,6 +33,7 @@ export class KgDatabaseConnection {
   /** 初始化 — 创建 DB + 应用 Schema */
   initialize(dbPath: string): void {
     this.dbPath = dbPath;
+    this.readOnly = false;
     const dir = dirname(dbPath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
@@ -37,6 +41,7 @@ export class KgDatabaseConnection {
     this.applyPragmas();
     this.transaction(() => {
       this.loadSchema();
+      // 保留 v2 baseline，让 fresh DB 与历史 DB 统一走可审计的 migration 链。
       this.setSchemaVersion(2, 'MaestroGraph unified schema v2');
     });
   }
@@ -47,23 +52,41 @@ export class KgDatabaseConnection {
       throw new Error(`MaestroGraph database not found: ${dbPath}. Run "maestro kg init" first.`);
     }
     this.dbPath = dbPath;
+    this.readOnly = false;
     this.db = new DatabaseSync(dbPath);
     this.applyPragmas();
   }
 
+  /** 以 SQLite read-only 模式打开已有 DB，不应用任何 write-like PRAGMA。 */
+  openReadOnly(dbPath: string): void {
+    if (!existsSync(dbPath)) {
+      throw new Error(`MaestroGraph database not found: ${dbPath}.`);
+    }
+    this.dbPath = dbPath;
+    this.db = new DatabaseSync(dbPath, { readOnly: true });
+    this.readOnly = true;
+  }
+
   close(): void {
     if (this.db) {
-      try {
-        this.db.exec('ROLLBACK');
-      } catch { /* ignore if no active transaction */ }
-      try {
-        this.db.exec('PRAGMA mmap_size = 0');
-        this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-      } catch (err) {
-        console.warn('[MaestroGraph] checkpoint failed on close:', (err as Error).message);
+      const db = this.db;
+      if (!this.readOnly) {
+        try {
+          db.exec('ROLLBACK');
+        } catch { /* ignore if no active transaction */ }
+        try {
+          db.exec('PRAGMA mmap_size = 0');
+          db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+        } catch (err) {
+          console.warn('[MaestroGraph] checkpoint failed on close:', (err as Error).message);
+        }
       }
-      this.db.close();
-      this.db = null;
+      try {
+        db.close();
+      } finally {
+        this.db = null;
+        this.readOnly = false;
+      }
     }
   }
 

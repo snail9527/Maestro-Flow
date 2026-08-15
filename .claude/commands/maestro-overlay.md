@@ -64,7 +64,7 @@ Amend output: `~/.maestro/overlays/amend-{slug}.json` + optional `~/.maestro/ove
 2. **Idempotent** — re-running `maestro overlay apply` with the same overlay JSON MUST produce no file changes
 3. **Creation only** — this skill MUST only create overlays; listing and removal are handled by `maestro overlay list` (ink TUI)
 4. **Pristine source preferred** — injection point analysis MUST read from `$PKG_ROOT/.claude/commands/` (untouched originals) first, fall back to `~/.claude/commands/` only if pristine unavailable
-5. **User approval before write** — overlay JSON MUST be shown and approved via [@ask] AskUserQuestion before writing to disk; NEVER auto-install without confirmation
+5. **User approval before write** — overlay JSON MUST be shown and approved via [@ask] AskUserQuestion before writing to disk, unless `-y` is explicitly provided (amend mode only)
 6. **Chain skip option mandatory** — if a skill chain is configured, the injected content MUST include a "Skip" option in [@ask] AskUserQuestion; NEVER force the user into a chain
 
 **Amend mode only** (when `--amend`):
@@ -118,7 +118,7 @@ After confirming the injection point, ask whether this overlay should recommend 
 
 Use [@ask] AskUserQuestion:
 - **"No chain"** — standard overlay, no skill handoff
-- **"Chain to skill"** → ask for the target skill name (e.g., a step like `review`, `execute`, `test` invoked via `maestro run prepare <step>` + `maestro run create <step> --session YYYYMMDD-<step>-{topic} --intent "{goal}"`)
+- **"Chain to skill"** → ask for the target skill name (e.g., a step like `review`, `execute`, `test` invoked via a v3 Session: `maestro session open "<goal>" --id YYYYMMDD-<step>-{topic} --chain <step> ... --json` → fenced `maestro run next --session {session_id} ... --json`)
 - **"Chain with alternatives"** → ask for primary skill + 1-2 alternative skills
 
 If chain is selected, record the skill name(s) for use in Step 3.
@@ -158,13 +158,13 @@ Build a slug from the user's intent (kebab-case, lowercase). Write to `~/.maestr
 **Skill Handoff** (overlay)
 
 After the above step completes, use [@ask] AskUserQuestion:
-- "Proceed to review" — Hand off to step `review` (`maestro run prepare review` + `maestro run create review --session YYYYMMDD-review-{topic} --intent "{goal}"`)
+- "Proceed to review" — Hand off to step `review` (open a v3 Session: `maestro session open "<goal>" --id YYYYMMDD-review-{topic} --chain review ... --json` → fenced `maestro run next`)
 - "Skip" — Continue with current command flow
 - "Alternative: execute" — Run step `execute` with built-in verification instead
 
 On user selection:
-- Proceed → run step `review` (`maestro run prepare review` + `maestro run create review --session YYYYMMDD-review-{topic} --intent "{goal}"`)
-- Alternative → run step `execute` (`maestro run prepare execute` + `maestro run create execute --session YYYYMMDD-execute-{topic} --intent "{goal}"`)
+- Proceed → run step `review` (open a v3 Session: `maestro session open "<goal>" --id YYYYMMDD-review-{topic} --chain review ... --json` → fenced `maestro run next`)
+- Alternative → run step `execute` (open a v3 Session: `maestro session open "<goal>" --id YYYYMMDD-execute-{topic} --chain execute ... --json` → fenced `maestro run next`)
 - Skip → continue normally
 ```
 
@@ -268,6 +268,12 @@ Per signal, determine: signal_id, source, description, target_command, target_se
 Read pristine source from `$PKG_ROOT/.claude/commands/<name>.md` to confirm section.
 Classify: command deficiency → proceed; code bug → skip (suggest `/maestro-companion`).
 
+**Classification decision tree**:
+- Signal points to 'command file missing a section/gate/step/routing rule' → **command deficiency** → proceed with overlay
+- Signal points to 'code implementation does not match existing command requirements' → **code bug** → skip, route to `/maestro-companion` or step `plan` via `/maestro-next`
+- Signal involves both → split: deficiency part → overlay; bug part → route to companion
+- Uncertain → default to [@ask] AskUserQuestion for user classification
+
 ### C. Group overlays
 
 Group by target command + section (merge same command+section). Granularity: 1-2 signals → `patch-{command}-{slug}.json`; 3+ cross-command → `amend-{slug}.json`. Read target commands to verify sections exist, check existing overlays. Display section map with injection points per target command.
@@ -291,7 +297,7 @@ On validation failure: fix JSON, retry (max 2).
 
 ### G. Report
 
-Display summary: signals collected/applied/skipped, overlay details, skipped code-bug routing (to `/maestro-companion` or step `plan --gaps`).
+Display summary: signals collected/applied/skipped, overlay details, skipped code-bug routing (to `/maestro-companion` or step `plan` via `/maestro-next`).
 </amend_mode>
 </execution>
 
@@ -302,7 +308,7 @@ Amend mode only:
 |------|-----------|----------|
 | E001 | No signals from any source | Verify artifact paths or provide description |
 | E002 | Signal source path invalid or unreadable | Check `--from-*` path; ensure artifact exists |
-| E003 | All signals are code bugs, not command gaps | Use `/maestro-companion` or step `plan --gaps` |
+| E003 | All signals are code bugs, not command gaps | Use `/maestro-companion` or step `plan` via `/maestro-next` |
 | E004 | Overlay validation failed after 2 retries | Review JSON manually |
 | W001 | Some signals skipped (code bugs) | Route to appropriate fix command |
 | W002 | Target command has >= 3 existing overlays | Consider consolidating |

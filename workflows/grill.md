@@ -16,7 +16,7 @@ Step 3: Terminology Alignment (code vs proposal)
 Step 4: Branch Walking (Socratic grilling loop)
 Step 5: Synthesis (report + terminology)
 Step 6: Context Package (context-package.json)
-Step 7: Register Artifact + Wrap-up
+Step 7: Wrap-up
 ```
 
 ---
@@ -37,7 +37,6 @@ Parse $ARGUMENTS to determine execution mode:
 - `--from <source>`: upstream material to grill against
 - Missing/empty args without `--from` or `--continue` = error
 
-**Session Resolution**: Runtime handles session resolution, artifact registration, and state updates. Contract inputs are resolved and injected by the runtime via `maestro run create`.
 
 **Output Directory Resolution**:
 ```
@@ -55,7 +54,7 @@ output_dir = {run_dir}/outputs/
 2. Read .workflow/state.json (if exists) → accumulated_context, artifacts[]
 3. Read .workflow/roadmap.md (if exists) → phase structure
 4. specs_content = maestro spec load --category arch  # MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep
-5. wiki_hits = maestro wiki search "{topic keywords}"  # MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep
+5. wiki_hits = maestro search "{topic keywords}"  # MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep
 ```
 
 ### 2.2: Load Upstream Material
@@ -67,7 +66,23 @@ If `--from` specified:
 
 Store as `upstream_material` (in-memory).
 
-### 2.3: Codebase Scan
+### 2.3: Architecture Review Dimensions (arch-kb)
+
+Query the isolated architecture knowledge base for grilling dimension seeds:
+
+```bash
+# Match system type for domain-specific concerns (template-only)
+maestro arch-kb search "{topic keywords}" --type template --json --limit 3
+
+# View matched template's decision sections as grilling angles
+maestro arch-kb show <template-id> --section "关键架构决策与权衡"
+```
+
+- If search returns templates: inject template **§8 决策与权衡** as domain-specific grilling angles
+- arch-kb is isolated from `maestro search` — only triggered by this explicit call
+- Skip if `--depth shallow` (too lightweight for template injection)
+
+### 2.4: Codebase Scan
 
 MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: spawn `Agent(subagent_type: Explore)` to map the codebase surface relevant to the topic:
 
@@ -108,7 +123,7 @@ Write `{output_dir}/grill-report.md` with header:
 {summary from Step 2.1}
 
 ### Codebase Surface
-{summary from Step 2.3}
+{summary from Step 2.4}
 
 ### Upstream Material
 {summary from Step 2.2 or "N/A"}
@@ -417,11 +432,7 @@ If any missing: produce the missing artifact before Step 7. Do NOT register comp
 
 ## Step 7: Wrap-up
 
-### 7.1: Artifact Registration
-
-Artifact registration and state updates are handled by `maestro run complete`.
-
-### 7.2: Domain Knowledge Flow
+### 7.1: Domain Knowledge Flow
 
 Domain terms produced by Grill settle into the project knowledge base via the following path:
 
@@ -434,7 +445,7 @@ context-package.json#domain.terminology[]  ──→  wrap-up domain extraction 
 - After all terms are locked via Step 5 synthesis, extraction is automatically triggered by `harvest --auto` at the end of the chain
 - Domain extraction always requires interactive confirmation (`-y` has no effect on domain registration)
 
-### 7.3: Completion Report
+### 7.2: Completion Report
 
 ```
 Grill session {artifact_id} completed.

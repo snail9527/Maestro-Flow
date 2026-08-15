@@ -15,10 +15,19 @@ import { registerRunCommand } from '../commands/run.js';
 import { writeStateJson, migrateV1toV2 } from '../utils/state-schema.js';
 import type { SessionState } from './schemas.js';
 
+function v2Workspace(root: string): void {
+  mkdirSync(join(root, ".workflow"), { recursive: true });
+  writeFileSync(join(root, ".workflow", "config.json"), JSON.stringify({
+    session_schema: { schema_version: "session-schema-selection/1.0", writer: "session/1.3", features: { session_statusless: false } },
+  }));
+}
+
 const roots: string[] = [];
 
 function root(): string {
   const path = mkdtempSync(join(tmpdir(), 'maestro-decide-'));
+
+  v2Workspace(path);
   roots.push(path);
   return path;
 }
@@ -151,6 +160,12 @@ describe('run decide — fix', () => {
     const result = runDecide(projectRoot, 's', 'DP-1', { verdict: 'fix', confidence: 'medium' });
     expect(result.point_status).toBe('pending');
     expect(result.retry).toEqual({ count: 1, max: 2, exhausted: false });
+    expect(result.next).toMatchObject({
+      suggest_only: true,
+      action: 'insert_fix',
+      command: null,
+      reason: expect.stringContaining('typed chain proposal'),
+    });
 
     const orch = orchOf(projectRoot, 's');
     expect(orch.decision_points[0].retry_count).toBe(1);
@@ -190,9 +205,9 @@ describe('run decide — escalate', () => {
     expect(result.next).toMatchObject({
       suggest_only: true,
       action: 'resolve_session',
-      command: expect.stringContaining('maestro session resolve --session s'),
+      command: expect.stringContaining('maestro run recover --session s'),
     });
-    expect(result.next.reason).toContain('canonical recovery is explicit resolve, then resume, then run next');
+    expect(result.next.reason).toContain('canonical recovery is run recover, then recover --resume, then run next');
     expect(result.next.preconditions).toEqual([
       'resolve the escalated decision; the Session remains paused',
       'resume only after every blocker and concurrency guard is clear',

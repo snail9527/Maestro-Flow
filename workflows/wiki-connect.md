@@ -22,13 +22,13 @@ Knowledge graph link discovery and health improvement. Analyzes the unified wiki
 ## Argument Shape
 
 ```
-/maestro-manage knowledge wiki connect                                 → full graph analysis, all types
-/maestro-manage knowledge wiki connect --scope spec                    → limit to spec entries only
-/maestro-manage knowledge wiki connect --scope memory                  → limit to memory entries only
-/maestro-manage knowledge wiki connect --min-similarity 0.5            → raise threshold (default: 0.3)
-/maestro-manage knowledge wiki connect --fix                           → auto-apply top suggestions
-/maestro-manage knowledge wiki connect --max 10                        → limit suggestion count (default: 20)
-/maestro-manage knowledge wiki connect --scope spec --fix --max 5      → combined: fix top 5 spec connections
+/maestro-knowledge wiki connect                                 → full graph analysis, all types
+/maestro-knowledge wiki connect --scope spec                    → limit to spec entries only
+/maestro-knowledge wiki connect --scope memory                  → limit to memory entries only
+/maestro-knowledge wiki connect --min-similarity 0.5            → raise threshold (default: 0.3)
+/maestro-knowledge wiki connect --fix                           → auto-apply top suggestions
+/maestro-knowledge wiki connect --max 10                        → limit suggestion count (default: 20)
+/maestro-knowledge wiki connect --scope spec --fix --max 5      → combined: fix top 5 spec connections
 ```
 
 | Flag | Effect |
@@ -42,9 +42,9 @@ Knowledge graph link discovery and health improvement. Analyzes the unified wiki
 
 ## Stage 1: Load Wiki State
 
-Gather baseline in parallel via `maestro wiki list --json`, `health`, `orphans`, `hubs --top 10`.
+Gather baseline in parallel via `maestro wiki list --json`, `health`, `orphans`, `hubs --limit 10`.
 
-MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: graph operations (`orphans`, `hubs --top 10`) — use the `maestro wiki` CLI to compute in-degree and orphan sets.
+MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: graph operations (`orphans`, `hubs --limit 10`) — use the `maestro wiki` CLI to compute in-degree and orphan sets.
 
 Working state: entry count by type, baseline health score, orphan IDs, hub in-degree counts.
 
@@ -121,6 +121,8 @@ If `--fix`: proceed to Stage 5.
 
 For each accepted suggestion: fetch entry, append target-id to `related` list (dedup), update via `maestro wiki update <source-id> --frontmatter`.
 
+> Relationship maintenance only — updating an existing entry's links never creates new knowledge. If a suggestion implies new content, route it through the candidate pipeline (`maestro knowledge stage` → `review` → `promote`).
+
 After all updates: re-run `maestro wiki health`, report applied/skipped counts and health delta.
 
 ---
@@ -151,8 +153,8 @@ Report:       .workflow/knowhow/KNW-wiki-connections-{date}.md
 
 | Action | Command |
 |--------|---------|
-| Generate knowledge digest | `/maestro-manage knowledge wiki digest <topic>` |
+| Generate knowledge digest | `/maestro-knowledge wiki digest <topic>` |
 | Follow-along on orphan | `/maestro-learn follow <wiki-id>` |
 | View full graph | `maestro wiki graph` |
-| Run harvest for new content | `/maestro-manage knowledge harvest --recent 7` |
+| Run harvest for new content | `/maestro-knowledge harvest --recent 7` |
 

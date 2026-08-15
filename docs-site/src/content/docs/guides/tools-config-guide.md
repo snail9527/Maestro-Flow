@@ -211,7 +211,7 @@ maestro search "jwt token" --type spec
 maestro search --category coding
 
 # 组合查询
-maestro search "oauth pkce" --type spec --category arch --limit 10
+maestro search "oauth pkce" --type spec --category arch
 
 # 代码搜索（需启用 MaestroGraph）
 maestro search "UserService" --code
@@ -267,7 +267,7 @@ maestro search "jwt token" --json
 
 ```bash
 # 基础搜索
-maestro search "<query>" [--type <type>] [--category <cat>] [--limit N]
+maestro search "<query>" [--type <type>] [--category <cat>]
 
 # 代码搜索
 maestro search "<symbol>" --code
@@ -488,14 +488,14 @@ maestro hooks uninstall
 为 51 个命令/skill 设置默认参数，通过 Hook 自动注入，无需每次手动输入。
 
 ```
-用户调用 /maestro-ralph continue
+用户调用 /maestro-ralph -c
        ↓
 skill-context hook (UserPromptSubmit)
        ↓ 匹配 skill → 加载配置 → 对比已有参数
        ↓
 additionalContext 注入默认参数
        ↓
-等同于 /maestro-ralph continue --auto-commit -y
+等同于 /maestro-ralph -c --auto-commit -y
 ```
 
 ### 配置文件

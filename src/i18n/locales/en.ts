@@ -49,6 +49,7 @@ export const en: LocaleStrings = {
     groupMcp: 'MCP Server',
     groupAppearance: 'Appearance',
     groupEmbedding: 'Embedding',
+    groupEntryCommands: 'Entry Commands',
     hubScope: 'Scope:',
     hubGlobal: 'Global',
     hubProject: 'Project',
@@ -79,6 +80,9 @@ export const en: LocaleStrings = {
     hubDetailCodexMcp: 'Register maestro-tools MCP server in Codex config.',
     hubDetailAgyHooks: 'Antigravity (Gemini CLI) event hooks.\nSame hook library adapted for Agy event model.',
     hubDetailExtraMcp: 'Register maestro-tools in additional IDEs/CLIs:\nCursor, Qoder, Trae, Kiro, Roo, VS Code, Gemini CLI.',
+
+    // Pi Agent — not installed by maestro; install the pi Maestro Flow plugin
+    piPluginReminder: 'Pi Agent is not installed by Maestro. Install the Maestro Flow pi plugin: pi install https://github.com/catlog22/pi-maestro-flow',
 
     // Hooks granular
     hooksIndividual: 'Individual Hooks',

@@ -26,9 +26,9 @@ Main worktree (master)              Worktree (.worktrees/m2-production/)
 │       └── plan-billing-.. [forked]│       └── ...
 │                                   │
 │   main 上修 M1 bug                │   在这里正常执行:
-│                                   │   /maestro-analyze
-│                                   │   /maestro-plan
-│                                   │   /maestro-execute
+│                                   │   /maestro "推进 M2"
+│                                   │     （编排器派发 analyze
+│                                   │      → plan → execute）
 ```
 
 </details>
@@ -47,7 +47,7 @@ Main worktree (master)              Worktree (.worktrees/m2-production/)
 ### 场景 1：里程碑完成后有 bug，不等修完直接开始下一个
 
 ```bash
-/maestro-milestone-complete          # M1 完成但有遗留 bug
+/maestro "完成里程碑 M1"             # M1 完成但有遗留 bug（编排器派发 milestone 步骤）
 /maestro-fork -m 2                   # Fork M2 worktree
 
 # 终端 A：main 上修 M1 bug
@@ -55,7 +55,7 @@ cd /project
 
 # 终端 B：worktree 中推进 M2
 cd .worktrees/m2-production/
-/maestro-analyze && /maestro-plan && /maestro-execute
+/maestro "推进 M2"                   # 编排器自动建链 analyze → plan → execute
 
 # M2 完成，回 main 合并
 /maestro-merge -m 2
@@ -155,14 +155,14 @@ worktree 内执行命令时，新 artifact 自动归属 `worktree-scope.json` �
 | 命令 | 原因 |
 |------|------|
 | `maestro-init` | 会重置项目状态 |
-| `maestro-roadmap` | 会重新分解 milestones |
-| `maestro-blueprint` | 会修改全局 blueprint |
+| `roadmap` 步骤 | 会重新分解 milestones |
+| `blueprint` 步骤 | 会修改全局 blueprint |
 | `maestro-fork` | 不能在 worktree 内再 fork |
 | `maestro-merge` | 必须在 main 中执行 |
 
 ## Dashboard 集成
 
-`/manage-status` 会显示 worktree 状态：
+`maestro session status` 会显示 worktree 状态：
 
 <details>
 <summary>Dashboard 输出示例</summary>

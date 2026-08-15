@@ -5,11 +5,20 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, extname, join, relative, resolve as resolvePath, sep } from 'node:path';
-import { hashDirectory, hashFile, scanOutputs, type ArtifactScanResult, type DiscoveredArtifact } from './artifacts.js';
+import { basename, extname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
+import {
+  defaultArtifactAlias,
+  hashDirectory,
+  hashFile,
+  scanOutputs,
+  validateStrictArtifactContract,
+  type ArtifactScanResult,
+  type DiscoveredArtifact,
+} from './artifacts.js';
 import { parseArgumentHint, type SkillParamDef } from '../config/argument-hint-parser.js';
 import {
   hashCommandContract,
@@ -26,21 +35,62 @@ import {
 } from '../core/skill-converter.js';
 import { deriveHandoff, readReportFrontmatter } from './report.js';
 import {
+  artifactRepublishReceiptPath,
+  createArtifactRepublishReceipt,
+  exactArtifactRepublishReceipt,
+  inspectArtifactCompatibility,
+  prepareArtifactRepublish,
+  type InspectArtifactCompatibilityOptions,
+  type PrepareArtifactRepublishOptions,
+} from './artifact-compatibility.js';
+import {
+  buildKnowledgeReconciliationCard,
+  knowledgeCandidateReceipt,
+  runKnowledgeDeltaPath,
+  runKnowledgeDeltaSchema,
+  stageHandoffKnowledgeCandidates,
+  summarizeSessionKnowledge,
+  type KnowledgeCandidateReceipt,
+} from './knowledge.js';
+import {
+  applyAutomaticKnowledgeSuppression,
+  ensureKnowledgeReconciliation,
+  isKnowledgeReconciliationFresh,
+  ensureSessionKnowledgeReconciliation,
+  persistSessionKnowledgeReconciliation,
+  readKnowledgeReconciliation,
+  reconcileRunKnowledgeSync,
+  reconciliationForCandidate,
+  reconciliationSummary,
+  writeKnowledgeReconciliation,
+  type KnowledgeReconciliation,
+} from '../knowledge/reconcile.js';
+import {
   gateSchema,
+  sessionStateV20Schema,
   type ArtifactRegistry,
   type CommandRun,
+  type CommandRunV14,
+  type ExecutionState,
   type Gate,
   type GateRegistry,
   type Handoff,
   type ReportFrontmatter,
   type SessionState,
+  type SessionStateRead,
 } from './schemas.js';
 import {
-  briefResultV10Schema,
+  artifactRepublishReceiptSchema,
+  briefResultV11Schema,
+  briefResultV12Schema,
   commandRebindAuditSchema,
   completeInputSnapshotSchema,
   executionContractV11Schema,
+  executionContractV12Schema,
   guidanceSnapshotSchema,
+  sessionProvenanceSchema,
+  type ArtifactCompatibilityAssessment,
+  type ArtifactRepublishReceipt,
   type BriefResult,
   type CompleteInputSnapshot,
   type CreationProvenance,
@@ -49,12 +99,31 @@ import {
   type GuidanceSnapshot,
   type IntentIdentity,
   type SessionProvenance,
+  type SourceFenceRead,
   type PersistedTransitionRecord,
+  type PersistedTransitionRecordV11,
+  type TransitionFenceV11,
   type TransitionPointer,
 } from './protocol-schemas.js';
 import { createIntentIdentity } from './intent-identity.js';
+import {
+  applyChainProposal,
+  selectChainProposal,
+  validateChainProposalArtifacts,
+  type ValidatedChainProposal,
+} from './chain-proposal.js';
 import { createTopicIdentity, normalizeTopic, sameTopicIdentity, type TopicIdentity } from './topic-identity.js';
-import { assessArtifactReuse, type ReuseAssessment } from './reuse-assessment.js';
+import {
+  assessArtifactReuse,
+  schemaMatch,
+  type ReuseAssessment,
+  type ReuseAssessmentInput,
+  type ReuseAssessmentRead,
+} from './reuse-assessment.js';
+import {
+  assessReceiptBackedArtifactReuse,
+  validateReuseAcceptance,
+} from './reuse-acceptance.js';
 import {
   buildIntentSection,
   buildBoundaryContractSection,
@@ -64,16 +133,27 @@ import {
 import { SessionStore, type SessionBundle, type StoreTransaction } from './store.js';
 import { createGateRegistry } from './defaults.js';
 import {
+  activeStepIndex,
   nextPendingDecisionIndex,
   nextPendingIndex,
   issueRetryToken,
 } from './chain.js';
-import { canonicalRunDir, resolveRunContext, resolveTargetPlatform } from './context.js';
-import { checkLease, claimLease, type LeaseClaim } from './lease.js';
+import { canonicalRunDir, resolveRunContext, resolveRunContextFull, resolveTargetPlatform } from './context.js';
+import {
+  assertExecutionLease,
+  checkLease,
+  claimLease,
+  hashExecutionLeaseId,
+  type ExecutionLeaseClaim,
+  type LeaseClaim,
+} from './lease.js';
 import {
   assertTransitionMutationRevisions,
   createTransitionOutcome,
+  createTransitionOutcomeV11,
+  createTransitionRequestV11,
   prepareTransitionMutation,
+  replayOrApplyTransitionV11,
   stableJsonUtf8,
   transitionMutationReceipt,
   TransitionReceiptError,
@@ -82,6 +162,7 @@ import {
   type TransitionMutationReceipt,
 } from './transition-receipts.js';
 import { validateSessionId } from './ids.js';
+import { reuseAcceptanceStatus } from './continuation.js';
 import {
   ensureSessionProjection,
   localISO,
@@ -123,6 +204,11 @@ export interface NamedGateBlocker {
   status: Gate['status'];
 }
 
+export type SessionProvenanceInput = Omit<SessionProvenance, 'forked_from' | 'imported_from'> & {
+  forked_from: SourceFenceRead | null;
+  imported_from: SourceFenceRead[];
+};
+
 export interface CreateRunOptions {
   projectRoot: string;
   command: string;
@@ -143,10 +229,21 @@ export interface CreateRunOptions {
   expectedIdentityRevision?: number;
   /** Lease claim validated and persisted with the chain binding. */
   leaseClaim?: LeaseClaim;
+  /** Explicit execution binding; omitted legacy calls continue writing command-run/1.3. */
+  execution?: {
+    executionId: string;
+    generation: number;
+    expectedRevision: number;
+    lease: ExecutionLeaseClaim;
+    requestId: string;
+    operation?: 'create' | 'next';
+  };
+  /** Require a running Session and atomically fence an ad-hoc Run allocation. */
+  requireRunningSession?: boolean;
   /** Explicit exact identity supplied by recall/fork/import consumers. */
   intentIdentity?: IntentIdentity;
   /** Session lineage for a newly allocated Session. */
-  sessionProvenance?: SessionProvenance;
+  sessionProvenance?: SessionProvenanceInput;
   /** Audited creation authority supplied by confirmation/transition consumers. */
   creation?: {
     requestId: string | null;
@@ -166,10 +263,12 @@ export interface CreateRunResult {
   resolved_platform: TargetPlatform;
   upstream: Record<string, RunUpstream>;
   topic_identity: TopicIdentity;
-  reuse_assessments: ReuseAssessment[];
+  reuse_assessments: ReuseAssessmentRead[];
+  reuse_warnings: string[];
   argument_requirements: ArgumentRequirement[];
   entry_gates: GateSummary;
   entry_blockers: NamedGateBlocker[];
+  session_created: boolean;
   next: { command: string; reason: string };
 }
 
@@ -185,6 +284,21 @@ export interface RebindRunResult {
   snapshot_hash: string;
   audit_path: string;
 }
+
+export interface ArtifactRepublishResult {
+  session_id: string;
+  source_artifact_id: string;
+  artifact_id: string;
+  compatibility_run_id: string;
+  compatibility_step_id: string;
+  assessment_hash: string;
+  artifact_registry_revision: number;
+  session_revision: number;
+  receipt: ArtifactRepublishReceipt;
+  replay: { status: 'applied' | 'replayed'; transition_id: string };
+}
+
+export interface ArtifactRepublishOptions extends PrepareArtifactRepublishOptions {}
 
 export interface AcceptReuseResult {
   session_id: string;
@@ -208,6 +322,15 @@ export interface SealSessionResult {
   status: 'sealed';
   sealed_at: string;
   run_count: number;
+  knowledge: {
+    pending_candidates: number;
+    promoting_candidates: number;
+    promoted_candidates: number;
+    review_required_candidates: number;
+    conflict_candidates: number;
+    suppressed_candidates: number;
+    review_command: string;
+  };
 }
 
 export interface GateSummary {
@@ -226,7 +349,7 @@ export interface CheckRunResult {
   warnings: string[];
   errors: string[];
   upstream: Record<string, RunUpstream>;
-  reuse_assessments: ReuseAssessment[];
+  reuse_assessments: ReuseAssessmentRead[];
   /** Populated by `run check`: repair loop while gates block, complete when clean, advance when sealed. */
   next?: { command: string; reason: string };
   /**
@@ -235,6 +358,8 @@ export interface CheckRunResult {
    * `finish:` lines. Prompt-layer guidance — never a blocking gate.
    */
   finish?: string[];
+  /** Completion-preflight knowledge classification; promotion review remains separate. */
+  knowledge_reconciliation?: ReturnType<typeof reconciliationSummary>;
 }
 
 export interface CompleteRunResult extends CheckRunResult {
@@ -250,6 +375,17 @@ export interface CompleteRunResult extends CheckRunResult {
     step_status: string;
     retry: { count: number; max: number; exhausted: boolean } | null;
   } | null;
+  /** Proposal operations applied inside the same completion transition. */
+  chain_proposal?: {
+    proposal_id: string;
+    path: string;
+    status: 'applied';
+    operations: Array<{ op: string; target: string; status: string }>;
+  } | null;
+  /** Candidate staging receipt; project knowledge still requires explicit review/promotion. */
+  knowledge: (KnowledgeCandidateReceipt & {
+    reconciliation: ReturnType<typeof reconciliationSummary>;
+  }) | null;
   transition: TransitionMutationReceipt;
 }
 
@@ -266,8 +402,49 @@ export interface PreparePrevious {
   handoff: PrevHandoff | null;
   consumes: PrepareConsumeStatus[];
   upstream: Record<string, RunUpstream>;
-  reuse_assessments: ReuseAssessment[];
+  reuse_assessments: ReuseAssessmentRead[];
   selected_refs: Array<{ alias: string; artifact_id: string; path: string; assessment_hash: string }>;
+}
+
+export interface PrepareChainStepHint {
+  index: number;
+  step_id: string;
+  command: string;
+  status: SessionState['orchestration']['chain'][number]['status'];
+  run_id: string | null;
+  decision_ref: string | null;
+}
+
+export interface PrepareDecisionHint {
+  point_id: string;
+  after_step_id: string | null;
+  status: SessionState['orchestration']['decision_points'][number]['status'];
+  retry_count: number;
+  max_retries: number;
+  evidence_ref: string | null;
+}
+
+export interface PrepareSessionGuidance {
+  session_id: string;
+  status: SessionState['status'] | 'missing';
+  active_run_id: string | null;
+  latest_completed_run_id: string | null;
+  current_step: PrepareChainStepHint | null;
+  next_pending_step: PrepareChainStepHint | null;
+  open_decisions: PrepareDecisionHint[];
+  knowledge?: {
+    unique_inputs: number;
+    pending_candidates: number;
+    corroborated_candidates: number;
+    promoting_candidates: number;
+    review_required_candidates: number;
+    conflict_candidates: number;
+    suppressed_candidates: number;
+    missing_reconciliation_candidates: number;
+    review_command: string;
+  };
+  reminders: string[];
+  next: { command: string | null; reason: string };
 }
 
 export interface PrepareStepResult {
@@ -280,6 +457,8 @@ export interface PrepareStepResult {
   goal_mode: { platform: string; instructions: string } | null;
   /** Present only when `sessionId` is supplied — read-only prior-step context. */
   previous?: PreparePrevious;
+  /** Present only when `sessionId` is supplied — read-only chain and decision reminders. */
+  session_guidance?: PrepareSessionGuidance;
 }
 
 export interface SkillContentResult {
@@ -303,7 +482,27 @@ export interface CompleteNextSuggestion {
   preconditions: string[];
 }
 
+export interface CheckRunOptions {
+  /**
+   * Downgrade contract kind/schema/role/alias mismatches to warnings. Required outputs,
+   * artifact syntax, safe-path checks, and gates remain blocking.
+   */
+  skipArtifactMetadataValidation?: boolean;
+}
+
 export interface CompleteRunOptions {
+  /**
+   * When true, the caller asserts that `run check` already passed clean and
+   * outputs/ has not been modified since. The completion engine may skip
+   * gate re-evaluation (but still scans for artifact registration).
+   * TODO: implement skip logic in prepareCompleteInputs.
+   */
+  checkClean?: boolean;
+  /**
+   * Compatibility-only caller input. Completion always validates artifact metadata
+   * strictly; the warnings-only mode is diagnostic and belongs to `run check`.
+   */
+  skipArtifactMetadataValidation?: boolean;
   /** Extra concerns merged (append + dedupe) into the derived handoff. */
   notes?: string[];
   /** Run-relative paths registered as evidence artifacts beyond the outputs scan. */
@@ -323,10 +522,24 @@ export interface CompleteRunOptions {
   decisions?: string[];
   /** Lease claim checked inside the same transaction that seals the Run. */
   leaseClaim?: LeaseClaim;
+  /** Execution-bound completion authority; omitted legacy calls stay on transition/1.0. */
+  execution?: {
+    executionId: string;
+    generation: number;
+    expectedRevision: number;
+    lease: ExecutionLeaseClaim;
+    requestId: string;
+  };
   /** Internal chain transition used by completeRunWithVerdict. */
   chainVerdict?: CompletionVerdict;
+  /** Run-relative chain-proposal artifact selected for atomic application. */
+  chainProposal?: string;
+  /** Apply the single validated chain-proposal discovered in this Run. */
+  applyChainProposal?: boolean;
   /** Audited retry/revision/lease authority for completion. */
   transition?: Partial<TransitionMutationOptions>;
+  /** Require this Run to remain the active Run of a running Session until sealing. */
+  requireRunningSession?: boolean;
 }
 
 /** Chain-advancement instruction carried by `run complete --verdict`. */
@@ -375,6 +588,61 @@ function sha256(value: string | Buffer): string {
 
 function protocolSha256(value: string | Buffer): string {
   return `sha256:${sha256(value)}`;
+}
+
+function runHashForReplay(store: SessionStore, sessionId: string, runId: string | null): string | null {
+  if (!runId) return null;
+  const path = join(store.runDir(sessionId, runId), 'run.json');
+  return existsSync(path) ? protocolSha256(readFileSync(path)) : null;
+}
+
+function assertRunTransitionReplayEvidence(
+  store: SessionStore,
+  sessionId: string,
+  record: PersistedTransitionRecordV11,
+  records: readonly PersistedTransitionRecordV11[],
+  _currentFence: TransitionFenceV11,
+): void {
+  const value = typeof record.outcome.result.value === 'object' && record.outcome.result.value !== null
+    ? record.outcome.result.value as { run_id?: unknown }
+    : null;
+  const runId = record.outcome.subject.run_id
+    ?? (typeof value?.run_id === 'string' ? value.run_id : null);
+  const expectedHash = record.outcome.postconditions.run_hash;
+  if (!runId || !expectedHash) {
+    throw new TransitionReceiptError(
+      'REPLAY_STATE_DIVERGED',
+      `request_id ${record.request_id} has no verifiable Run postcondition`,
+    );
+  }
+
+  let evidencedHash = expectedHash;
+  const successors = records
+    .filter(candidate => candidate.status === 'applied'
+      && candidate.payload.operation === 'complete'
+      && candidate.outcome.subject.run_id === runId
+      && (candidate.payload.preconditions.execution_revision ?? -1)
+        >= (record.outcome.postconditions.execution_revision ?? 0))
+    .sort((left, right) => (
+      (left.payload.preconditions.execution_revision ?? 0)
+      - (right.payload.preconditions.execution_revision ?? 0)
+    ));
+  for (const successor of successors) {
+    if (successor.payload.preconditions.run_hash !== evidencedHash
+      || !successor.outcome.postconditions.run_hash) {
+      throw new TransitionReceiptError(
+        'REPLAY_STATE_DIVERGED',
+        `request_id ${record.request_id} Run hash successor evidence is inconsistent`,
+      );
+    }
+    evidencedHash = successor.outcome.postconditions.run_hash;
+  }
+  if (runHashForReplay(store, sessionId, runId) !== evidencedHash) {
+    throw new TransitionReceiptError(
+      'REPLAY_STATE_DIVERGED',
+      `request_id ${record.request_id} Run postcondition evidence diverged from canonical bytes`,
+    );
+  }
 }
 
 function buildGuidanceSnapshot(
@@ -474,15 +742,46 @@ function projectState(projectRoot: string): StateJsonV2 {
   };
 }
 
-function projectSessionEntry(session: SessionState): ProjectSessionEntry {
-  return {
+export function projectSessionEntry(
+  session: SessionState,
+  authority?: SessionStateRead,
+): ProjectSessionEntry {
+  const common = {
     session_id: session.session_id,
     intent: session.intent,
-    status: session.status,
     depends_on: [],
     roadmap_artifact_id: null,
     seed_ref: null,
   };
+  if (authority?.schema_version === 'session/2.0') {
+    const identity = sessionStateV20Schema.parse(authority);
+    return {
+      ...common,
+      session_schema_version: 'session/2.0',
+      current_execution_id: identity.current_execution_id,
+      latest_execution_id: identity.latest_execution_id,
+      archived_at: identity.archived_at,
+    };
+  }
+  return {
+    ...common,
+    session_schema_version: authority?.schema_version.startsWith('session/1.')
+      ? authority.schema_version as 'session/1.0' | 'session/1.1' | 'session/1.2' | 'session/1.3'
+      : 'session/1.3',
+    status: session.status,
+    active_run_id: session.active_run_id,
+  };
+}
+
+function sessionAvailableForAutomaticUse(store: SessionStore, sessionId: string): boolean {
+  const record = store.readSessionRecord(sessionId);
+  if (record.schema_version !== 'session/2.0') {
+    return store.readBundle(sessionId).session.status === 'running';
+  }
+  const identity = sessionStateV20Schema.parse(record);
+  if (identity.archived_at) return false;
+  if (!identity.current_execution_id) return true;
+  return store.readExecution(sessionId, identity.current_execution_id).status === 'active';
 }
 
 function compatibleTopic(session: SessionState, identity: TopicIdentity): boolean {
@@ -513,7 +812,7 @@ function runningTopicCandidatesLocked(
       const session = currentDraft?.session_id === sessionId
         ? currentDraft
         : store.readBundle(sessionId).session;
-      return session.status === 'running' ? [{ sessionId, session }] : [];
+      return sessionAvailableForAutomaticUse(store, sessionId) ? [{ sessionId, session }] : [];
     } catch {
       return [];
     }
@@ -542,7 +841,8 @@ export function resolveTopicSessionId(
     }
     return requested;
   }
-  const running = store.listSessions({ statuses: ['running'] }).candidates;
+  const running = store.listSessions().candidates
+    .filter(item => sessionAvailableForAutomaticUse(store, item.sessionId));
   const native = running.filter(item => item.session.topic_identity
     && sameTopicIdentity(item.session.topic_identity, identity));
   const nativeId = uniqueTopicCandidate('Running topic match', native);
@@ -591,21 +891,9 @@ function nextSequence(store: SessionStore, sessionId: string): number {
   return max + 1;
 }
 
-function defaultAlias(kind: string, command: string): string | undefined {
-  const value = `${kind} ${command}`.toLowerCase();
-  if (value.includes('analy') || value.includes('finding')) return 'current-analysis';
-  if (value.includes('plan')) return 'current-plan';
-  if (value.includes('execut') || value.includes('change-manifest')) return 'latest-execution';
-  if (value.includes('verif')) return 'latest-verification';
-  if (value.includes('review')) return 'latest-review';
-  if (value.includes('test') || value.includes('acceptance')) return 'latest-test';
-  if (value.includes('debug') || value.includes('diagnos')) return 'latest-debug';
-  return undefined;
-}
-
 interface CollectedReuse {
   upstream: Record<string, RunUpstream>;
-  assessments: ReuseAssessment[];
+  assessments: ReuseAssessmentRead[];
 }
 
 function observedArtifactHash(path: string): string | null {
@@ -653,9 +941,19 @@ function collectReusableUpstream(
   registry: ArtifactRegistry,
   gates: GateRegistry,
   contract: CommandContract,
+  consumerCommand: string,
 ): CollectedReuse {
   if (contract.consumes.length === 0) return { upstream: {}, assessments: [] };
+  const consumedKinds = new Set(contract.consumes.map(c => c.kind));
+  const replacesIndex = new Map<string, string[]>();
+  for (const [id, artifact] of Object.entries(registry.artifacts)) {
+    if (artifact.replaces) {
+      const list = replacesIndex.get(artifact.replaces);
+      if (list) list.push(id); else replacesIndex.set(artifact.replaces, [id]);
+    }
+  }
   const candidates = Object.entries(registry.artifacts)
+    .filter(([, artifact]) => consumedKinds.has(artifact.kind))
     .map(([artifactId, artifact]) => {
       let producer: CommandRun | null = null;
       try { producer = store.readRun(session.session_id, artifact.producer_run_id); } catch { /* assessed as unavailable */ }
@@ -666,9 +964,9 @@ function collectReusableUpstream(
     .sort((left, right) => (right.producer?.sequence ?? 0) - (left.producer?.sequence ?? 0)
       || left.artifactId.localeCompare(right.artifactId));
 
-  const assessments: ReuseAssessment[] = [];
+  const assessments: ReuseAssessmentRead[] = [];
   const upstream: Record<string, RunUpstream> = {};
-  for (const consume of contract.consumes) {
+  for (const [consumeIndex, consume] of contract.consumes.entries()) {
     const aliasTargetId = consume.alias ? registry.aliases[consume.alias] : undefined;
     const matchingKind = candidates.filter(item => item.artifact.kind === consume.kind);
     const scopedCandidates = consume.alias
@@ -676,28 +974,59 @@ function collectReusableUpstream(
       : matchingKind;
     const assessed = scopedCandidates.map(item => {
       const producer = item.producer!;
-      const supersededBy = Object.entries(registry.artifacts)
-        .filter(([, candidate]) => candidate.replaces === item.artifactId)
-        .map(([id]) => id);
+      const supersededBy = replacesIndex.get(item.artifactId) ?? [];
       const acceptedSchemas = consume.schema
         ? [consume.schema]
         : (contract.contract_version ?? 1) === 1 ? [item.artifact.schema_version] : [];
+      const acceptedSchemaRanges: string[] = consume.schema_range ? [consume.schema_range] : [];
       const acceptedRoles: string[] = consume.role ? [consume.role] : [];
+      const republishConsumer = consume.alias && consume.role && (consume.schema || consume.schema_range)
+        ? {
+            command: consumerCommand,
+            command_contract_hash: `sha256:${hashCommandContract(contract)}`,
+            slot_index: consumeIndex,
+            slot: {
+              kind: consume.kind,
+              schema: consume.schema ?? consume.schema_range!,
+              role: consume.role,
+              alias: consume.alias,
+            },
+          }
+        : null;
+      const republishAuthority = republishConsumer
+        ? exactArtifactRepublishReceipt(store, session.session_id, item.artifactId, republishConsumer)
+        : null;
       const currentSameRoleCandidates = matchingKind
         .filter(peer => peer.artifact.role === item.artifact.role)
         .filter(peer => peer.artifact.status === 'sealed')
         .filter(peer => !Object.values(registry.artifacts).some(candidate => candidate.replaces === peer.artifactId))
         .filter(peer => consume.alias ? peer.artifactId === aliasTargetId : true);
       const sameRoleCandidates = currentSameRoleCandidates
-        .map(peer => ({
-        artifactId: peer.artifactId,
-        artifactHash: peer.artifact.content_hash ? `sha256:${peer.artifact.content_hash}` : null,
-        eligible: peer.producer?.status === 'sealed'
-          && peer.artifact.status === 'sealed'
-          && peer.observedHash === `sha256:${peer.artifact.content_hash}`
-          && (acceptedSchemas.length === 0 || acceptedSchemas.includes(peer.artifact.schema_version))
-          && (acceptedRoles.length === 0 || acceptedRoles.includes(peer.artifact.role)),
-        }));
+        .map(peer => {
+          const schemaEligible = acceptedSchemas.length === 0 && acceptedSchemaRanges.length === 0
+            ? true
+            : (() => {
+              const match = schemaMatch(peer.artifact.schema_version, acceptedSchemas, acceptedSchemaRanges);
+              return match === 'exact' || match === 'major-compatible';
+            })();
+          return {
+            artifactId: peer.artifactId,
+            artifactHash: peer.artifact.content_hash ? `sha256:${peer.artifact.content_hash}` : null,
+            eligible: peer.producer?.status === 'sealed'
+              && peer.artifact.status === 'sealed'
+              && peer.observedHash === `sha256:${peer.artifact.content_hash}`
+              && schemaEligible
+              && (acceptedRoles.length === 0 || acceptedRoles.includes(peer.artifact.role)),
+          };
+        });
+      const acceptsNegativeEvidence = consume.accepts_negative_evidence === true;
+      const producerCarriesNegativeEvidence = acceptsNegativeEvidence
+        && producer.status === 'sealed'
+        && item.artifact.status === 'sealed'
+        && (producer.output.verdict === 'blocked'
+          || producer.output.verdict === 'failed'
+          || producer.handoff?.verdict === 'blocked'
+          || producer.handoff?.verdict === 'failed');
       const assessmentInput = {
         candidate: {
           workspaceId: createTopicIdentity(projectRoot, session.intent, { source: 'legacy-intent' }).workspace_id,
@@ -716,35 +1045,44 @@ function collectReusableUpstream(
         consumer: {
           kind: consume.kind,
           alias: consume.alias ?? null,
-          schema: consume.schema ?? null,
+          schema: consume.schema ?? consume.schema_range ?? null,
           role: consume.role ?? null,
         },
         acceptedArtifactSchemas: acceptedSchemas,
+        acceptedSchemaRanges: acceptedSchemaRanges,
         acceptedArtifactRoles: acceptedRoles,
-        contract: producerContractDrift(projectRoot, producer, item.artifact),
+        contract: republishAuthority
+          ? {
+              producerHash: republishAuthority.receipt_hash,
+              currentHash: republishAuthority.receipt_hash,
+              drift: 'compatible_output' as const,
+            }
+          : producerContractDrift(projectRoot, producer, item.artifact),
         freshness: item.artifact.status === 'superseded' || supersededBy.length > 0
           ? 'stale'
           : consume.alias
             ? (aliasTargetId === item.artifactId ? 'fresh' : 'unknown')
             : currentSameRoleCandidates.length > 0 ? 'fresh' : 'unknown',
         quality: {
-          status: producer.status !== 'sealed'
-            || producer.output.verdict === 'blocked'
-            || producer.output.verdict === 'failed'
-            || producer.handoff?.verdict === 'blocked'
-            || producer.handoff?.verdict === 'failed'
-            || producer.gate_ids.some(id => {
-              const status = gates.gates[id]?.status;
-              return status !== undefined && !['passed', 'waived', 'skipped'].includes(status);
-            })
-            ? 'low'
-            : (producer.handoff?.concerns.length ?? 0) > 0
-              || producer.handoff?.verdict === 'ready_with_concerns'
-              || producer.output.verdict === 'ready_with_concerns'
-              ? 'medium'
-              : producer.handoff?.verdict === 'ready' && producer.output.verdict === 'ready'
-                ? 'high'
-                : 'unknown',
+          status: producerCarriesNegativeEvidence
+            ? 'high'
+            : producer.status !== 'sealed'
+              || producer.output.verdict === 'blocked'
+              || producer.output.verdict === 'failed'
+              || producer.handoff?.verdict === 'blocked'
+              || producer.handoff?.verdict === 'failed'
+              || producer.gate_ids.some(id => {
+                const status = gates.gates[id]?.status;
+                return status !== undefined && !['passed', 'waived', 'skipped'].includes(status);
+              })
+              ? 'low'
+              : (producer.handoff?.concerns.length ?? 0) > 0
+                || producer.handoff?.verdict === 'ready_with_concerns'
+                || producer.output.verdict === 'ready_with_concerns'
+                ? 'medium'
+                : producer.handoff?.verdict === 'ready' && producer.output.verdict === 'ready'
+                  ? 'high'
+                  : 'unknown',
           concernCodes: producer.handoff?.concerns ?? [],
         },
         supersession: {
@@ -753,21 +1091,32 @@ function collectReusableUpstream(
           supersededByArtifactIds: supersededBy,
         },
         conflicts: { sameRoleCandidates },
-      } satisfies Parameters<typeof assessArtifactReuse>[0];
-      let assessment = assessArtifactReuse(assessmentInput);
+      } satisfies ReuseAssessmentInput;
+      let assessment = republishAuthority
+        ? assessArtifactReuse(assessmentInput)
+        : assessReceiptBackedArtifactReuse(projectRoot, assessmentInput, store);
       const finalArtifactHash = observedArtifactHash(join(store.sessionDir(session.session_id), item.artifact.relative_path));
       const finalRunHash = observedArtifactHash(join(store.runDir(session.session_id, producer.run_id), 'run.json'));
       if (finalArtifactHash !== assessment.source_fence.observed_artifact_hash
         || finalRunHash !== assessment.source_fence.producer_run_hash) {
         const producerFenceStable = finalRunHash === assessment.source_fence.producer_run_hash;
-        assessment = assessArtifactReuse({
-          ...assessmentInput,
-          candidate: {
-            ...assessmentInput.candidate,
-            observedArtifactHash: finalArtifactHash,
-            producerRunHash: producerFenceStable ? finalRunHash : null,
-          },
-        });
+        assessment = republishAuthority
+          ? assessArtifactReuse({
+              ...assessmentInput,
+              candidate: {
+                ...assessmentInput.candidate,
+                observedArtifactHash: finalArtifactHash,
+                producerRunHash: producerFenceStable ? finalRunHash : null,
+              },
+            })
+          : assessReceiptBackedArtifactReuse(projectRoot, {
+              ...assessmentInput,
+              candidate: {
+                ...assessmentInput.candidate,
+                observedArtifactHash: finalArtifactHash,
+                producerRunHash: producerFenceStable ? finalRunHash : null,
+              },
+            }, store);
       }
       assessments.push(assessment);
       return { item, assessment };
@@ -802,32 +1151,29 @@ export function assessSessionReuse(
       bundle.artifacts,
       bundle.gates,
       resolveCommandSource(projectRoot, command).contract,
+      command,
     );
   });
 }
 
 interface RevalidatedRunReuse {
   upstream: Record<string, RunUpstream>;
-  assessments: ReuseAssessment[];
+  assessments: ReuseAssessmentRead[];
   blockers: string[];
 }
 
-function hasAcceptedReviewReceipt(
-  bundle: SessionBundle,
-  run: CommandRun,
-  assessment: ReuseAssessment,
+function sameReuseSourceAuthority(
+  original: ReuseAssessmentRead['source_fence'],
+  refreshed: ReuseAssessmentRead['source_fence'],
 ): boolean {
-  return bundle.session.requests.some(item => {
-    if (item.type !== 'transition' || !('outcome' in item)
-      || item.outcome.operation !== 'accept-reuse' || item.outcome.status !== 'applied') return false;
-    const acceptance = item.outcome.result.acceptance;
-    if (!acceptance || typeof acceptance !== 'object' || Array.isArray(acceptance)) return false;
-    const raw = acceptance as Record<string, unknown>;
-    return raw.run_id === run.run_id
-      && raw.assessment_hash === assessment.assessment_hash
-      && raw.artifact_id === assessment.source_fence.artifact_id
-      && stableJsonUtf8(raw.source_fence) === stableJsonUtf8(assessment.source_fence);
-  });
+  if (original.schema_version !== refreshed.schema_version) return false;
+  if (original.schema_version === 'reuse-source-fence/1.0') {
+    return stableJsonUtf8(original) === stableJsonUtf8(refreshed);
+  }
+  if (refreshed.schema_version !== 'reuse-source-fence/1.1') return false;
+  const { artifact_registry_revision: _originalRevision, ...originalAuthority } = original;
+  const { artifact_registry_revision: _refreshedRevision, ...refreshedAuthority } = refreshed;
+  return stableJsonUtf8(originalAuthority) === stableJsonUtf8(refreshedAuthority);
 }
 
 function revalidateRunReuse(
@@ -835,8 +1181,9 @@ function revalidateRunReuse(
   store: SessionStore,
   bundle: SessionBundle,
   run: CommandRun,
+  contract?: CommandContract,
 ): RevalidatedRunReuse {
-  const stored = (run.input.reuse_assessments ?? []) as ReuseAssessment[];
+  const stored = (run.input.reuse_assessments ?? []) as ReuseAssessmentRead[];
   if (stored.length === 0) {
     return {
       upstream: {},
@@ -844,41 +1191,51 @@ function revalidateRunReuse(
       blockers: run.input.consumes.length > 0 ? ['consumed artifacts have no reusable source fence'] : [],
     };
   }
-  const current = collectReusableUpstream(
-    projectRoot,
-    store,
-    bundle.session,
-    bundle.artifacts,
-    bundle.gates,
-    contractForRun(projectRoot, run).contract,
-  );
+  let current: CollectedReuse = { upstream: {}, assessments: [] };
+  let collectionError: string | null = null;
+  try {
+    current = collectReusableUpstream(
+      projectRoot,
+      store,
+      bundle.session,
+      bundle.artifacts,
+      bundle.gates,
+      contract ?? contractForRun(projectRoot, run).contract,
+      run.command.name,
+    );
+  } catch (error) {
+    collectionError = (error as Error).message;
+  }
   const upstream: Record<string, RunUpstream> = {};
-  const assessments: ReuseAssessment[] = [];
+  const assessments: ReuseAssessmentRead[] = [];
   const blockers: string[] = [];
   for (const original of stored) {
+    let authorityError: string | null = null;
+    try {
+      validateReuseAcceptance(projectRoot, original, store);
+    } catch (error) {
+      authorityError = (error as Error).message;
+    }
     const refreshed = current.assessments.find(item =>
       item.source_fence.artifact_id === original.source_fence.artifact_id
       && item.consumer.kind === original.consumer.kind
       && item.consumer.alias === original.consumer.alias);
     const aliasCurrent = original.consumer.alias === null
       || bundle.artifacts.aliases[original.consumer.alias] === original.source_fence.artifact_id;
-    const sourceFenceCurrent = refreshed !== undefined
-      && refreshed.source_fence.artifact_registry_revision === original.source_fence.artifact_registry_revision
-      && refreshed.source_fence.artifact_hash === original.source_fence.artifact_hash
-      && refreshed.source_fence.observed_artifact_hash === original.source_fence.observed_artifact_hash
-      && refreshed.source_fence.producer_run_hash === original.source_fence.producer_run_hash
+    const sourceFenceCurrent = authorityError === null
+      && collectionError === null
+      && refreshed !== undefined
+      && sameReuseSourceAuthority(original.source_fence, refreshed.source_fence)
       && aliasCurrent;
     const originalReuseCurrent = original.decision === 'REUSE'
       && refreshed?.decision === 'REUSE'
       && sourceFenceCurrent;
     const acceptedReviewCurrent = original.decision === 'REVIEW'
       && refreshed?.decision === 'REVIEW'
-      && refreshed.assessment_hash === original.assessment_hash
-      && stableJsonUtf8(refreshed.source_fence) === stableJsonUtf8(original.source_fence)
       && sourceFenceCurrent
-      && hasAcceptedReviewReceipt(bundle, run, original);
+      && reuseAcceptanceStatus(bundle.session, run, original as ReuseAssessment) === 'accepted';
     if (!originalReuseCurrent && !acceptedReviewCurrent) {
-      const assessment: ReuseAssessment = refreshed
+      const assessment: ReuseAssessmentRead = refreshed
         ? {
             ...refreshed,
             decision: refreshed.decision === 'REUSE' ? 'REVIEW' : refreshed.decision,
@@ -889,7 +1246,11 @@ function revalidateRunReuse(
         : { ...original, decision: 'REJECT', reason_codes: [...new Set([...original.reason_codes, 'ARTIFACT_INVALID' as const])] };
       assessments.push(assessment);
       if (run.input.consumes.includes(original.source_fence.artifact_id)) {
-        blockers.push(`artifact ${original.source_fence.artifact_id} reuse fence is no longer current or accepted`);
+        const detail = authorityError ?? collectionError;
+        blockers.push(
+          `artifact ${original.source_fence.artifact_id} reuse fence is no longer current or accepted`
+          + (detail ? `: ${detail}` : ''),
+        );
       }
       continue;
     }
@@ -933,11 +1294,19 @@ export function acceptRunReuse(
   const located = store.findRun(runId, sessionId);
   const initialBundle = store.readBundle(located.sessionId);
   const initialRun = located.run;
-  const assessment = (initialRun.input.reuse_assessments as ReuseAssessment[])
+  const assessment = (initialRun.input.reuse_assessments as ReuseAssessmentRead[])
     .find(item => item.assessment_hash === assessmentHash);
   if (!assessment) throw new Error(`reuse assessment not found: ${assessmentHash}`);
   if (assessment.decision !== 'REVIEW') {
     throw new Error(`reuse assessment ${assessmentHash} is ${assessment.decision}, expected REVIEW`);
+  }
+  validateReuseAcceptance(projectRoot, assessment, store);
+  let executionBinding: Pick<CommandRunV14, 'execution_id' | 'generation'> | null = null;
+  try {
+    const bound = store.readExecutionRun(located.sessionId, runId);
+    executionBinding = { execution_id: bound.execution_id, generation: bound.generation };
+  } catch {
+    // Historical command-run/1.x acceptance remains on the legacy writer path.
   }
   const resolvedContract = contractForRun(projectRoot, initialRun).contract;
   const prepared = prepareTransitionMutation({
@@ -964,18 +1333,30 @@ export function acceptRunReuse(
     if (run.status === 'sealed' || run.status === 'completed') {
       throw new Error(`Run ${runId} is ${run.status} and immutable`);
     }
-    const stored = (run.input.reuse_assessments as ReuseAssessment[])
+    const stored = (run.input.reuse_assessments as ReuseAssessmentRead[])
       .find(item => item.assessment_hash === assessment.assessment_hash);
     const current = collectReusableUpstream(
       projectRoot, store, draft.session, draft.artifacts, draft.gates, resolvedContract,
-    ).assessments.find(item => item.assessment_hash === assessment.assessment_hash);
+      run.command.name,
+    ).assessments.find(item => (
+      item.source_fence.artifact_id === assessment.source_fence.artifact_id
+      && item.consumer.kind === assessment.consumer.kind
+      && item.consumer.alias === assessment.consumer.alias
+    ));
+    if (stored) validateReuseAcceptance(projectRoot, stored, store);
     if (!stored || stored.decision !== 'REVIEW'
       || !current || current.decision !== 'REVIEW'
       || stableJsonUtf8(stored.source_fence) !== stableJsonUtf8(assessment.source_fence)
-      || stableJsonUtf8(current.source_fence) !== stableJsonUtf8(assessment.source_fence)) {
+      || !sameReuseSourceAuthority(assessment.source_fence, current.source_fence)) {
       throw new TransitionReceiptError(
         'FENCE_CONFLICT',
         `reuse assessment ${assessment.assessment_hash} no longer matches its REVIEW source fence`,
+      );
+    }
+    if (run.input.consumes.includes(assessment.source_fence.artifact_id)) {
+      throw new TransitionReceiptError(
+        'ALREADY_ACCEPTED',
+        `reuse assessment ${assessment.assessment_hash} was already accepted for Run ${runId}`,
       );
     }
     if (!run.input.consumes.includes(assessment.source_fence.artifact_id)) {
@@ -1001,7 +1382,15 @@ export function acceptRunReuse(
     );
     if (run.status === 'blocked' && entryGates.blocking.length === 0) run.status = 'running';
     draft.session.activity_revision++;
-    tx.writeRun(run);
+    const persistedRun: CommandRun | CommandRunV14 = executionBinding
+      ? {
+          ...run,
+          schema_version: 'command-run/1.4',
+          execution_id: executionBinding.execution_id,
+          generation: executionBinding.generation,
+        }
+      : run;
+    tx.writeRun(persistedRun);
     const acceptance = {
       run_id: runId,
       assessment_hash: assessment.assessment_hash,
@@ -1029,7 +1418,7 @@ export function acceptRunReuse(
         session_identity_revision: draft.session.identity_revision,
         session_activity_revision: draft.session.activity_revision,
         active_run_id: draft.session.active_run_id,
-        run_hash: protocolSha256(`${JSON.stringify(run, null, 2)}\n`),
+        run_hash: protocolSha256(`${JSON.stringify(persistedRun, null, 2)}\n`),
         artifact_registry_revision: draft.artifacts.revision,
       },
       exit_code: 0, error_code: null, result: { acceptance, value: result },
@@ -1038,6 +1427,224 @@ export function acceptRunReuse(
   return {
     ...(structuredClone(evaluated.outcome.result.value) as Omit<AcceptReuseResult, 'transition'>),
     transition: transitionMutationReceipt(prepared.request, evaluated.outcome, evaluated.replayed),
+  };
+}
+
+export function inspectArtifactForConsumer(
+  projectRoot: string,
+  options: InspectArtifactCompatibilityOptions,
+): ArtifactCompatibilityAssessment {
+  return inspectArtifactCompatibility(projectRoot, options);
+}
+
+/** Session/1.x and statusless session/2.0 compatibility writer adapter. */
+export function republishArtifactLegacy(
+  projectRoot: string,
+  options: ArtifactRepublishOptions,
+): ArtifactRepublishResult {
+  const store = new SessionStore(projectRoot);
+  const initial = store.readSessionRecord(options.sessionId);
+  if (initial.schema_version === 'session/3.0') {
+    throw new Error('artifact republish for session/3.0 requires the v3 mutation adapter');
+  }
+  const bundle = store.readBundle(options.sessionId);
+  const preparedRequest = prepareTransitionMutation({
+    session: bundle.session,
+    currentFence: store.readSessionFence(options.sessionId),
+    operation: 'artifact-republish',
+    subject: { session_id: options.sessionId, run_id: null, chain_step_id: null },
+    payload: {
+      artifact_id: options.artifactId,
+      consumer_command: options.consumerCommand,
+      alias: options.alias,
+      assessment_hash: options.assessmentHash,
+      expected_artifact_revision: options.expectedArtifactRevision,
+      expected_session_revision: options.expectedSessionRevision,
+      participant_id: options.participantId,
+      actor_id: options.actorId,
+      reason: options.reason,
+      evidence_refs: [...options.evidenceRefs],
+    },
+    options: {
+      requestId: options.requestId,
+      expectedIdentityRevision: bundle.session.identity_revision,
+      expectedActivityRevision: options.expectedSessionRevision,
+    },
+  });
+  const evaluated = store.replayOrApplyArtifactRepublishTransition(options.sessionId, preparedRequest.request, (draft, tx) => {
+    assertTransitionMutationRevisions(draft.session, preparedRequest.options);
+    if (draft.session.status !== 'running') {
+      throw new Error(`Session ${options.sessionId} is ${draft.session.status}; artifact republish requires running`);
+    }
+    if (draft.artifacts.revision !== options.expectedArtifactRevision) {
+      throw new TransitionReceiptError(
+        'FENCE_CONFLICT',
+        `artifact registry revision conflict: expected ${options.expectedArtifactRevision}, current ${draft.artifacts.revision}`,
+      );
+    }
+    const prepared = prepareArtifactRepublish(projectRoot, options, store);
+    const consumerSteps = draft.session.orchestration.chain.filter(step => (
+      step.command === options.consumerCommand && step.status === 'pending'
+    ));
+    if (consumerSteps.length !== 1 || consumerSteps[0].run_id !== null) {
+      throw new Error('artifact republish requires one pending consumer step with no allocated Run');
+    }
+    if (draft.session.active_run_id && consumerSteps[0].run_id === draft.session.active_run_id) {
+      throw new Error('artifact republish cannot target an active consumer Run');
+    }
+    if (draft.artifacts.artifacts[prepared.artifactId]) {
+      throw new Error(`derived Artifact already exists: ${prepared.artifactId}`);
+    }
+    const sequence = readdirSync(join(store.sessionDir(options.sessionId), 'runs'), { withFileTypes: true })
+      .filter(item => item.isDirectory())
+      .map(item => {
+        try { return store.readRun(options.sessionId, item.name).sequence; } catch { return 0; }
+      })
+      .reduce((max, value) => Math.max(max, value), 0) + 1;
+    const compatibilityRun: CommandRun = {
+      schema_version: 'command-run/1.3',
+      session_id: options.sessionId,
+      run_id: prepared.compatibilityRunId,
+      sequence,
+      parent_run_id: prepared.sourceArtifact.producer_run_id,
+      command: {
+        name: 'artifact-compatibility-republish',
+        version: '1.0',
+        source_path: '',
+        content_hash: sha256('artifact-compatibility-republish/1.0'),
+        resolved_prompt_hash: sha256('artifact-compatibility-republish/1.0'),
+        contract_hash: sha256('artifact-compatibility-republish/1.0'),
+      },
+      status: 'sealed',
+      input: {
+        args: [prepared.assessment.assessment_hash],
+        consumes: [options.artifactId],
+        context_identity_revision: draft.session.identity_revision,
+        reuse_assessments: [],
+      },
+      gate_ids: [],
+      output: {
+        produces: [prepared.artifactId],
+        primary_artifact_id: prepared.artifact.role === 'primary' ? prepared.artifactId : null,
+        verdict: 'ready',
+      },
+      handoff: {
+        schema_version: 'command-handoff/1.0',
+        producer_run_id: prepared.compatibilityRunId,
+        command: 'artifact-compatibility-republish',
+        verdict: 'ready',
+        summary: `Republished ${options.artifactId} for ${options.consumerCommand}:${options.alias}`,
+        constraints: [], decisions: [], concerns: [], artifact_refs: [prepared.artifactId], next: [],
+        details: { assessment_hash: prepared.assessment.assessment_hash },
+      },
+      started_at: prepared.recordedAt,
+      completed_at: prepared.recordedAt,
+      sealed_at: prepared.recordedAt,
+      chain_step_id: prepared.compatibilityStepId,
+      resolved_platform: 'claude',
+      goal_binding: null,
+      checkpoint_expectation: null,
+      checkpoint: null,
+      retry_fence: null,
+      contract_snapshot: null,
+      guidance_snapshot: null,
+      creation_decision: null,
+      creation_provenance: {
+        schema_version: 'creation-provenance/1.0',
+        provenance: 'verified-v1',
+        source_workspace_id: null,
+        source_session_id: options.sessionId,
+        source_run_id: prepared.sourceArtifact.producer_run_id,
+        imported_artifact_hashes: [prepared.assessment.source.artifact_hash],
+      },
+      transition: null,
+    };
+    const consumerIndex = draft.session.orchestration.chain.findIndex(step => step === consumerSteps[0]);
+    draft.session.orchestration.chain.splice(consumerIndex, 0, {
+      step_id: prepared.compatibilityStepId,
+      command: 'artifact-compatibility-republish',
+      status: 'sealed',
+      run_id: prepared.compatibilityRunId,
+      inserted_by: options.actorId,
+      decision_ref: `receipts/artifact-republish/${prepared.compatibilityRunId}.json`,
+    });
+    draft.artifacts.artifacts[prepared.artifactId] = prepared.artifact;
+    draft.artifacts.aliases[options.alias] = prepared.artifactId;
+    draft.artifacts.revision++;
+    draft.session.activity_revision++;
+    tx.writeText(join(store.sessionDir(options.sessionId), prepared.artifactPath), prepared.content, 0o600);
+    tx.writeRun(compatibilityRun);
+    const receipt = createArtifactRepublishReceipt({
+      receipt_id: prepared.compatibilityRunId,
+      request_id: options.requestId,
+      session_id: options.sessionId,
+      assessment_hash: prepared.assessment.assessment_hash,
+      source_artifact_id: options.artifactId,
+      source_artifact_hash: prepared.assessment.source.artifact_hash,
+      artifact_id: prepared.artifactId,
+      artifact_hash: `sha256:${prepared.artifact.content_hash}`,
+      artifact_path: prepared.artifactPath,
+      derived_from: [options.artifactId],
+      consumer: prepared.assessment.consumer,
+      transformed_metadata: {
+        role: { from: prepared.assessment.source.raw_slot.role, to: prepared.assessment.consumer.slot.role },
+        alias: { from: prepared.assessment.source.raw_slot.alias, to: prepared.assessment.consumer.slot.alias },
+      },
+      compatibility_run_id: prepared.compatibilityRunId,
+      compatibility_step_id: prepared.compatibilityStepId,
+      artifact_registry_revision_before: options.expectedArtifactRevision,
+      artifact_registry_revision_after: draft.artifacts.revision,
+      session_revision_before: options.expectedSessionRevision,
+      session_revision_after: draft.session.activity_revision,
+      actor_id: options.actorId,
+      participant_id: options.participantId,
+      reason: options.reason,
+      evidence_refs: [...new Set(options.evidenceRefs)].sort(),
+      recorded_at: prepared.recordedAt,
+    });
+    tx.writeJson(
+      artifactRepublishReceiptPath(store, options.sessionId, receipt.receipt_id),
+      receipt,
+      artifactRepublishReceiptSchema,
+      0o600,
+    );
+    const value: Omit<ArtifactRepublishResult, 'replay'> = {
+      session_id: options.sessionId,
+      source_artifact_id: options.artifactId,
+      artifact_id: prepared.artifactId,
+      compatibility_run_id: prepared.compatibilityRunId,
+      compatibility_step_id: prepared.compatibilityStepId,
+      assessment_hash: prepared.assessment.assessment_hash,
+      artifact_registry_revision: draft.artifacts.revision,
+      session_revision: draft.session.activity_revision,
+      receipt,
+    };
+    return createTransitionOutcome({
+      request_id: preparedRequest.request.request_id,
+      request_hash: preparedRequest.request.normalized_request_hash,
+      operation: 'artifact-republish',
+      status: 'applied',
+      applied_at: prepared.recordedAt,
+      subject: preparedRequest.request.subject,
+      postconditions: {
+        session_identity_revision: draft.session.identity_revision,
+        session_activity_revision: draft.session.activity_revision,
+        active_run_id: draft.session.active_run_id,
+        run_hash: null,
+        artifact_registry_revision: draft.artifacts.revision,
+      },
+      exit_code: 0,
+      error_code: null,
+      result: { receipt, value },
+    });
+  });
+  const value = structuredClone(evaluated.outcome.result.value) as Omit<ArtifactRepublishResult, 'replay'>;
+  return {
+    ...value,
+    replay: {
+      status: evaluated.replayed ? 'replayed' : 'applied',
+      transition_id: evaluated.outcome.transition_id,
+    },
   };
 }
 
@@ -1099,6 +1706,16 @@ export function resolveArgumentRequirements(
     const required = definition.required === true;
     const missing = required && value === undefined && fallback === undefined;
     const strict = source.contract.arguments.find(item => item.name === definition.name);
+    // Positional enums in argument-hints are type/format hints (`<target:
+    // file|dir|HEAD>` means the value may be any of those kinds, not a literal
+    // enum), and choices containing `<...>` placeholders are open-ended — only
+    // literal named enums (e.g. `--mode quick|standard|deep`) are validated.
+    const invalid = definition.type === 'enum'
+      && definition.positional !== true
+      && value !== undefined
+      && definition.choices !== undefined
+      && !definition.choices.some(c => c.includes('<'))
+      && !definition.choices.includes(String(value));
     return {
       name: definition.name,
       required,
@@ -1106,9 +1723,50 @@ export function resolveArgumentRequirements(
       type: definition.type,
       source: sourceKind,
       ...(fallback !== undefined ? { default: fallback } : {}),
+      ...(invalid ? { invalid: String(value), choices: definition.choices } : {}),
       ...(missing ? { question: strict?.question ?? `Provide required argument ${definition.name}` } : {}),
     };
   });
+}
+
+/**
+ * Flag-like arguments that match no declared definition. Used to enrich
+ * missing/invalid-argument errors so a typo is not silently swallowed.
+ */
+export function resolveUnknownFlags(projectRoot: string, command: string, args: string[]): string[] {
+  const source = resolveCommandSource(projectRoot, command);
+  const definitions = argumentDefinitions(source);
+  const byName = new Map(definitions.map(item => [item.name, item]));
+  const flags: string[] = [];
+  for (const value of args) {
+    if (!value.startsWith('-')) continue;
+    const name = value.indexOf('=') === -1 ? value : value.slice(0, value.indexOf('='));
+    if (!byName.has(name)) flags.push(name);
+  }
+  return flags;
+}
+
+function assertDispatchableCommand(projectRoot: string, command: string, args: string[]): void {
+  const content = resolveStepContent(projectRoot, command);
+  if (!content.prepare && !content.workflow) {
+    throw new Error('no prepare or workflow content');
+  }
+  const requirements = resolveArgumentRequirements(projectRoot, command, args);
+  const missing = requirements.filter(item => item.required && item.missing);
+  const invalid = requirements.filter(item => item.invalid !== undefined);
+  const unknown = resolveUnknownFlags(projectRoot, command, args);
+  if (missing.length > 0 || invalid.length > 0) {
+    const unknownNote = unknown.length > 0 ? ` Unknown flags: ${unknown.join(', ')}.` : '';
+    throw new Error(
+      (missing.length > 0
+        ? `missing required arguments: ${missing.map(item => `${item.name}: ${item.question}`).join('; ')}`
+        : '')
+      + (invalid.length > 0
+        ? `invalid values: ${invalid.map(item => `${item.name}="${item.invalid}" (expected one of: ${(item.choices ?? []).join(', ')} or an explicit definition)`).join('; ')}`
+        : '')
+      + unknownNote,
+    );
+  }
 }
 
 /** Compact a full Handoff into the shared PrevHandoff summary shape. */
@@ -1161,6 +1819,20 @@ function handoffByLatestCompleted(store: SessionStore, session: SessionState): P
   } catch {
     return null;
   }
+}
+
+/** Fast-path-first handoff lookup: O(1) via latest_completed_run_id, fallback to full scan. */
+function handoffBeforeSequence(store: SessionStore, session: SessionState, beforeSequence: number): PrevHandoff | null {
+  const latestId = session.latest_completed_run_id;
+  if (latestId) {
+    try {
+      const latestRun = store.readRun(session.session_id, latestId);
+      if (latestRun.handoff && latestRun.sequence < beforeSequence) {
+        return toPrevHandoff(latestRun.handoff);
+      }
+    } catch { /* fall through to scan */ }
+  }
+  return latestHandoffBefore(store, session.session_id, beforeSequence);
 }
 
 /**
@@ -1587,7 +2259,7 @@ function ensureRunShell(store: SessionStore, sessionId: string, runId: string): 
   mkdirSync(join(runDir, 'work'), { recursive: true });
   const report = join(runDir, 'report.md');
   if (!existsSync(report)) {
-    writeFileSync(report, '---\nverdict: ready\nsummary: ""\nconstraints: []\ndecisions: []\ncaveats: []\nopen_questions: []\nnext: []\n---\n## 摘要\n\n## 结论/Verdict\n\n## 讨论/复盘\n\n## 产物\n\n## 交接/Next\n', 'utf8');
+    writeFileSync(report, '---\nverdict: ready\nsummary: ""\nconstraints: []\ndecisions: []\nconcerns: []\nnext: []\ndetails: {}\n---\n## 摘要\n\n## 结论/Verdict\n\n## 讨论/复盘\n\n## 产物\n\n## 交接/Next\n', 'utf8');
   }
   writeFileSync(join(runDir, 'diagnostics.ndjson'), '', { flag: 'a' });
   return runDir;
@@ -1636,11 +2308,20 @@ export function createRun(options: CreateRunOptions): CreateRunResult {
   }
   const argumentRequirements = resolveArgumentRequirements(options.projectRoot, options.command, options.args ?? []);
   const missingArguments = argumentRequirements.filter(item => item.required && item.missing);
-  if (missingArguments.length > 0) {
+  const invalidArguments = argumentRequirements.filter(item => item.invalid !== undefined);
+  const unknownFlags = resolveUnknownFlags(options.projectRoot, options.command, options.args ?? []);
+  if (missingArguments.length > 0 || invalidArguments.length > 0) {
+    const unknownNote = unknownFlags.length > 0 ? ` Unknown flags: ${unknownFlags.join(', ')}.` : '';
     throw new Error(
-      `Missing required arguments: ${missingArguments.map(item => `${item.name} (${item.question})`).join(', ')}. `
+      (missingArguments.length > 0
+        ? `Missing required arguments: ${missingArguments.map(item => `${item.name} (${item.question})`).join(', ')}. `
+        : '')
+      + (invalidArguments.length > 0
+        ? `Invalid values: ${invalidArguments.map(item => `${item.name}="${item.invalid}" (expected one of: ${(item.choices ?? []).join(', ')} or an explicit definition)`).join(', ')}. `
+        : '')
       + '--intent is Session metadata only and does not fill command arguments; '
-      + 'pass required inputs with --arg <value> or -- <args...>.',
+      + 'pass required inputs with --arg <value> or -- <args...>.'
+      + unknownNote,
     );
   }
 
@@ -1652,15 +2333,76 @@ export function createRun(options: CreateRunOptions): CreateRunResult {
   );
   const { sessionId, topicIdentity } = resolvedSession;
   const sessionExisted = store.sessionExists(sessionId);
+  const selectedStatusless = sessionExisted
+    ? store.readSessionRecord(sessionId).schema_version === 'session/2.0'
+    : store.sessionSchemaSelection().writer === 'session/2.0';
+  if (selectedStatusless && !options.execution) {
+    throw new Error('session/2.0 Run creation requires an explicit current Execution binding');
+  }
+  if (sessionExisted) {
+    const selected = store.readSessionRecord(sessionId);
+    if (selected.schema_version === 'session/2.0' && selected.archived_at) {
+      throw new Error(`Session ${sessionId} is archived`);
+    }
+  }
   if (!sessionExisted) {
     store.createSession(sessionId, intent, {
       command: options.command,
       intentIdentity,
-      ...(options.sessionProvenance ? { provenance: options.sessionProvenance } : {}),
+      ...(options.sessionProvenance
+        ? { provenance: sessionProvenanceSchema.parse(options.sessionProvenance) }
+        : {}),
     });
   }
 
-  return store.update(sessionId, (bundle, tx) => {
+  const applyCreate = (
+    bundle: SessionBundle,
+    tx: StoreTransaction,
+    execution: ExecutionState | null,
+  ): CreateRunResult => {
+    const authorityIdentityRevision = bundle.session.identity_revision;
+    const authorityActivityRevision = bundle.session.activity_revision;
+    if (execution) {
+      if (execution.session_id !== sessionId || execution.generation !== options.execution!.generation) {
+        throw new Error('Execution generation or Session binding changed');
+      }
+      if (execution.status !== 'active') throw new Error(`Execution ${execution.execution_id} is ${execution.status}`);
+      if (execution.active_run_id) throw new Error(`Execution has active Run ${execution.active_run_id}`);
+      assertExecutionLease(execution.lease, options.execution!.lease);
+
+      if (options.execution!.operation === 'next') {
+        let reconciled = false;
+        for (const step of bundle.session.orchestration.chain) {
+          if (step.status !== 'running' || !step.run_id) continue;
+          const status = tx.readRun(step.run_id).status;
+          if (status !== 'sealed' && status !== 'completed') continue;
+          step.status = 'sealed';
+          reconciled = true;
+        }
+        if (reconciled) bundle.session.activity_revision++;
+      }
+    }
+    if (options.requireRunningSession) {
+      if (!selectedStatusless && bundle.session.status !== 'running') {
+        throw new Error(`Session ${sessionId} is ${bundle.session.status}; publishing requires running status`);
+      }
+      if (options.expectedIdentityRevision !== undefined
+        && authorityIdentityRevision !== options.expectedIdentityRevision) {
+        throw new TransitionReceiptError(
+          'FENCE_CONFLICT',
+          `stale identity revision: expected ${options.expectedIdentityRevision}, current ${authorityIdentityRevision}`,
+        );
+      }
+      if (options.expectedActivityRevision !== undefined
+        && authorityActivityRevision !== options.expectedActivityRevision) {
+        throw new TransitionReceiptError(
+          'FENCE_CONFLICT',
+          `stale activity revision: expected ${options.expectedActivityRevision}, current ${authorityActivityRevision}`,
+        );
+      }
+      const conflict = checkLease(bundle.session.orchestration.lease, options.leaseClaim ?? {});
+      if (conflict) throw new Error(conflict);
+    }
     if (bundle.session.active_run_id) {
       throw new Error(
         `Session ${sessionId} already has active Run ${bundle.session.active_run_id}; `
@@ -1684,25 +2426,25 @@ export function createRun(options: CreateRunOptions): CreateRunResult {
       chainStepId = retryStep.step_id;
     }
     if (chainStepId) {
-      if (bundle.session.status !== 'running') {
+      if (!selectedStatusless && bundle.session.status !== 'running') {
         throw new Error(`Session ${sessionId} is ${bundle.session.status}; chain dispatch requires running status`);
       }
       if (
         options.expectedActivityRevision !== undefined
-        && bundle.session.activity_revision !== options.expectedActivityRevision
+        && authorityActivityRevision !== options.expectedActivityRevision
       ) {
         throw new Error(
           `Session ${sessionId} changed after run-next preflight `
-          + `(expected activity_revision ${options.expectedActivityRevision}, got ${bundle.session.activity_revision})`,
+          + `(expected activity_revision ${options.expectedActivityRevision}, got ${authorityActivityRevision})`,
         );
       }
       if (
         options.expectedIdentityRevision !== undefined
-        && bundle.session.identity_revision !== options.expectedIdentityRevision
+        && authorityIdentityRevision !== options.expectedIdentityRevision
       ) {
         throw new Error(
           `Session ${sessionId} identity changed after run-next preflight `
-          + `(expected identity_revision ${options.expectedIdentityRevision}, got ${bundle.session.identity_revision})`,
+          + `(expected identity_revision ${options.expectedIdentityRevision}, got ${authorityIdentityRevision})`,
         );
       }
       const conflict = checkLease(bundle.session.orchestration.lease, options.leaseClaim ?? {});
@@ -1767,19 +2509,38 @@ export function createRun(options: CreateRunOptions): CreateRunResult {
       if (pending.chain_step_id !== boundStep.step_id) throw new Error('retry token chain step mismatch');
       if (pending.command !== options.command) throw new Error(`retry token is for command ${pending.command}`);
       if (Date.parse(pending.expires_at) <= Date.now()) throw new Error('retry token has expired');
-      const parent = tx.readRun(pending.parent_run_id);
+      const parent = execution
+        ? tx.readExecutionRun(pending.parent_run_id)
+        : tx.readRun(pending.parent_run_id);
       if (parent.session_id !== sessionId) throw new Error(`retry parent belongs to Session ${parent.session_id}`);
       if (parent.command.name !== options.command) throw new Error('retry parent command mismatch');
       if (parent.chain_step_id !== boundStep.step_id) throw new Error('retry parent chain step mismatch');
       if (parent.sequence >= sequence) throw new Error('retry parent must precede the replacement Run');
+      if (parent.status !== 'sealed') throw new Error('retry parent must be sealed before replacement allocation');
       if (!parent.retry_fence || parent.retry_fence.token !== pending.token) {
         throw new Error('retry parent fence does not match the pending token');
       }
       if (parent.retry_fence.consumed_at) throw new Error('retry token was already consumed');
-      parent.retry_fence.consumed_at = now;
+      const priorReplacements = execution
+        ? tx.listBoundExecutionRuns(execution.execution_id, execution.generation)
+        : (() => {
+            const runsRoot = join(store.sessionDir(sessionId), 'runs');
+            if (!existsSync(runsRoot)) return [];
+            return readdirSync(runsRoot)
+              .filter(candidate => existsSync(join(runsRoot, candidate, 'run.json')))
+              .map(candidate => tx.readRun(candidate));
+          })();
+      if (priorReplacements.some(candidate => (
+        candidate.parent_run_id === parent.run_id
+        && candidate.chain_step_id === boundStep!.step_id
+        && candidate.command.name === options.command
+        && candidate.creation_decision?.mode === 'retry'
+        && candidate.creation_provenance.source_run_id === parent.run_id
+      ))) {
+        throw new Error('retry token was already consumed by a replacement Run');
+      }
       boundStep.pending_retry = null;
       parentRunId = parent.run_id;
-      tx.writeRun(parent);
     } else if (options.retryToken) {
       throw new Error('invalid, expired, or already-consumed retry token');
     }
@@ -1792,8 +2553,21 @@ export function createRun(options: CreateRunOptions): CreateRunResult {
       bundle.artifacts,
       bundle.gates,
       source.contract,
+      options.command,
     );
     const upstream = reuse.upstream;
+    const reuseWarnings: string[] = [];
+    for (const consume of source.contract.consumes) {
+      if (!consume.alias) continue;
+      const aliasTargetId = bundle.artifacts.aliases[consume.alias];
+      const kindMatches = Object.values(bundle.artifacts.artifacts)
+        .filter(artifact => artifact.kind === consume.kind);
+      if (aliasTargetId === undefined && kindMatches.length > 0) {
+        reuseWarnings.push(
+          `consume alias '${consume.alias}' (kind=${consume.kind}) is not registered in this Session while ${kindMatches.length} ${consume.kind} artifact(s) exist; the upstream cannot bind — check the producer alias`,
+        );
+      }
+    }
     const guidanceSnapshot = buildGuidanceSnapshot(options.projectRoot, options.command, source);
     const creationMode = options.creation?.mode
       ?? (options.retryToken ? 'retry' : boundStep ? 'chain-next' : 'explicit-create');
@@ -1844,7 +2618,7 @@ export function createRun(options: CreateRunOptions): CreateRunResult {
         args: options.args ?? [],
         consumes: Object.values(upstream).map(item => item.artifact_id),
         context_identity_revision: bundle.session.identity_revision,
-        reuse_assessments: reuse.assessments,
+        reuse_assessments: reuse.assessments as ReuseAssessment[],
       },
       gate_ids: gateIds,
       output: { produces: [], primary_artifact_id: null, verdict: null },
@@ -1886,8 +2660,25 @@ export function createRun(options: CreateRunOptions): CreateRunResult {
     bundle.session.activity_revision++;
     bundle.session.status = 'running';
     bundle.gates.revision++;
-    tx.writeRun(run);
-    const nextState = ensureSessionProjection(freshState, projectSessionEntry(bundle.session));
+    if (execution) {
+      const boundRun: CommandRunV14 = {
+        ...run,
+        schema_version: 'command-run/1.4',
+        execution_id: execution.execution_id,
+        generation: execution.generation,
+      };
+      tx.writeRun(boundRun);
+      execution.active_run_id = runId;
+      execution.chain = structuredClone(bundle.session.orchestration.chain);
+      execution.decision_points = structuredClone(bundle.session.orchestration.decision_points);
+      execution.revision++;
+    } else {
+      tx.writeRun(run);
+    }
+    const nextState = ensureSessionProjection(
+      freshState,
+      projectSessionEntry(bundle.session, store.readSessionRecord(sessionId)),
+    );
     tx.writeJson(join(store.workflowRoot, 'state.json'), nextState);
     const runDirRel = canonicalRunDir(store, sessionId, runId);
     const hasWorkflow = resolveStepContent(options.projectRoot, options.command).workflow !== null;
@@ -1903,9 +2694,11 @@ export function createRun(options: CreateRunOptions): CreateRunResult {
       upstream,
       topic_identity: bundle.session.topic_identity ?? topicIdentity,
       reuse_assessments: reuse.assessments,
+      reuse_warnings: reuseWarnings,
       argument_requirements: argumentRequirements,
       entry_gates: entrySummary,
       entry_blockers: entryBlockers,
+      session_created: !sessionExisted && Boolean(options.sessionId),
       next: {
         command: `maestro run brief ${runId}`,
         reason: entrySummary.blocking.length > 0
@@ -1913,12 +2706,144 @@ export function createRun(options: CreateRunOptions): CreateRunResult {
           : readyReason,
       },
     };
+  };
+
+  if (!options.execution) {
+    return store.update(sessionId, (bundle, tx) => applyCreate(bundle, tx, null));
+  }
+
+  const executionOptions = options.execution;
+  const requestId = executionOptions.requestId?.trim();
+  if (!requestId) throw new Error('request id is required');
+  return store.updateExecutionAtomic(
+    sessionId,
+    executionOptions.executionId,
+    executionOptions.expectedRevision,
+    (bundle, execution, tx) => {
+      const activeRunPath = execution.active_run_id
+        ? join(store.runDir(sessionId, execution.active_run_id), 'run.json')
+        : null;
+      const before: TransitionFenceV11 = {
+        session_identity_revision: bundle.session.identity_revision,
+        session_activity_revision: bundle.session.activity_revision,
+        execution_id: execution.execution_id,
+        execution_generation: execution.generation,
+        execution_revision: execution.revision,
+        execution_status: execution.status,
+        lease_epoch: execution.lease?.epoch ?? null,
+        active_run_id: execution.active_run_id,
+        run_hash: activeRunPath && existsSync(activeRunPath) ? protocolSha256(readFileSync(activeRunPath)) : null,
+        artifact_registry_revision: bundle.artifacts.revision,
+      };
+      const records = tx.listExecutionTransitions(execution.execution_id);
+      const existing = records.find(record => record.request_id === requestId) ?? null;
+      const operation = executionOptions.operation ?? 'create';
+      const request = createTransitionRequestV11({
+        request_id: requestId,
+        operation,
+        subject: {
+          session_id: sessionId,
+          execution_id: execution.execution_id,
+          generation: execution.generation,
+          run_id: null,
+          chain_step_id: options.chainStepId ?? null,
+        },
+        requested_at: existing?.payload.requested_at ?? localISO(),
+        preconditions: existing?.payload.preconditions ?? before,
+        payload: {
+          command: options.command,
+          intent: options.intent ?? null,
+          topic: options.topic ?? null,
+          args: options.args ?? [],
+          platform: options.platform ?? null,
+          chain_step_id: options.chainStepId ?? null,
+          retry_token: options.retryToken ?? null,
+          creation: options.creation ?? null,
+          lease: {
+            owner_id: executionOptions.lease.ownerId,
+            owner_kind: executionOptions.lease.ownerKind,
+            epoch: executionOptions.lease.epoch,
+            lease_id_hash: hashExecutionLeaseId(executionOptions.lease.leaseId),
+          },
+        },
+      });
+      const evaluated = replayOrApplyTransitionV11(
+        records,
+        request,
+        before,
+        () => {
+          const value = applyCreate(bundle, tx, execution);
+          const runWrite = tx.writes.find(write => (
+            write.path === join(store.runDir(sessionId, value.run_id), 'run.json')
+          ));
+          const after: TransitionFenceV11 = {
+            session_identity_revision: bundle.session.identity_revision,
+            session_activity_revision: bundle.session.activity_revision,
+            execution_id: execution.execution_id,
+            execution_generation: execution.generation,
+            execution_revision: execution.revision,
+            execution_status: execution.status,
+            lease_epoch: execution.lease?.epoch ?? null,
+            active_run_id: execution.active_run_id,
+            run_hash: runWrite ? protocolSha256(`${JSON.stringify(runWrite.value, null, 2)}\n`) : null,
+            artifact_registry_revision: bundle.artifacts.revision,
+          };
+          return createTransitionOutcomeV11({
+            request_id: request.request_id,
+            request_hash: request.normalized_request_hash,
+            operation,
+            status: 'applied',
+            applied_at: localISO(),
+            subject: request.subject,
+            postconditions: after,
+            exit_code: 0,
+            error_code: null,
+            result: { value },
+          });
+        },
+        (record, history, current) => assertRunTransitionReplayEvidence(
+          store,
+          sessionId,
+          record,
+          history,
+          current,
+        ),
+      );
+      if (!evaluated.replayed) tx.writeExecutionTransition(execution.execution_id, evaluated.record);
+      return structuredClone(evaluated.outcome.result.value) as CreateRunResult;
+    },
+    { replayRequestId: requestId },
+  );
+}
+
+export interface CreateExecutionRunOptions extends Omit<CreateRunOptions, 'execution'> {
+  executionId: string;
+  generation: number;
+  expectedExecutionRevision: number;
+  executionLease: ExecutionLeaseClaim;
+  requestId: string;
+  transitionOperation?: 'create' | 'next';
+}
+
+/** Execution-aware create; legacy createRun remains an unleased command-run/1.3 API. */
+export function createExecutionRun(options: CreateExecutionRunOptions): CreateRunResult {
+  return createRun({
+    ...options,
+    execution: {
+      executionId: options.executionId,
+      generation: options.generation,
+      expectedRevision: options.expectedExecutionRevision,
+      lease: options.executionLease,
+      requestId: options.requestId,
+      operation: options.transitionOperation,
+    },
+    requireRunningSession: true,
   });
 }
 
 /**
  * Finish-work checklist injected when `run check` finds every gate clean.
- * Core norms (handoff frontmatter, knowledge record, verdict semantics) are
+ * Core norms (handoff frontmatter, knowledge staging, verdict semantics) are
  * runtime-built; workflow frontmatter `finish:` lines extend them. Mirrors the
  * core/extension split of the injection builder (inject.ts).
  */
@@ -1927,8 +2852,14 @@ function buildFinishChecklist(projectRoot: string, run: CommandRun, frontmatter:
   if (!frontmatter.summary.trim()) {
     lines.push('report.md handoff frontmatter is empty — fill summary (plus concerns/decisions) before completing; the sealed handoff is derived from it.');
   }
-  lines.push('Record new knowledge before sealing: constraints/rules → `maestro spec add`, reusable recipes/pitfalls → `/maestro-manage knowledge capture`; skip only if nothing new was learned.');
-  lines.push('Mark every spec/knowhow entry this Run contradicted: replaced by a better rule → `maestro spec add ... --json` then `maestro spec supersede <old-sid> --by <new-sid>`; both sides defensible → `maestro spec conflict mark <file> <line> --note "<reason>"` and let `/maestro-manage knowledge audit` adjudicate. Never seal with a known-stale entry unmarked.');
+  lines.push(`Stage knowledge before sealing: put accepted decisions and locked constraints in report.md frontmatter (completion stages them automatically); reusable recipes/pitfalls → \`maestro knowledge stage knowhow "<title>" --content-file <path|-> --run ${run.run_id}\` (write content to a temp file or stdin, never inline). Quality bar: stage only pitfalls ("when doing X, watch out for Y because Z"), failure lessons, non-trivial trade-offs, or newly established prescriptive constraints — never process notes, re-descriptions of existing patterns, trivial operations, or raw tool/log traces; zero candidates is a legitimate outcome. Do not write project spec/knowhow directly from routine Run completion.`);
+  lines.push('Session-source candidates (staged with `--session`, run-less work) do not require Session seal under `session/2.0`: promotion revalidates immutable candidate version/content hash, exact Session activity revision, evidence roots/hash, candidate snapshot, and a fresh session reconciliation receipt for the current corpus fingerprint. `maestro knowledge review <session-id> --refresh` repairs missing/stale receipts.');
+  lines.push(`Inspect the reconciliation receipt created by this check. For every candidate that needs a disposition, present it to the user first — title, content summary, evidence anchors, evidence-backed matches (id + title), and your recommended disposition (unique|duplicate|related|conflict|supersede + target) with a one-line rationale — then collect the user's decision and only then run \`maestro knowledge promote <session-id> --resolve <candidate-id> --as <choice> [--target <knowledge-id>] --reason "<reason>"\` (inline TOCTOU fence + resolve + promote). Never hand the raw promote command to the user as the whole task. Unresolved items may be sealed but cannot be promoted.`);
+  lines.push(`Record stronger knowledge relations during staging: \`maestro knowledge stage <target> "<title>" --content-file <path|-> --run ${run.run_id} --signal cited|validated|contradicted --signal-ids <knowledge-ids>\`. A search result or automatic injection is exposure only; it is not evidence of use.`);
+  lines.push(`Attribute search hits before citing: \`maestro knowledge record <knowledge-ids...> --signal consumed|cited|validated|contradicted --source search --run ${run.run_id}\` records pure attribution without staging a candidate (use stage --signal only when a candidate is intended); record/load turn exposure into evidence.`);
+  lines.push('Teammate/agent outputs worth reusing: put conclusions into report.md frontmatter decisions/constraints (seal stages them automatically) or stage explicitly with `maestro knowledge stage knowhow "<title>" --content-file <path|-> --run ' + run.run_id + '` — never let sub-agent findings vanish at process exit.');
+  lines.push('Negative knowledge: failed tests, rejected reviews, or contradicted practices → stage a counterexample candidate (scope + failure reason + alternative) with `maestro knowledge stage knowhow "<title>" --content-file <path|-> --run ' + run.run_id + '` so future runs stop repeating them.');
+  lines.push('For contradicted canonical knowledge, record the contradiction before sealing. After candidate review/promotion, replace stale rules with `maestro spec supersede <old-sid> --by <new-sid>`; if both rules remain valid, use `maestro spec conflict mark <file> <line> --note "<reason>"`. Never leave a known-stale entry unmarked.');
   lines.push('Pick the verdict honestly: `done` (clean) or `done-with-concerns` (works but carries caveats — list every caveat in concerns).');
   lines.push(...resolveStepContent(projectRoot, run.command.name).finish);
   return lines;
@@ -1958,45 +2889,39 @@ function checkNext(
   };
 }
 
-function validateStrictArtifactContract(
-  runDir: string,
-  contract: CommandContract,
-  scan: ArtifactScanResult,
-): void {
-  if (contract.contract_version !== 2 && contract.contract_version !== 2.1) return;
-  for (const expected of contract.produces) {
-    const expectedPath = expected.path?.replaceAll('\\', '/').replace(/^\.\//, '');
-    const actual = expectedPath
-      ? scan.artifacts.find(item => relative(runDir, item.absolutePath).replaceAll('\\', '/') === expectedPath)
-      : undefined;
-    if (!actual) {
-      if (expected.required) scan.errors.push(`Missing required contract v2 output: ${expectedPath ?? expected.kind}`);
-      continue;
-    }
-    if (actual.kind !== expected.kind) {
-      scan.errors.push(`${expectedPath}: _meta.kind ${actual.kind} does not match contract ${expected.kind}`);
-    }
-    if (expected.schema && actual.schemaVersion !== expected.schema) {
-      scan.errors.push(`${expectedPath}: _meta.schema ${actual.schemaVersion} does not match contract ${expected.schema}`);
-    }
-    const expectedRole = expected.role ?? (expected.primary ? 'primary' : 'attachment');
-    if (actual.role !== expectedRole) {
-      scan.errors.push(`${expectedPath}: _meta.role ${actual.role} does not match contract ${expectedRole}`);
-    }
-  }
-}
-
-export function checkRun(projectRoot: string, runId: string, sessionId?: string): CheckRunResult {
+export function checkRun(
+  projectRoot: string,
+  runId: string,
+  sessionId?: string,
+  options: CheckRunOptions = {},
+): CheckRunResult {
   const store = new SessionStore(projectRoot);
   const located = store.findRun(runId, sessionId);
+  const initialBundle = store.readBundle(located.sessionId);
   const resolvedContract = contractForRun(projectRoot, located.run);
-  const reuse = revalidateRunReuse(projectRoot, store, store.readBundle(located.sessionId), located.run);
+  const reuse = revalidateRunReuse(projectRoot, store, initialBundle, located.run, resolvedContract.contract);
   const scan = scanOutputs(
     store.runDir(located.sessionId, runId),
     store.sessionDir(located.sessionId),
     resolvedContract.contract,
   );
-  validateStrictArtifactContract(store.runDir(located.sessionId, runId), resolvedContract.contract, scan);
+  validateStrictArtifactContract(
+    store.runDir(located.sessionId, runId),
+    resolvedContract.contract,
+    scan,
+    options,
+  );
+  validateChainProposalArtifacts(
+    store.runDir(located.sessionId, runId),
+    initialBundle,
+    located.run,
+    resolvedContract.contract,
+    scan,
+    {
+      preflight: located.run.status !== 'sealed',
+      validateCommand: (command, args) => assertDispatchableCommand(projectRoot, command, args),
+    },
+  );
   scan.errors.push(...reuse.blockers);
   if (resolvedContract.warning) scan.warnings.unshift(resolvedContract.warning);
   const frontmatter = readReportFrontmatter(store.runDir(located.sessionId, runId));
@@ -2004,6 +2929,12 @@ export function checkRun(projectRoot: string, runId: string, sessionId?: string)
   if (located.run.status === 'sealed') {
     const bundle = store.readBundle(located.sessionId);
     validateSealedIntegrity(located.run, bundle.artifacts, scan);
+    const knowledgeReconciliation = readKnowledgeReconciliation(
+      store,
+      located.sessionId,
+      runId,
+      true,
+    );
     return {
       session_id: located.sessionId,
       run_id: runId,
@@ -2015,9 +2946,23 @@ export function checkRun(projectRoot: string, runId: string, sessionId?: string)
       upstream: reuse.upstream,
       reuse_assessments: reuse.assessments,
       next: checkNext(located.sessionId, runId, 'sealed', true),
+      ...(knowledgeReconciliation
+        ? { knowledge_reconciliation: reconciliationSummary(knowledgeReconciliation) }
+        : {}),
     };
   }
 
+  const knowledgeReconciliation = reconcileRunKnowledgeSync(
+    projectRoot,
+    located.sessionId,
+    runId,
+    frontmatter,
+  );
+  if (knowledgeReconciliation.counts.review_required > 0) {
+    scan.warnings.push(
+      `${knowledgeReconciliation.counts.review_required} knowledge candidate(s) require review before promotion`,
+    );
+  }
   return store.update(located.sessionId, (bundle, tx) => {
     const run = tx.readRun(runId);
     const context: EvaluationContext = {
@@ -2033,7 +2978,19 @@ export function checkRun(projectRoot: string, runId: string, sessionId?: string)
     const gates = evaluateRunGates(bundle, run, context);
     if (run.status === 'created') run.status = 'running';
     tx.writeRun(run);
+    writeKnowledgeReconciliation(store, tx, knowledgeReconciliation);
     const clean = gates.blocking.length === 0 && scan.errors.length === 0;
+    // Write a .check_clean marker so `session done --check-clean` can skip
+    // gate re-evaluation when outputs/ has not been modified since.
+    if (clean) {
+      try {
+        writeFileSync(
+          join(store.runDir(located.sessionId, runId), '.check_clean'),
+          JSON.stringify({ at: new Date().toISOString(), gates_revision: bundle.gates.revision }),
+          'utf8',
+        );
+      } catch { /* best-effort marker */ }
+    }
     return {
       session_id: located.sessionId,
       run_id: runId,
@@ -2045,6 +3002,7 @@ export function checkRun(projectRoot: string, runId: string, sessionId?: string)
       upstream: reuse.upstream,
       reuse_assessments: reuse.assessments,
       next: checkNext(located.sessionId, runId, run.status, clean),
+      knowledge_reconciliation: reconciliationSummary(knowledgeReconciliation),
       ...(clean ? { finish: buildFinishChecklist(projectRoot, run, frontmatter) } : {}),
     };
   });
@@ -2172,10 +3130,51 @@ export function sealSession(projectRoot: string, sessionId: string, summary = ''
 
   const state = projectState(projectRoot);
   const bundle = store.readBundle(sessionId);
-  const projected = ensureSessionProjection(state, projectSessionEntry(bundle.session), false);
+  const projected = ensureSessionProjection(
+    state,
+    projectSessionEntry(bundle.session, store.readSessionRecord(sessionId)),
+    false,
+  );
   if (projected.active_session_id === sessionId) projected.active_session_id = null;
   writeStateJson(projectRoot, projected);
-  return result;
+  // K6: refresh the session-level reconciliation receipt at seal time
+  // (isomorphic to the run-seal reconciliation write). Best-effort: a receipt
+  // failure must not block sealing — the missing receipt keeps promotion of
+  // session-origin candidates fail-closed until review --refresh repairs it.
+  try {
+    const sessionReceipt = ensureSessionKnowledgeReconciliation(projectRoot, sessionId);
+    persistSessionKnowledgeReconciliation(projectRoot, sessionReceipt);
+  } catch {
+    // Missing receipt → promotion of session-origin candidates fails closed.
+  }
+  const knowledge = summarizeSessionKnowledge(projectRoot, sessionId, { readOnly: true });
+  const reconciliation = knowledge.candidates.map(candidate => {
+    const policies = reconciliationForCandidate(
+      projectRoot,
+      sessionId,
+      candidate.run_ids,
+      candidate.candidate_id,
+    );
+    return policies.find(item => item.promotion_eligibility === 'suppressed')
+      ?? policies.find(item => item.promotion_eligibility === 'review_required')
+      ?? policies[0]
+      ?? null;
+  });
+  return {
+    ...result,
+    knowledge: {
+      pending_candidates: knowledge.candidates.filter(candidate => candidate.status === 'pending').length,
+      promoting_candidates: knowledge.candidates.filter(candidate => candidate.status === 'promoting').length,
+      promoted_candidates: knowledge.candidates.filter(candidate => candidate.status === 'promoted').length,
+      review_required_candidates: reconciliation
+        .filter(candidate => candidate?.promotion_eligibility === 'review_required').length,
+      conflict_candidates: reconciliation
+        .filter(candidate => candidate?.disposition === 'potential_conflict').length,
+      suppressed_candidates: reconciliation
+        .filter(candidate => candidate?.promotion_eligibility === 'suppressed').length,
+      review_command: `maestro knowledge review ${sessionId}`,
+    },
+  };
 }
 
 function artifactId(sequence: number, ordinal: number): string {
@@ -2199,7 +3198,7 @@ function registerArtifacts(
     if (previous?.status === 'sealed' && previous.content_hash !== item.contentHash) {
       throw new Error(`Sealed artifact is immutable: ${item.relativePath}`);
     }
-    const alias = item.alias ?? (item.role === 'primary' ? defaultAlias(item.kind, run.command.name) : undefined);
+    const alias = item.alias ?? (item.role === 'primary' ? defaultArtifactAlias(item.kind, run.command.name) : undefined);
     const priorAliasId = alias ? registry.aliases[alias] : undefined;
     if (priorAliasId && priorAliasId !== id) {
       const prior = registry.artifacts[priorAliasId];
@@ -2280,6 +3279,8 @@ function recordCompletionEvidence(
 function inferExtraMediaType(path: string): string {
   switch (extname(path).toLowerCase()) {
     case '.json': return 'application/json';
+    case '.ndjson':
+    case '.jsonl': return 'application/x-ndjson';
     case '.md': return 'text/markdown';
     case '.yaml':
     case '.yml': return 'application/yaml';
@@ -2301,15 +3302,26 @@ function discoverExtraArtifacts(
   paths: string[],
 ): DiscoveredArtifact[] {
   const runDirAbs = resolvePath(runDir);
+  const withinRun = (p: string) => p === runDirAbs || p.startsWith(runDirAbs + sep);
   const discovered: DiscoveredArtifact[] = [];
   for (const rel of paths) {
-    const abs = resolvePath(runDir, rel);
-    const within = abs === runDirAbs || abs.startsWith(runDirAbs + sep);
-    if (!within) {
-      throw new Error(`--artifact path escapes run directory: ${rel}`);
+    let abs = resolvePath(runDir, rel);
+    if (!existsSync(abs) && !isAbsolute(rel)) {
+      // Callers habitually pass shell-CWD-relative paths. Accept that reading
+      // unambiguously: only when the run-relative target is missing AND the
+      // CWD-relative target exists inside the run directory.
+      const cwdAbs = resolvePath(rel);
+      if (existsSync(cwdAbs) && withinRun(cwdAbs)) abs = cwdAbs;
+    }
+    if (!withinRun(abs)) {
+      throw new Error(
+        `--artifact path escapes run directory: ${rel} (resolved to ${abs}; relative paths resolve against the run directory ${runDirAbs} — pass a run-relative or absolute path inside it)`,
+      );
     }
     if (!existsSync(abs)) {
-      throw new Error(`--artifact path does not exist: ${rel}`);
+      throw new Error(
+        `--artifact path does not exist: ${rel} (resolved to ${abs}; relative paths resolve against the run directory ${runDirAbs}, not the shell CWD — pass a run-relative or absolute path)`,
+      );
     }
     const stat = statSync(abs);
     const data = stat.isDirectory() ? null : readFileSync(abs);
@@ -2416,6 +3428,8 @@ export interface PreparedCompleteInputs {
   options: CompleteRunOptions;
   files: PreparedCompleteFile[];
   completionInputSnapshot: CompleteInputSnapshot;
+  chainProposal: ValidatedChainProposal | null;
+  knowledgeReconciliation: KnowledgeReconciliation;
 }
 
 type CompleteAuthorityResult = Omit<CompleteRunResult, 'transition'>;
@@ -2450,7 +3464,7 @@ function completeInputSnapshot(runDir: string, paths: readonly string[]): Comple
 
 function assertCompleteReplayInputs(
   runDir: string,
-  record: PersistedTransitionRecord,
+  record: { request_id: string; payload: { payload: Record<string, unknown> } },
 ): void {
   const parsed = completeInputSnapshotSchema.safeParse(record.payload.payload.completion_input_snapshot);
   if (!parsed.success) {
@@ -2475,6 +3489,112 @@ function assertCompleteReplayInputs(
   }
 }
 
+type ReviewDisposition = 'PASS' | 'WARN' | 'BLOCK';
+
+function unknownRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function contractProducesReviewFindings(contract: CommandContract): boolean {
+  return contract.produces.some(output => (
+    output.kind === 'review-findings' || output.schema === 'review-findings/1.0'
+  ));
+}
+
+function readPrimaryReviewDisposition(
+  scan: ArtifactScanResult,
+  contract: CommandContract,
+  runDir: string,
+): ReviewDisposition | null {
+  const declared = contract.produces.filter(output => (
+    (output.kind === 'review-findings' || output.schema === 'review-findings/1.0')
+    && output.role === 'primary'
+  ));
+  if (declared.length !== 1 || !declared[0].path) {
+    scan.errors.push(`review contract must declare exactly one primary review-findings output path; found ${declared.length}`);
+    return null;
+  }
+  const declaredPath = declared[0].path.replaceAll('\\', '/').replace(/^\.\//, '');
+  const matches = scan.artifacts.filter(item => (
+    relative(runDir, item.absolutePath).replaceAll('\\', '/') === declaredPath
+  ));
+  if (matches.length !== 1) {
+    scan.errors.push(`${declaredPath}: expected exactly one canonical review-findings artifact; found ${matches.length}`);
+    return null;
+  }
+  const artifact = matches[0];
+  try {
+    const parsed = unknownRecord(JSON.parse(readFileSync(artifact.absolutePath, 'utf8')) as unknown);
+    const verdict = typeof parsed?.verdict === 'string' ? parsed.verdict.trim().toUpperCase() : '';
+    if (verdict === 'PASS' || verdict === 'WARN' || verdict === 'BLOCK') return verdict;
+    scan.errors.push(`${artifact.relativePath}: review-findings verdict must be PASS, WARN, or BLOCK`);
+  } catch (error) {
+    scan.errors.push(`${artifact.relativePath}: cannot read review-findings verdict (${(error as Error).message})`);
+  }
+  return null;
+}
+
+function immediateFormalDecision(bundle: SessionBundle, chainIndex: number): string | null {
+  if (chainIndex < 0) return null;
+  const current = bundle.session.orchestration.chain[chainIndex];
+  const step = bundle.session.orchestration.chain[chainIndex + 1];
+  if (!step || step.status !== 'pending' || !step.decision_ref) return null;
+  const point = bundle.session.orchestration.decision_points.find(candidate => (
+    candidate.point_id === step.decision_ref
+    && candidate.status === 'pending'
+    && (candidate.after_step_id === null || candidate.after_step_id === current.step_id)
+  ));
+  return point?.point_id ?? null;
+}
+
+function reviewRepairProposalErrors(
+  selected: ValidatedChainProposal,
+  bundle: SessionBundle,
+  chainIndex: number,
+): string[] {
+  const current = bundle.session.orchestration.chain[chainIndex];
+  if (!current) return ['current review chain step is missing'];
+  const operations = selected.proposal.operations;
+  const expected = [
+    { command: 'review', stage: 'repair-review', args: undefined },
+    { command: 'execute', stage: 'repair-execute', args: undefined },
+    { command: 'plan', stage: 'repair-plan', args: '--gaps' },
+  ] as const;
+  if (operations.length !== expected.length) {
+    return [`expected exactly ${expected.length} insert operations, received ${operations.length}`];
+  }
+  const errors: string[] = [];
+  const currentGoal = current.goal_ref ?? null;
+  for (const [index, expectedOperation] of expected.entries()) {
+    const operation = operations[index];
+    if (operation.op !== 'insert') {
+      errors.push(`operations[${index}] must be insert`);
+      continue;
+    }
+    if (operation.after !== current.step_id) {
+      errors.push(`operations[${index}].after must be ${current.step_id}`);
+    }
+    if (operation.command !== expectedOperation.command) {
+      errors.push(`operations[${index}].command must be ${expectedOperation.command}`);
+    }
+    if ((operation.stage ?? null) !== expectedOperation.stage) {
+      errors.push(`operations[${index}].stage must be ${expectedOperation.stage}`);
+    }
+    if (operation.args !== expectedOperation.args) {
+      errors.push(`operations[${index}].args must be ${expectedOperation.args ?? 'omitted'}`);
+    }
+    if ((operation.goal_ref ?? null) !== currentGoal) {
+      errors.push(`operations[${index}].goal_ref must inherit ${currentGoal ?? 'no goal binding'}`);
+    }
+    if (operation.decision_ref !== undefined && operation.decision_ref !== null) {
+      errors.push(`operations[${index}].decision_ref must be omitted`);
+    }
+  }
+  return errors;
+}
+
 /** Prepare report/output/state inputs and immutable hashes outside the transition lock. */
 export function prepareCompleteInputs(
   projectRoot: string,
@@ -2485,12 +3605,13 @@ export function prepareCompleteInputs(
   const store = new SessionStore(projectRoot);
   const located = store.findRun(runId, sessionId);
   const replayRequestId = options.transition?.requestId?.trim();
+  let replayRecord: PersistedTransitionRecord | undefined;
   if (replayRequestId) {
-    const replayRecord = store.readBundle(located.sessionId).session.requests.find(item => (
+    const candidate = store.readBundle(located.sessionId).session.requests.find(item => (
       item.type === 'transition' && 'outcome' in item && item.request_id === replayRequestId
     ));
-    if (replayRecord) {
-      const validated = validatePersistedTransitionRecord(replayRecord);
+    if (candidate) {
+      const validated = validatePersistedTransitionRecord(candidate);
       if (validated.payload.operation !== 'complete'
         || validated.payload.subject.session_id !== located.sessionId
         || validated.payload.subject.run_id !== runId) {
@@ -2503,14 +3624,42 @@ export function prepareCompleteInputs(
         store.runDir(located.sessionId, runId),
         validated,
       );
+      replayRecord = validated;
     }
   }
   const resolved = contractForRun(projectRoot, located.run);
   const runDir = store.runDir(located.sessionId, runId);
   const sessionDir = store.sessionDir(located.sessionId);
+  const bundle = store.readBundle(located.sessionId);
   const scan = scanOutputs(runDir, sessionDir, resolved.contract);
+  let chainProposal: ValidatedChainProposal | null = null;
   if (!isFailureVerdict(options.chainVerdict)) {
+    // The skip option is diagnostic-only on `run check`; completion must never
+    // use it to weaken the authority that is about to be sealed and published.
     validateStrictArtifactContract(runDir, resolved.contract, scan);
+    const proposals = validateChainProposalArtifacts(
+      runDir,
+      bundle,
+      located.run,
+      resolved.contract,
+      scan,
+      {
+        preflight: replayRecord === undefined,
+        validateCommand: (command, args) => assertDispatchableCommand(projectRoot, command, args),
+      },
+    );
+    if (options.chainProposal && options.applyChainProposal) {
+      throw new Error('use either chainProposal or applyChainProposal, not both');
+    }
+    if (options.chainProposal) chainProposal = selectChainProposal(runDir, options.chainProposal, proposals);
+    if (options.applyChainProposal) {
+      if (proposals.length !== 1) {
+        throw new Error(`--apply-proposal requires exactly one valid chain proposal (found ${proposals.length})`);
+      }
+      chainProposal = proposals[0];
+    }
+  } else if (options.chainProposal || options.applyChainProposal) {
+    throw new Error('chain proposal cannot be applied with needs-retry or blocked verdict');
   }
   const extraArtifacts = discoverExtraArtifacts(runDir, sessionDir, options.extraArtifacts ?? []);
   const completionPaths = [
@@ -2527,6 +3676,53 @@ export function prepareCompleteInputs(
     ...scan.artifacts.map(item => item.absolutePath),
     ...extraArtifacts.map(item => item.absolutePath),
   ]);
+  const frontmatter = readReportFrontmatter(runDir);
+  const chainIndex = bundle.session.orchestration.chain.findIndex(step => step.run_id === runId);
+  const immediateDecision = immediateFormalDecision(bundle, chainIndex);
+  const reviewContract = contractProducesReviewFindings(resolved.contract);
+  const reviewDisposition = reviewContract
+    ? readPrimaryReviewDisposition(scan, resolved.contract, runDir)
+    : null;
+  if (reviewDisposition) {
+    const expectedReportVerdict = reviewDisposition === 'PASS'
+      ? 'ready'
+      : reviewDisposition === 'WARN'
+        ? 'ready_with_concerns'
+        : 'blocked';
+    if (frontmatter.verdict !== expectedReportVerdict) {
+      scan.errors.push(
+        `review-findings verdict ${reviewDisposition} conflicts with report verdict ${frontmatter.verdict}`,
+      );
+    }
+    if (reviewDisposition === 'BLOCK' && immediateDecision && chainProposal) {
+      scan.errors.push(
+        `review BLOCK must not apply a chain proposal when formal decision ${immediateDecision} owns routing`,
+      );
+    } else if (reviewDisposition === 'BLOCK' && chainProposal) {
+      const routeErrors = reviewRepairProposalErrors(chainProposal, bundle, chainIndex);
+      if (routeErrors.length > 0) {
+        scan.errors.push(`review BLOCK repair proposal is incomplete: ${routeErrors.join('; ')}`);
+      }
+    } else if (reviewDisposition !== 'BLOCK' && chainProposal) {
+      scan.errors.push(`review verdict ${reviewDisposition} must not modify the chain`);
+    }
+  }
+  if (!isFailureVerdict(options.chainVerdict) && chainIndex >= 0) {
+    if (frontmatter.verdict === 'failed') {
+      scan.errors.push('report verdict failed requires a needs-retry or blocked chain verdict');
+    } else if ((reviewDisposition === 'BLOCK' || (!reviewContract && frontmatter.verdict === 'blocked'))
+      && !chainProposal && !immediateDecision) {
+      scan.errors.push(
+        'report verdict blocked cannot advance the existing chain without an applied chain proposal or immediate decision node',
+      );
+    }
+  }
+  const knowledgeReconciliation = ensureKnowledgeReconciliation(
+    projectRoot,
+    located.sessionId,
+    runId,
+    frontmatter,
+  );
   return {
     projectRoot,
     sessionId: located.sessionId,
@@ -2538,11 +3734,13 @@ export function prepareCompleteInputs(
     warning: resolved.warning,
     scan,
     extraArtifacts,
-    frontmatter: readReportFrontmatter(runDir),
+    frontmatter,
     state: projectState(projectRoot),
     options,
     files: [...paths].sort().map(path => ({ path, hash: preparedPathHash(path) })),
     completionInputSnapshot: completeInputSnapshot(runDir, completionPaths),
+    chainProposal,
+    knowledgeReconciliation,
   };
 }
 
@@ -2552,6 +3750,18 @@ function revalidatePreparedCompleteInputs(prepared: PreparedCompleteInputs): voi
       throw new TransitionReceiptError('FENCE_CONFLICT', `prepared completion input changed: ${file.path}`);
     }
   }
+  if (!isKnowledgeReconciliationFresh(
+    prepared.projectRoot,
+    prepared.sessionId,
+    prepared.runId,
+    prepared.knowledgeReconciliation,
+    prepared.frontmatter,
+  )) {
+    throw new TransitionReceiptError(
+      'FENCE_CONFLICT',
+      'knowledge candidates or project corpus changed after reconciliation',
+    );
+  }
 }
 
 /** Apply complete authority using only the prepared inputs and StoreTransaction. */
@@ -2559,9 +3769,41 @@ export function applyCompleteRunMutation(
   draft: SessionBundle,
   tx: StoreTransaction,
   prepared: PreparedCompleteInputs,
+  executionOverride?: ExecutionState,
 ): { result: CompleteAuthorityResult; run: CommandRun } {
   const { store, runId, projectRoot, scan, frontmatter, options } = prepared;
   const run = tx.readRun(runId);
+  const execution = options.execution ? executionOverride ?? tx.readExecution(options.execution.executionId) : null;
+  if (execution) {
+    if (execution.generation !== options.execution!.generation) {
+      throw new Error('Execution generation changed');
+    }
+    if (execution.revision !== options.execution!.expectedRevision) {
+      throw new Error(
+        `execution revision conflict: expected ${options.execution!.expectedRevision}, current ${execution.revision}`,
+      );
+    }
+    if (execution.status !== 'active') throw new Error(`Execution ${execution.execution_id} is ${execution.status}`);
+    if (execution.active_run_id !== runId) {
+      throw new Error(`Execution active Run is ${execution.active_run_id ?? '<none>'}; expected ${runId}`);
+    }
+    assertExecutionLease(execution.lease, options.execution!.lease);
+    const bound = tx.readExecutionRun(runId);
+    if (bound.execution_id !== execution.execution_id || bound.generation !== execution.generation) {
+      throw new Error('command-run/1.4 Execution binding changed');
+    }
+  }
+  if (options.requireRunningSession) {
+    const statusless = store.readSessionRecord(prepared.sessionId).schema_version === 'session/2.0';
+    if (!statusless && draft.session.status !== 'running') {
+      throw new Error(`Session ${prepared.sessionId} is ${draft.session.status}; publishing requires running status`);
+    }
+    if (draft.session.active_run_id !== runId) {
+      throw new Error(
+        `Session ${prepared.sessionId} active Run is ${draft.session.active_run_id ?? '<none>'}; expected ${runId}`,
+      );
+    }
+  }
   if (run.status === 'sealed') throw new Error(`Run ${runId} is sealed and immutable`);
   const reuse = revalidateRunReuse(projectRoot, store, draft, run);
   scan.errors.push(...reuse.blockers.filter(blocker => !scan.errors.includes(blocker)));
@@ -2586,9 +3828,23 @@ export function applyCompleteRunMutation(
   draft.session.activity_revision++;
   if (blocked) {
     run.status = 'blocked';
-    tx.writeRun(run);
+    if (execution) {
+      tx.writeRun({
+        ...run,
+        schema_version: 'command-run/1.4',
+        execution_id: execution.execution_id,
+        generation: execution.generation,
+      });
+      execution.active_run_id = runId;
+      execution.chain = structuredClone(draft.session.orchestration.chain);
+      execution.decision_points = structuredClone(draft.session.orchestration.decision_points);
+      execution.revision++;
+    } else {
+      tx.writeRun(run);
+    }
     tx.writeJson(join(store.workflowRoot, 'state.json'), ensureSessionProjection(
-      prepared.state, projectSessionEntry(draft.session),
+      prepared.state,
+      projectSessionEntry(draft.session, store.readSessionRecord(prepared.sessionId)),
     ));
     return {
       run,
@@ -2603,6 +3859,8 @@ export function applyCompleteRunMutation(
           preconditions: ['repair blocking outputs or gates', 'run check must report no blocking gates'],
         },
         chain_transition: null,
+        chain_proposal: null,
+        knowledge: null,
       },
     };
   }
@@ -2617,6 +3875,16 @@ export function applyCompleteRunMutation(
   }
   mergeNotesIntoConcerns(run.handoff, options.notes ?? []);
   mergeDecisionsIntoHandoff(run.handoff, options.decisions ?? []);
+  const knowledgeDelta = stageHandoffKnowledgeCandidates(store, tx, prepared.sessionId, run);
+  applyAutomaticKnowledgeSuppression(knowledgeDelta, prepared.knowledgeReconciliation);
+  if (knowledgeDelta) {
+    tx.writeJson(
+      runKnowledgeDeltaPath(store, prepared.sessionId, runId),
+      knowledgeDelta,
+      runKnowledgeDeltaSchema,
+    );
+  }
+  writeKnowledgeReconciliation(store, tx, prepared.knowledgeReconciliation);
   run.status = 'sealed';
   run.sealed_at = localISO();
   draft.session.latest_completed_run_id = runId;
@@ -2624,10 +3892,36 @@ export function applyCompleteRunMutation(
   const chainTransition = options.chainVerdict
     ? applyChainVerdict(draft.session, run, options.chainVerdict)
     : null;
+  const chainProposal = prepared.chainProposal
+    ? {
+        proposal_id: prepared.chainProposal.proposal.proposal_id,
+        path: prepared.chainProposal.path,
+        status: 'applied' as const,
+        operations: applyChainProposal(draft, prepared.chainProposal.proposal),
+      }
+    : null;
   summarizeRegistry(draft.gates);
-  tx.writeRun(run);
+  if (execution && chainTransition && draft.session.status === 'paused') {
+    execution.status = 'paused';
+    execution.lease = null;
+  }
+  if (execution) {
+    tx.writeRun({
+      ...run,
+      schema_version: 'command-run/1.4',
+      execution_id: execution.execution_id,
+      generation: execution.generation,
+    });
+    execution.active_run_id = null;
+    execution.chain = structuredClone(draft.session.orchestration.chain);
+    execution.decision_points = structuredClone(draft.session.orchestration.decision_points);
+    execution.revision++;
+  } else {
+    tx.writeRun(run);
+  }
   tx.writeJson(join(store.workflowRoot, 'state.json'), ensureSessionProjection(
-    prepared.state, projectSessionEntry(draft.session),
+    prepared.state,
+    projectSessionEntry(draft.session, store.readSessionRecord(prepared.sessionId)),
   ));
   return {
     run,
@@ -2636,7 +3930,13 @@ export function applyCompleteRunMutation(
       artifacts: scanSummary(scan), warnings: scan.warnings, errors: scan.errors,
       upstream: reuse.upstream, reuse_assessments: reuse.assessments, sealed: true,
       primary_artifact_id: primary, artifact_ids: artifactIds,
-      next_action: completionNextPointer(draft.session, runId), chain_transition: chainTransition,
+      next_action: completionNextPointer(draft.session, runId),
+      chain_transition: chainTransition,
+      chain_proposal: chainProposal,
+      knowledge: {
+        ...knowledgeCandidateReceipt(prepared.sessionId, knowledgeDelta),
+        reconciliation: reconciliationSummary(prepared.knowledgeReconciliation),
+      },
     },
   };
 }
@@ -2647,8 +3947,169 @@ export function completeRun(
   sessionId?: string,
   options: CompleteRunOptions = {},
 ): CompleteRunResult {
+  if (!options.execution) {
+    const authorityStore = new SessionStore(projectRoot);
+    const located = authorityStore.findRun(runId, sessionId);
+    const openExecution = authorityStore.readOpenExecution(located.sessionId);
+    if (openExecution) {
+      throw new Error(
+        `Session ${located.sessionId} has open Execution ${openExecution.execution_id}; execution binding and lease are required`,
+      );
+    }
+  } else {
+    const authorityStore = new SessionStore(projectRoot);
+    const located = authorityStore.findRun(runId, sessionId);
+    const requestId = options.execution.requestId?.trim();
+    if (!requestId) throw new Error('request id is required');
+    const existing = authorityStore.readExecutionTransition(
+      located.sessionId,
+      options.execution.executionId,
+      requestId,
+    );
+    if (!existing) {
+      const execution = authorityStore.readExecution(located.sessionId, options.execution.executionId);
+      if (execution.generation !== options.execution.generation) throw new Error('Execution generation changed');
+      if (execution.revision !== options.execution.expectedRevision) {
+        throw new Error(
+          `execution revision conflict: expected ${options.execution.expectedRevision}, current ${execution.revision}`,
+        );
+      }
+      if (execution.status !== 'active') throw new Error(`Execution ${execution.execution_id} is ${execution.status}`);
+      if (execution.active_run_id !== runId) {
+        throw new Error(`Execution active Run is ${execution.active_run_id ?? '<none>'}; expected ${runId}`);
+      }
+      assertExecutionLease(execution.lease, options.execution.lease);
+      const bound = authorityStore.readExecutionRun(located.sessionId, runId);
+      if (bound.execution_id !== execution.execution_id || bound.generation !== execution.generation) {
+        throw new Error('command-run/1.4 Execution binding changed');
+      }
+    }
+  }
   const preparedInputs = prepareCompleteInputs(projectRoot, runId, sessionId, options);
   const { store } = preparedInputs;
+  if (options.execution) {
+    const executionOptions = options.execution;
+    const requestId = executionOptions.requestId?.trim();
+    if (!requestId) throw new Error('request id is required');
+    const evaluated = store.updateExecutionAtomic(
+      preparedInputs.sessionId,
+      executionOptions.executionId,
+      executionOptions.expectedRevision,
+      (draft, execution, tx) => {
+        const runPath = join(store.runDir(preparedInputs.sessionId, runId), 'run.json');
+        const before: TransitionFenceV11 = {
+          session_identity_revision: draft.session.identity_revision,
+          session_activity_revision: draft.session.activity_revision,
+          execution_id: execution.execution_id,
+          execution_generation: execution.generation,
+          execution_revision: execution.revision,
+          execution_status: execution.status,
+          lease_epoch: execution.lease?.epoch ?? null,
+          active_run_id: execution.active_run_id,
+          run_hash: existsSync(runPath) ? protocolSha256(readFileSync(runPath)) : null,
+          artifact_registry_revision: draft.artifacts.revision,
+        };
+        const records = tx.listExecutionTransitions(execution.execution_id);
+        const existing = records.find(record => record.request_id === requestId) ?? null;
+        if (existing) assertCompleteReplayInputs(preparedInputs.runDir, existing);
+        const request = createTransitionRequestV11({
+          request_id: requestId,
+          operation: 'complete',
+          subject: {
+            session_id: preparedInputs.sessionId,
+            execution_id: execution.execution_id,
+            generation: execution.generation,
+            run_id: runId,
+            chain_step_id: store.readRun(preparedInputs.sessionId, runId).chain_step_id,
+          },
+          requested_at: existing?.payload.requested_at ?? localISO(),
+          preconditions: existing?.payload.preconditions ?? before,
+          payload: {
+            run_id: runId,
+            notes: options.notes ?? [],
+            extra_artifacts: options.extraArtifacts ?? [],
+            summary_fallback: options.summaryFallback ?? null,
+            decisions: options.decisions ?? [],
+            chain_verdict: options.chainVerdict ?? null,
+            skip_artifact_metadata_validation: options.skipArtifactMetadataValidation ?? false,
+            chain_proposal: preparedInputs.chainProposal
+              ? {
+                  path: preparedInputs.chainProposal.path,
+                  proposal_id: preparedInputs.chainProposal.proposal.proposal_id,
+                  content_hash: preparedInputs.chainProposal.artifact.contentHash,
+                }
+              : null,
+            completion_input_snapshot: existing?.payload.payload.completion_input_snapshot
+              ?? preparedInputs.completionInputSnapshot,
+            lease: {
+              owner_id: executionOptions.lease.ownerId,
+              owner_kind: executionOptions.lease.ownerKind,
+              epoch: executionOptions.lease.epoch,
+              lease_id_hash: hashExecutionLeaseId(executionOptions.lease.leaseId),
+            },
+          },
+        });
+        const receipt = replayOrApplyTransitionV11(
+          records,
+          request,
+          before,
+          () => {
+            revalidatePreparedCompleteInputs(preparedInputs);
+            const applied = applyCompleteRunMutation(draft, tx, preparedInputs, execution);
+            const persistedRun: CommandRunV14 = {
+              ...applied.run,
+              schema_version: 'command-run/1.4',
+              execution_id: execution.execution_id,
+              generation: execution.generation,
+            };
+            const after: TransitionFenceV11 = {
+              session_identity_revision: draft.session.identity_revision,
+              session_activity_revision: draft.session.activity_revision,
+              execution_id: execution.execution_id,
+              execution_generation: execution.generation,
+              execution_revision: execution.revision,
+              execution_status: execution.status,
+              lease_epoch: execution.lease?.epoch ?? null,
+              active_run_id: execution.active_run_id,
+              run_hash: protocolSha256(`${JSON.stringify(persistedRun, null, 2)}\n`),
+              artifact_registry_revision: draft.artifacts.revision,
+            };
+            return createTransitionOutcomeV11({
+              request_id: request.request_id,
+              request_hash: request.normalized_request_hash,
+              operation: 'complete',
+              status: 'applied',
+              applied_at: localISO(),
+              subject: request.subject,
+              postconditions: after,
+              exit_code: applied.result.sealed ? 0 : 1,
+              error_code: applied.result.sealed ? null : 'RUN_GATES_BLOCKING',
+              result: { value: applied.result },
+            });
+          },
+          (record, history, current) => assertRunTransitionReplayEvidence(
+            store,
+            preparedInputs.sessionId,
+            record,
+            history,
+            current,
+          ),
+        );
+        if (!receipt.replayed) tx.writeExecutionTransition(execution.execution_id, receipt.record);
+        return {
+          value: structuredClone(receipt.outcome.result.value) as CompleteAuthorityResult,
+          transition: {
+            request_id: request.request_id,
+            transition_id: receipt.outcome.transition_id,
+            status: receipt.replayed ? 'replayed' as const : 'applied' as const,
+          },
+        };
+      },
+      { replayRequestId: requestId },
+    );
+    return { ...evaluated.value, transition: evaluated.transition };
+  }
+
   const initialBundle = store.readBundle(preparedInputs.sessionId);
   const requestId = options.transition?.requestId?.trim();
   const priorRecord = requestId
@@ -2668,6 +4129,14 @@ export function completeRun(
       summary_fallback: options.summaryFallback ?? null,
       decisions: options.decisions ?? [],
       chain_verdict: options.chainVerdict ?? null,
+      skip_artifact_metadata_validation: options.skipArtifactMetadataValidation ?? false,
+      chain_proposal: preparedInputs.chainProposal
+        ? {
+            path: preparedInputs.chainProposal.path,
+            proposal_id: preparedInputs.chainProposal.proposal.proposal_id,
+            content_hash: preparedInputs.chainProposal.artifact.contentHash,
+          }
+        : null,
       completion_input_snapshot: priorSnapshot ?? preparedInputs.completionInputSnapshot,
     },
     options: options.transition ?? { leaseClaim: options.leaseClaim },
@@ -2702,6 +4171,34 @@ export function completeRun(
     ...(structuredClone(evaluated.outcome.result.value) as CompleteAuthorityResult),
     transition: transitionMutationReceipt(prepared.request, evaluated.outcome, evaluated.replayed),
   };
+}
+
+export interface CompleteExecutionRunOptions extends Omit<CompleteRunOptions, 'execution'> {
+  sessionId: string;
+  executionId: string;
+  generation: number;
+  expectedExecutionRevision: number;
+  executionLease: ExecutionLeaseClaim;
+  requestId: string;
+}
+
+/** Execution-aware completion with command-run/1.4 binding and full lease fencing. */
+export function completeExecutionRun(
+  projectRoot: string,
+  runId: string,
+  options: CompleteExecutionRunOptions,
+): CompleteRunResult {
+  return completeRun(projectRoot, runId, options.sessionId, {
+    ...options,
+    requireRunningSession: true,
+    execution: {
+      executionId: options.executionId,
+      generation: options.generation,
+      expectedRevision: options.expectedExecutionRevision,
+      lease: options.executionLease,
+      requestId: options.requestId,
+    },
+  });
 }
 
 export interface CompleteVerdictOptions extends CompleteRunOptions {
@@ -2753,7 +4250,18 @@ function completionNextPointer(session: SessionState, completedRunId?: string): 
       preconditions: ['session_status=running', `chain_step=${reconcilable.step_id}`, `sealed_run_id=${completedRunId}`],
     };
   }
-  if (nextPendingIndex(session, true) !== null) {
+  const pendingExecution = nextPendingIndex(session, true);
+  const pendingDecision = nextPendingDecisionIndex(session);
+  if (pendingDecision !== null && (pendingExecution === null || pendingDecision < pendingExecution)) {
+    return {
+      suggest_only: true,
+      action: 'evaluate_decision',
+      command: `maestro run next --session ${sessionId}`,
+      reason: 'next node is a decision — the orchestrator evaluates it',
+      preconditions: ['session_status=running', 'decision remains pending'],
+    };
+  }
+  if (pendingExecution !== null) {
     return {
       suggest_only: true,
       action: 'dispatch_next',
@@ -2762,7 +4270,7 @@ function completionNextPointer(session: SessionState, completedRunId?: string): 
       preconditions: ['session_status=running', 'active_run_id=null', 'no earlier pending decision'],
     };
   }
-  if (nextPendingDecisionIndex(session) !== null) {
+  if (pendingDecision !== null) {
     return {
       suggest_only: true,
       action: 'evaluate_decision',
@@ -2828,7 +4336,11 @@ export function completeRunWithVerdict(
     summaryFallback: options.summaryFallback,
     decisions: options.decisions,
     leaseClaim: options.leaseClaim,
+    execution: options.execution,
     chainVerdict: verdict,
+    skipArtifactMetadataValidation: options.skipArtifactMetadataValidation,
+    chainProposal: options.chainProposal,
+    applyChainProposal: options.applyChainProposal,
     transition: options.transition,
   });
 
@@ -2899,17 +4411,38 @@ export function summarizeRunMode(raw: string): string {
 
 // ---------------------------------------------------------------------------
 // Goal mode — prepare frontmatter 声明 `goal: true` 的 step，加载时按平台附带
-// goal 创建模式。用户选择加载带标志的 step 即构成显式启用（满足 codex goal
-// 工具「仅用户明确要求时使用」的约束）。平台无对应工具时返回 null。
+// goal 设置提示词。Goal 工具是 LLM 内置工具，不检测可用性——LLM 能调就调。
 // ---------------------------------------------------------------------------
 
 const GOAL_MODE_BLOCKS: Partial<Record<TargetPlatform, string>> = {
+  claude: [
+    'Goal 模式（该 step 声明 goal 标志）：',
+    '1. Session 创建后，输出 Goal Prompt 供用户设定终止条件（非阻塞，继续执行）：',
+    '   📋 可随时复制以下 /goal 设定终止条件（执行过程中输入即可）：',
+    '   /goal 完成以下子目标：',
+    '   {逐条列出 decomposition.goals 中 status!=superseded 的 id: goal — 完成条件: done_when}',
+    '   直到 session 的 decomposition.goals 全部 done 且 chain steps 全部 sealed 才停。',
+    '2. 用户输入 /goal 后由 harness 管理终止条件，LLM 无需额外操作。',
+    '3. 若用户未输入 /goal，不影响执行流程。',
+  ].join('\n'),
   codex: [
-    'Goal 模式（该 step 声明 goal 标志，用户加载即为明确启用）：',
-    '1. Run 开始时 `create_goal({ objective: "{step}: <用户意图一句话>" })`（用户给定预算时加 `token_budget`）；单一活跃 goal，若已有未完成 goal 先收口。',
-    '2. 过程中可用 `get_goal({})` 查看已用时间与剩余 token 预算。',
-    '3. Run 完成时 `update_goal({ status: "complete" })`；同一阻塞持续无法推进时 `update_goal({ status: "blocked" })`。',
-    '4. 完成后向用户报告工具返回的最终 token 用量。',
+    'Goal 模式（该 step 声明 goal 标志）：',
+    '1. Session 创建后 call `create_goal({ objective: "{intent}", success_criteria: [decomposition.goals 各 done_when] })`；单一活跃 goal，若已有未完成 goal 先收口。',
+    '2. 过程中可用 `get_goal({})` 查看进度与剩余 token 预算。',
+    '3. 全部子目标完成时 `update_goal({ status: "complete" })`；阻塞时 `update_goal({ status: "blocked" })`。',
+    '4. 完成后向用户报告最终状态。',
+  ].join('\n'),
+  pi: [
+    'Goal 模式（该 step 声明 goal 标志）：',
+    '1. Session 创建后 call `goal({ action: "create", objective: "{intent}" })`。',
+    '2. 过程中可用 `goal({ action: "get" })` 查看状态。',
+    '3. 全部子目标完成时 `goal({ action: "complete", summary: "..." })`。',
+  ].join('\n'),
+  'agents-standard': [
+    'Goal 模式（该 step 声明 goal 标志）：',
+    '1. Session 创建后 call `create_task({ subject: "Session: {intent}", description: "完成条件: {decomposition.goals 各 done_when 汇总}" })` 作为 session goal。',
+    '2. 各子目标完成时 update_task 标记 completed。',
+    '3. 全部完成时 update_task session goal 为 completed。',
   ].join('\n'),
 };
 
@@ -2976,6 +4509,168 @@ function preparePreviousContext(
   };
 }
 
+function prepareStepHint(
+  step: SessionState['orchestration']['chain'][number],
+  index: number,
+): PrepareChainStepHint {
+  return {
+    index,
+    step_id: step.step_id,
+    command: step.command,
+    status: step.status,
+    run_id: step.run_id,
+    decision_ref: step.decision_ref,
+  };
+}
+
+function prepareSessionGuidance(
+  projectRoot: string,
+  sessionId: string,
+): PrepareSessionGuidance {
+  const store = new SessionStore(projectRoot);
+  if (!store.sessionExists(sessionId)) {
+    return {
+      session_id: sessionId,
+      status: 'missing',
+      active_run_id: null,
+      latest_completed_run_id: null,
+      current_step: null,
+      next_pending_step: null,
+      open_decisions: [],
+      reminders: [`Session ${sessionId} was not found; create or select a Session before relying on prior context.`],
+      next: { command: null, reason: 'Session not found' },
+    };
+  }
+
+  const session = store.readBundle(sessionId).session;
+  const knowledgeSummary = summarizeSessionKnowledge(projectRoot, sessionId, { readOnly: true });
+  const pendingKnowledge = knowledgeSummary.candidates
+    .filter(candidate => candidate.status === 'pending');
+  const promotingKnowledge = knowledgeSummary.candidates
+    .filter(candidate => candidate.status === 'promoting');
+  const reconciliationPolicies = knowledgeSummary.candidates.map(candidate => {
+    const policies = reconciliationForCandidate(
+      projectRoot,
+      sessionId,
+      candidate.run_ids,
+      candidate.candidate_id,
+    );
+    return {
+      missing: policies.length < candidate.run_ids.length,
+      policy: policies.find(item => item.promotion_eligibility === 'suppressed')
+        ?? policies.find(item => item.promotion_eligibility === 'review_required')
+        ?? policies[0]
+        ?? null,
+    };
+  });
+  const reviewRequiredKnowledge = reconciliationPolicies
+    .filter(item => item.policy?.promotion_eligibility === 'review_required').length;
+  const conflictKnowledge = reconciliationPolicies
+    .filter(item => item.policy?.disposition === 'potential_conflict').length;
+  const suppressedKnowledge = reconciliationPolicies
+    .filter(item => item.policy?.promotion_eligibility === 'suppressed').length;
+  const missingReconciliation = reconciliationPolicies.filter(item => item.missing).length;
+  const chain = session.orchestration.chain;
+  const activeIndex = activeStepIndex(session);
+  const nextExecutionIndex = nextPendingIndex(session, true);
+  const nextDecisionIndex = nextPendingDecisionIndex(session);
+  const currentStep = activeIndex === null ? null : prepareStepHint(chain[activeIndex], activeIndex);
+  const nextPendingStep = nextExecutionIndex === null ? null : prepareStepHint(chain[nextExecutionIndex], nextExecutionIndex);
+  const openDecisions = session.orchestration.decision_points
+    .filter(point => point.status !== 'passed')
+    .map(point => ({
+      point_id: point.point_id,
+      after_step_id: point.after_step_id,
+      status: point.status,
+      retry_count: point.retry_count,
+      max_retries: point.max_retries,
+      evidence_ref: point.evidence_ref,
+    }));
+  const reminders: string[] = [];
+  let next: PrepareSessionGuidance['next'];
+
+  if (session.status !== 'running') {
+    const escalated = openDecisions.filter(point => point.status === 'escalated').map(point => point.point_id);
+    if (escalated.length > 0) reminders.push(`Resolve escalated decision(s): ${escalated.join(', ')}.`);
+    next = {
+      command: null,
+      reason: `session ${session.session_id} is ${session.status}; resolve or resume Session authority before continuing`,
+    };
+  } else if (session.active_run_id && activeIndex === null) {
+    reminders.push(`Re-attach active Run ${session.active_run_id} instead of creating a new Run.`);
+    next = {
+      command: `maestro run brief ${session.active_run_id} --session ${session.session_id}`,
+      reason: `session already has active Run ${session.active_run_id}`,
+    };
+  } else if (activeIndex !== null) {
+    const activeRunId = chain[activeIndex].run_id ?? session.active_run_id;
+    reminders.push(`Finish active chain step ${chain[activeIndex].step_id} before dispatching another step.`);
+    next = {
+      command: activeRunId ? `maestro run check ${activeRunId}` : null,
+      reason: 'active chain step is still running',
+    };
+  } else if (nextDecisionIndex !== null && (nextExecutionIndex === null || nextDecisionIndex < nextExecutionIndex)) {
+    const decision = chain[nextDecisionIndex];
+    reminders.push(`Review decision node ${decision.decision_ref ?? decision.step_id} before later execution steps.`);
+    next = {
+      command: `maestro run next --session ${session.session_id}`,
+      reason: `next chain node is unresolved decision ${decision.decision_ref}`,
+    };
+  } else if (nextExecutionIndex !== null) {
+    next = {
+      command: `maestro run next --session ${session.session_id}`,
+      reason: `next pending step is ${chain[nextExecutionIndex].step_id}`,
+    };
+  } else {
+    reminders.push('No pending chain execution step remains; seal the Session after reviewing the knowledge candidate backlog.');
+    next = {
+      command: `maestro run seal-session ${session.session_id}`,
+      reason: 'chain has no pending execution steps',
+    };
+  }
+
+  if (openDecisions.length > 0 && !reminders.some(item => item.includes('decision'))) {
+    reminders.push(`Open decision(s): ${openDecisions.map(point => point.point_id).join(', ')}.`);
+  }
+  if (pendingKnowledge.length > 0 || promotingKnowledge.length > 0) {
+    reminders.push(
+      `Knowledge backlog: ${pendingKnowledge.length} pending, ${promotingKnowledge.length} promoting; `
+      + `review with \`maestro knowledge review ${sessionId}\`.`,
+    );
+  }
+  if (reviewRequiredKnowledge > 0 || missingReconciliation > 0) {
+    reminders.push(
+      `Knowledge reconciliation: ${reviewRequiredKnowledge} require review, `
+      + `${conflictKnowledge} potential conflicts, ${missingReconciliation} missing receipts; `
+      + `inspect with \`maestro knowledge review ${sessionId}\`.`,
+    );
+  }
+
+  return {
+    session_id: session.session_id,
+    status: session.status,
+    active_run_id: session.active_run_id,
+    latest_completed_run_id: session.latest_completed_run_id,
+    current_step: currentStep,
+    next_pending_step: nextPendingStep,
+    open_decisions: openDecisions,
+    knowledge: {
+      unique_inputs: knowledgeSummary.unique_inputs,
+      pending_candidates: pendingKnowledge.length,
+      corroborated_candidates: pendingKnowledge
+        .filter(candidate => candidate.stage === 'corroborated').length,
+      promoting_candidates: promotingKnowledge.length,
+      review_required_candidates: reviewRequiredKnowledge,
+      conflict_candidates: conflictKnowledge,
+      suppressed_candidates: suppressedKnowledge,
+      missing_reconciliation_candidates: missingReconciliation,
+      review_command: `maestro knowledge review ${sessionId}`,
+    },
+    reminders,
+    next,
+  };
+}
+
 export function prepareStep(
   projectRoot: string,
   stepName: string,
@@ -3000,6 +4695,7 @@ export function prepareStep(
   };
   if (sessionId) {
     result.previous = preparePreviousContext(projectRoot, stepName, sessionId);
+    result.session_guidance = prepareSessionGuidance(projectRoot, sessionId);
   }
   return result;
 }
@@ -3030,11 +4726,8 @@ export function briefRun(
   sessionId?: string,
   platform?: TargetPlatform,
 ): BriefRunResult {
-  const store = new SessionStore(projectRoot);
-  const context = resolveRunContext(projectRoot, runId, sessionId, platform);
-  const located = store.findRun(runId, context.session_id);
-  const bundle = store.readBundle(located.sessionId);
-  const run = located.run;
+  const context = resolveRunContextFull(projectRoot, runId, sessionId, platform);
+  const { store, bundle, run } = context;
   const resolvedPlatform = context.resolved_platform;
   const suffix = PLATFORM_SUFFIX[resolvedPlatform];
   const content = resolveStepContent(projectRoot, run.command.name, suffix);
@@ -3054,15 +4747,16 @@ export function briefRun(
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
 
-  const validatedReuse = revalidateRunReuse(projectRoot, store, bundle, run);
-  const upstream = validatedReuse.upstream;
-  const prevHandoff = latestHandoffBefore(store, located.sessionId, run.sequence);
-  const anchor = buildAnchorSections(store, bundle.session);
-  const freshness = guidanceFreshness(projectRoot, run);
   const resolvedContract = contractForRun(projectRoot, run);
   const contract = resolvedContract.contract;
+  const validatedReuse = revalidateRunReuse(projectRoot, store, bundle, run, contract);
+  const upstream = validatedReuse.upstream;
+  const prevHandoff = handoffBeforeSequence(store, bundle.session, run.sequence);
+  const anchor = buildAnchorSections(store, bundle.session);
+  const freshness = guidanceFreshness(projectRoot, run);
   const argumentRequirements = resolveArgumentRequirements(projectRoot, run.command.name, run.input.args);
   const reuseAssessments = validatedReuse.assessments;
+  const receiptBackedReuse = reuseAssessments.some(item => item.schema_version === 'reuse-assessment/1.1');
   const inputs: ExecutionContractView['inputs'] = contract.consumes.map(consume => ({
     kind: consume.kind,
     alias: consume.alias ?? null,
@@ -3095,8 +4789,10 @@ export function briefRun(
       } : null;
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
-  const executionContract: ExecutionContractView = executionContractV11Schema.parse({
-    schema_version: 'execution-contract/1.1',
+  const executionContract: ExecutionContractView = (
+    receiptBackedReuse ? executionContractV12Schema : executionContractV11Schema
+  ).parse({
+    schema_version: receiptBackedReuse ? 'execution-contract/1.2' : 'execution-contract/1.1',
     command: run.command.name,
     invocation: { args: [...run.input.args] },
     guidance: {
@@ -3126,16 +4822,17 @@ export function briefRun(
     },
     argument_requirements: argumentRequirements,
     reuse_assessments: reuseAssessments,
+    orchestration: { chain_effects: [...(contract.orchestration?.chain_effects ?? [])] },
   });
 
-  return briefResultV10Schema.parse({
-    schema_version: 'brief-result/1.0',
-    session_id: located.sessionId,
+  return (receiptBackedReuse ? briefResultV12Schema : briefResultV11Schema).parse({
+    schema_version: receiptBackedReuse ? 'brief-result/1.2' : 'brief-result/1.1',
+    session_id: context.session_id,
     run_id: runId,
     run_dir: context.run_dir,
     upstream,
     session: {
-      session_id: located.sessionId,
+      session_id: context.session_id,
       intent: bundle.session.intent,
       status: bundle.session.status,
       identity_revision: bundle.session.identity_revision,
@@ -3159,13 +4856,37 @@ export function briefRun(
         ? { path: content.workflow.path, content: tx(content.workflow.raw) }
         : null,
       run_mode: content.runMode
-        ? { path: content.runMode.path, content: tx(content.runMode.raw) }
+        ? { path: content.runMode.path, hash: protocolSha256(content.runMode.raw) }
         : null,
       refs: content.refs,
       goal_mode: resolveGoalMode(content.prepare?.raw, resolvedPlatform),
       freshness,
     },
     execution_contract: executionContract,
+    knowledge_context: (() => {
+      const card = buildKnowledgeReconciliationCard(projectRoot, context.session_id, runId);
+      const receipt = readKnowledgeReconciliation(store, context.session_id, runId, true);
+      const fresh = receipt
+        ? isKnowledgeReconciliationFresh(
+            projectRoot,
+            context.session_id,
+            runId,
+            receipt,
+            readReportFrontmatter(context.run_dir),
+          )
+        : false;
+      return {
+        ...card,
+        reconciliation: {
+          status: receipt ? (fresh ? 'fresh' : 'stale') : 'missing',
+          duplicates: receipt?.counts.duplicates ?? 0,
+          conflicts: receipt?.counts.conflicts ?? 0,
+          review_required: receipt?.counts.review_required ?? 0,
+          suppressed: receipt?.counts.suppressed ?? 0,
+          command: `maestro knowledge review ${context.session_id} --refresh`,
+        },
+      };
+    })(),
     continuity: { prev_handoff: prevHandoff, anchor },
     recovery: { next: briefNext(bundle.session, runId, run.status) },
   });
@@ -3217,4 +4938,96 @@ function briefNext(
     command: `maestro run check ${runId}`,
     reason: `pre-completion gate check (does not seal); when clean it emits the finish checklist — work through it, then run: maestro run complete ${runId}`,
   };
+}
+
+/**
+ * Register a Session in state.json's projections (sessions[] + active_session_id)
+ * for creation paths that do not go through a successful createRun (`session
+ * create`, `session start --no-dispatch`). Reads the freshest committed state and
+ * upserts, so concurrent registrations do not clobber each other's entries
+ * (the read-modify-write window stays tiny; there is no cross-process CAS).
+ * Returns a warning string when the registration could not be persisted, or null.
+ */
+export function ensureSessionProjectionOnDisk(
+  projectRoot: string,
+  sessionId: string,
+  makeActive = true,
+): string | null {
+  try {
+    const store = new SessionStore(projectRoot);
+    const bundle = store.readBundle(sessionId);
+    const state = readStateJson(projectRoot);
+    if (!state) return 'state.json missing; session projection not registered';
+    const projected = ensureSessionProjection(
+      state,
+      projectSessionEntry(bundle.session, store.readSessionRecord(sessionId)),
+      makeActive,
+    );
+    const record = store.readSessionRecord(sessionId);
+    if (record.schema_version === 'session/2.0'
+      && record.archived_at
+      && projected.active_session_id === sessionId) {
+      projected.active_session_id = null;
+    }
+    writeStateJson(projectRoot, projected);
+    return null;
+  } catch (error) {
+    return `session projection registration failed: ${(error as Error).message}`;
+  }
+}
+
+/**
+ * Find (and optionally remove) orphan Session directories — directories under
+ * .workflow/sessions/ that have no state.json projection and no Runs. These are
+ * the shells left behind by failed first dispatches or manual copies; they are
+ * invisible to canonical resolution and accumulate silently. `apply` deletes
+ * them; otherwise the call is a dry-run. Dangling projections (registered in
+ * state.json but missing on disk) are also reported and, with `apply`, pruned,
+ * since they make canonical resolution fail with a dead-lock.
+ */
+export function pruneOrphanSessions(
+  projectRoot: string,
+  apply: boolean,
+): { orphans: string[]; removed: string[]; dangling: string[]; pruned: string[] } {
+  const state = readStateJson(projectRoot);
+  const registered = new Set((state?.sessions ?? []).map(entry => entry.session_id));
+  const active = state?.active_session_id ?? null;
+  const sessionsDir = join(projectRoot, '.workflow', 'sessions');
+  const orphans: string[] = [];
+  const removed: string[] = [];
+  if (existsSync(sessionsDir)) {
+    for (const entry of readdirSync(sessionsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || registered.has(entry.name) || entry.name === active) continue;
+      const runsDir = join(sessionsDir, entry.name, 'runs');
+      let hasRuns = true;
+      try {
+        hasRuns = readdirSync(runsDir).length > 0;
+      } catch {
+        // No readable runs/ directory — conservatively treat as non-prunable.
+      }
+      if (hasRuns) continue;
+      orphans.push(entry.name);
+      if (apply) {
+        rmSync(join(sessionsDir, entry.name), { recursive: true, force: true });
+        removed.push(entry.name);
+      }
+    }
+  }
+  const dangling: string[] = [];
+  const pruned: string[] = [];
+  if (state) {
+    for (const entry of state.sessions ?? []) {
+      if (!existsSync(join(sessionsDir, entry.session_id))) dangling.push(entry.session_id);
+    }
+    if (apply && dangling.length > 0) {
+      const next = {
+        ...state,
+        sessions: (state.sessions ?? []).filter(entry => existsSync(join(sessionsDir, entry.session_id))),
+        active_session_id: active && existsSync(join(sessionsDir, active)) ? active : null,
+      };
+      writeStateJson(projectRoot, next);
+      pruned.push(...dangling);
+    }
+  }
+  return { orphans, removed, dangling, pruned };
 }

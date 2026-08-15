@@ -214,6 +214,23 @@ Generate detailed PRD with functional/non-functional requirements.
 
 Generate architecture decisions, component design, and technology selections.
 
+**Step 6.0: Architecture Knowledge Query (arch-kb)** — OPTIONAL, keyword-triggered
+
+Query the isolated architecture knowledge base for template scaffolding:
+
+```bash
+# Match system type to architecture templates (inject as ADR seed)
+maestro arch-kb search "{product_brief one-liner + key constraints}" --type template --json
+
+# View matched template sections as seed context
+maestro arch-kb show <template-id> --section "关键架构决策与权衡"
+maestro arch-kb show <template-id> --section "架构全景图"
+```
+
+- If search returns ≥1 template: inject matched template's **§8 决策与权衡** and **§4 架构全景图** as seed context into Step 6.1 CLI prompt
+- If no match: proceed without template (current behavior)
+- arch-kb is isolated from `maestro search` — only triggered by this explicit call
+
 **Step 6.1: Architecture Analysis via CLI (role: review)** — MANDATORY, NOT SUBSTITUTABLE
 - System architecture style with justification
 - Core components and responsibilities
@@ -336,7 +353,7 @@ Blueprint specification package is complete (all 6 phases done). Suggest next wo
 | Analyze specification | `analyze --from blueprint:{artifact_id}` |
 | Generate roadmap | `roadmap --from blueprint:{artifact_id}` |
 | Plan first phase | `plan 1 --from blueprint:{artifact_id}` |
-| Create issues | Recommend `/maestro-manage issue create ...` per Epic |
+| Create issues | Recommend `/maestro-issue create ...` per Epic |
 | Export only | Blueprint complete, no further action |
 
 ### Step 11: Final Report

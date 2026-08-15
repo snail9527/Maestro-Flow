@@ -1,20 +1,43 @@
 ---
 name: odyssey-improve
 description: 6-dimension runtime quality audit → diagnose → fix → verify cycle with baseline metrics tracking and zero-residual enforcement
-goal: true
-argument-hint: "<target> [--dimensions <list>] [--fix-threshold <severity>] [--skip-fix] [--skip-generalize] [-y] [-c]"
+argument-hint: <target> [--dimensions <list>] [--fix-threshold <severity>] [--skip-fix] [--skip-generalize] [-y] [-c]
 contract:
   consumes:
-    - { kind: session, alias: prior-session, required: false }
+  - kind: audit-result
+    alias: latest-audit
+    required: false
+    schema: audit-result/1.0
+    role: primary
   produces:
-    - { path: outputs/session.json, kind: audit-result, alias: latest-audit, role: primary }
-    - { path: outputs/evidence.ndjson, kind: evidence, role: evidence }
-    - { path: outputs/understanding.md, kind: improvement-metrics, alias: improvement-report, role: attachment }
+  - path: outputs/session.json
+    kind: audit-result
+    alias: latest-audit
+    role: primary
+    required: true
+    schema: audit-result/1.0
+  - path: outputs/evidence.ndjson
+    kind: evidence
+    role: evidence
+    required: false
+    schema: evidence/1.0
+  - path: outputs/understanding.md
+    kind: improvement-metrics
+    alias: improvement-report
+    role: attachment
+    required: false
+    schema: improvement-metrics/1.0
   gates:
-    exit: [all-dimensions-audited, zero-remaining-verified]
+    exit:
+    - all-dimensions-audited
+    - zero-remaining-verified
+  contract_version: 2.1
 refs:
-  - { path: workflows/odyssey-base.md, when: Shared back-half (GENERALIZE → DISCOVER → RECORD → END) needed }
-  - { path: ref/cli-supplementary.md, when: CLI-assisted survey or verification is needed }
+- path: workflows/odyssey-base.md
+  when: Shared back-half (GENERALIZE → DISCOVER → RECORD → END) needed
+- path: ref/cli-supplementary.md
+  when: CLI-assisted survey or verification is needed
+goal: true
 ---
 
 # Pre-task Thinking: odyssey-improve
@@ -56,7 +79,13 @@ When prior improve sessions of the same target exist, check their audit results 
 - **Baseline integrity** — `baseline_metrics` captured at INTAKE are immutable throughout the session; before/after comparison in §8 uses these exact values.
 - **Fix scope** — fixes target diagnosed root causes, not symptoms. Symptoms may indicate a deeper architectural issue requiring `--mode debug` escalation.
 - **Evidence append-only** — evidence.ndjson entries are immutable observations; modifying or deleting them is forbidden.
+- **Generalize is mandatory** unless `skip_generalize == true`; prior-phase convergence is NOT a valid skip reason.
 - **Exhaustive audit** — all 6 dimensions (or `--dimensions` subset) must be attempted. Zero dimensions reviewed is BLOCKED, not a warning.
+- **Behavioral equivalence** — fixes MUST preserve existing behavior. All tests MUST pass after each individual change, not just at the end of a tier.
+- **Scope locked after confirmation** — once the fix plan is confirmed (or auto-proceeded via `-y`), no scope expansion to additional files without re-confirmation.
+- **Incremental verification** — each discrete fix step MUST be verified (tests run) before proceeding. NEVER batch multiple unrelated changes into a single verification.
+- **No feature creep** — fixes MUST NOT add new functionality, change APIs, or alter public interfaces. Beneficial changes discovered → evidence phase=decision as recommendations, NOT applied.
+- **Rollback safety** — if any test fails after a fix step, revert that specific change before attempting alternatives. NEVER proceed with failing tests.
 
 ## Risk Checklist
 
@@ -67,6 +96,10 @@ When prior improve sessions of the same target exist, check their audit results 
 - After each severity tier fix, was re-verification scoped to the current tier's dimension only? Cross-dimension regression checks belong at S_VERIFY.
 - Were 3 diagnosis retries exhausted before marking INCONCLUSIVE? Premature escalation misses solvable issues.
 - Is zero-residual enforced — every finding has fix / issue / decision, with no blanket skips?
+- Are all 3 generalization layers (syntax/semantic/structural) attempted? A single-layer quick grep does NOT satisfy the thoroughness floor.
+- Does each fix preserve behavioral equivalence? A fix that changes observable behavior (API shape, return values, side effects) is scope creep, not a fix.
+- Was each fix step individually verified before proceeding? Batched changes make regression attribution impossible.
+- If a test failed after a fix, was that specific change reverted before trying alternatives? Proceeding with failing tests compounds risk.
 
 ## Gate Intent
 

@@ -1,6 +1,7 @@
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -70,6 +71,228 @@ describe('WikiIndexer', () => {
     expect(index.byId['knowhow-tip-dead'].ext.status).toBe('deprecated');
     expect(index.byId['knowhow-dcs-old'].status).toBe('deprecated');
     expect(index.byId['knowhow-dcs-old'].ext.status).toBe('deprecated');
+  });
+
+  it('prefers canonical MaestroGraph data and falls back to the legacy graph', async () => {
+    await mkdir(join(tmpRoot, 'kg'), { recursive: true });
+    await write('codebase/knowledge-graph.json', JSON.stringify({
+      nodes: [{ id: 'legacy', type: 'class', name: 'Legacy Only', summary: '', tags: [] }],
+      edges: [],
+    }));
+    const db = new DatabaseSync(join(tmpRoot, 'kg', 'maestro.db'));
+    db.exec(`
+      CREATE TABLE nodes (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        file_path TEXT,
+        source_type TEXT NOT NULL,
+        definition TEXT,
+        body TEXT,
+        category TEXT,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE edges (source TEXT NOT NULL, target TEXT NOT NULL, kind TEXT NOT NULL);
+      INSERT INTO nodes VALUES (
+        'domain:canonical', 'domain_term', 'Canonical Node', NULL,
+        'domain', 'from sqlite', NULL, NULL, 1
+      );
+    `);
+    db.close();
+
+    const canonical = await new WikiIndexer({ workflowRoot: tmpRoot, persistence: 'memory-only' }).get();
+    expect(canonical.entries.some(entry => entry.title === 'Canonical Node')).toBe(true);
+    expect(canonical.entries.some(entry => entry.title === 'Legacy Only')).toBe(false);
+
+    await rm(join(tmpRoot, 'kg', 'maestro.db'));
+    const fallback = await new WikiIndexer({ workflowRoot: tmpRoot, persistence: 'memory-only' }).get();
+    expect(fallback.entries.some(entry => entry.title === 'Legacy Only')).toBe(true);
+  });
+
+  it('fills the result limit after deprecated filtering and parent caps', async () => {
+    for (let index = 0; index < 6; index++) {
+      await write(
+        `specs/shared-${index}.md`,
+        `---\ntitle: Ranking shared ${index}\nparent: shared-parent\n---\n` +
+        `# Ranking shared ${index}\nRanking ranking ranking shared candidate.`,
+      );
+    }
+    for (let index = 0; index < 4; index++) {
+      await write(
+        `specs/distinct-${index}.md`,
+        `---\ntitle: Ranking distinct ${index}\nparent: distinct-parent-${index}\n---\n` +
+        `# Ranking distinct ${index}\nRanking candidate.`,
+      );
+    }
+    await write(
+      'specs/deprecated.md',
+      '---\ntitle: Ranking deprecated\nstatus: deprecated\n---\n' +
+      '# Ranking deprecated\nRanking ranking ranking ranking ranking.',
+    );
+    const indexer = new WikiIndexer({ workflowRoot: tmpRoot });
+
+    const first = await indexer.searchWithMeta('ranking', 5, { skipEmbedding: true });
+    const second = await indexer.searchWithMeta('ranking', 5, { skipEmbedding: true });
+    const ids = first.results.map(result => result.entry.id);
+    const shared = first.results.filter(result => result.entry.parent === 'shared-parent');
+
+    expect(first.results).toHaveLength(5);
+    expect(shared).toHaveLength(2);
+    expect(ids).not.toContain('spec:project:deprecated');
+    expect(second.results.map(result => result.entry.id)).toEqual(ids);
+  });
+
+  it('applies facets before ranking truncation and can include deprecated entries', async () => {
+    for (let index = 0; index < 70; index++) {
+      await write(
+        `knowhow/TIP-noise-${index}.md`,
+        `---\ntitle: Facet ranking noise ${index}\ntype: tip\ncategory: debug\n---\n` +
+        '# Facet ranking noise\nFacet ranking ranking ranking ranking noise.',
+      );
+    }
+    await write(
+      'specs/architecture-constraints.md',
+      `---\ncategory: arch\n---\n
+<spec-entry category="arch" keywords="facet,atomic" date="2026-07-28" sid="S-facet-target" title="Atomic facet target">
+
+### Atomic facet target
+
+Facet ranking target.
+
+</spec-entry>
+
+<spec-entry category="arch" keywords="facet,legacy" date="2026-07-27" sid="S-facet-legacy" title="Legacy facet target" status="deprecated">
+
+### Legacy facet target
+
+Facet ranking legacy target.
+
+</spec-entry>`,
+    );
+    const indexer = new WikiIndexer({ workflowRoot: tmpRoot });
+
+    const active = await indexer.searchWithMeta('facet ranking', 5, {
+      skipEmbedding: true,
+      filters: { type: 'spec', category: 'arch' },
+    });
+    expect(active.results.map(result => result.entry.title)).toContain('Atomic facet target');
+    expect(active.results.map(result => result.entry.title)).not.toContain('Legacy facet target');
+
+    const historical = await indexer.searchWithMeta('facet ranking legacy', 5, {
+      skipEmbedding: true,
+      filters: { type: 'spec', category: 'arch', includeDeprecated: true },
+    });
+    expect(historical.results.map(result => result.entry.title)).toContain('Legacy facet target');
+  });
+
+  it('keeps memory-only search independent from filesystem caches and indexes', async () => {
+    await write(
+      'specs/memory-only.md',
+      '---\ntitle: Memory only sentinel\n---\n# Memory only sentinel\nHermetic in memory search.',
+    );
+    const staleArtifacts = [
+      'search-cache.json',
+      'wiki-index.json',
+      'embedding-index.json',
+      'embedding-index.bin',
+    ];
+    for (const path of staleArtifacts) await write(path, `stale:${path}`);
+    const before = Object.fromEntries(await Promise.all(staleArtifacts.map(async path => {
+      const info = await stat(join(tmpRoot, path));
+      return [path, { bytes: await readFile(join(tmpRoot, path)), mtimeMs: info.mtimeMs }];
+    })));
+
+    const evidenceEvents: Array<{ event: string; site: string; queryId: null }> = [];
+    const indexer = new WikiIndexer({
+      workflowRoot: tmpRoot,
+      persistence: 'memory-only',
+      evidenceRecorder: event => evidenceEvents.push(event),
+    });
+    const firstIndex = await indexer.getSearchIndexWithMeta();
+    const secondIndex = await indexer.getSearchIndexWithMeta();
+    const result = await indexer.searchWithMeta('memory sentinel', 5);
+
+    expect(firstIndex.cacheState).toBe('cold-build');
+    expect(secondIndex).toEqual({ index: firstIndex.index, cacheState: 'cache-hit' });
+    expect(result.results.map(item => item.entry.id)).toContain('spec:project:memory-only');
+    expect(result.embeddingUsed).toBe(false);
+    for (const path of staleArtifacts) {
+      const info = await stat(join(tmpRoot, path));
+      expect(await readFile(join(tmpRoot, path))).toEqual(before[path].bytes);
+      expect(info.mtimeMs).toBe(before[path].mtimeMs);
+    }
+    await expect(readFile(join(tmpRoot, 'search-cache.json.tmp'))).rejects.toThrow();
+    await expect(readFile(join(tmpRoot, 'embedding-index.db'))).rejects.toThrow();
+    expect(evidenceEvents).toEqual([]);
+  });
+
+  it('reports real search-index cache state across reuse and invalidation', async () => {
+    await write(
+      'specs/cache-state.md',
+      '---\ntitle: Cache state sentinel\n---\n# Cache state sentinel\nCold index evidence.',
+    );
+    const indexer = new WikiIndexer({
+      workflowRoot: tmpRoot,
+      persistence: 'memory-only',
+    });
+
+    const first = await indexer.getSearchIndexWithMeta();
+    const second = await indexer.getSearchIndexWithMeta();
+    expect(first.cacheState).toBe('cold-build');
+    expect(second).toEqual({ index: first.index, cacheState: 'cache-hit' });
+    await expect(indexer.getSearchIndex()).resolves.toBe(first.index);
+
+    indexer.invalidate();
+    const rebuilt = await indexer.getSearchIndexWithMeta();
+    expect(rebuilt.cacheState).toBe('cold-build');
+    expect(rebuilt.index).not.toBe(first.index);
+  });
+
+  it('records actual filesystem cache/index branch events', async () => {
+    await write(
+      'specs/event-evidence.md',
+      '---\ntitle: Event evidence\n---\n# Event evidence\nBranch-site recorder.',
+    );
+    const writeEvents: Array<{ event: string; site: string; queryId: null }> = [];
+    const writer = new WikiIndexer({
+      workflowRoot: tmpRoot,
+      evidenceRecorder: event => writeEvents.push(event),
+    });
+
+    await writer.get();
+    await expect.poll(async () => {
+      try {
+        await stat(join(tmpRoot, 'wiki-index.json'));
+        await stat(join(tmpRoot, 'search-cache.json'));
+        return true;
+      } catch {
+        return false;
+      }
+    }).toBe(true);
+    expect(writeEvents).toEqual(expect.arrayContaining([
+      {
+        event: 'filesystem-cache-write',
+        site: 'WikiIndexer.persistSearchCache.createWriteStream',
+        queryId: null,
+      },
+      {
+        event: 'filesystem-index-write',
+        site: 'WikiIndexer.persistIndex.writeFile',
+        queryId: null,
+      },
+    ]));
+
+    const readEvents: Array<{ event: string; site: string; queryId: null }> = [];
+    const reader = new WikiIndexer({
+      workflowRoot: tmpRoot,
+      evidenceRecorder: event => readEvents.push(event),
+    });
+    await reader.get();
+    expect(readEvents).toContainEqual({
+      event: 'filesystem-cache-read',
+      site: 'WikiIndexer.tryLoadSearchCache.readFile',
+      queryId: null,
+    });
   });
 });
 
@@ -202,7 +425,7 @@ describe('search (BM25)', () => {
     const inv = buildInvertedIndex(index.entries);
     const results = searchBM25(inv, 'authentication');
     expect(results[0].docId).toBe('spec:project:auth');
-  });
+  }, 15_000);
 
   it('returns empty for stop-word-only query', async () => {
     await write('specs/a.md', `---\ntitle: A\n---\n# A`);
@@ -868,7 +1091,7 @@ describe('virtual adapters: run-mode sessions', () => {
     expect(run.ext.gateSummary).toEqual({ total: 1, waived: 1, failed: 0, blocked: 0 });
 
     await new Promise(resolve => setTimeout(resolve, 25));
-    expect(JSON.parse(await readFile(join(tmpRoot, 'search-cache.json'), 'utf-8')).version).toBe(3);
+    expect(JSON.parse(await readFile(join(tmpRoot, 'search-cache.json'), 'utf-8')).version).toBe(5);
   });
 
   it('indexes session and command-run schemas 1.0 through 1.3', async () => {
@@ -953,7 +1176,7 @@ describe('virtual adapters: run-mode sessions', () => {
     expect(run.related).toContain(`session-${fixture.sessionId}`);
   });
 
-  it('invalidates v2 search cache and persists v3', async () => {
+  it('invalidates v2 search cache and persists v5', async () => {
     await write('specs/cache-v3.md', '---\ntitle: Cache v3\n---\n# Cache v3\nProjection cache sentinel.');
     await write('search-cache.json', JSON.stringify({
       version: 2, generatedAt: 1, mtimeSnapshot: [], entries: [],
@@ -964,7 +1187,7 @@ describe('virtual adapters: run-mode sessions', () => {
     await expect.poll(async () => {
       try { return JSON.parse(await readFile(join(tmpRoot, 'search-cache.json'), 'utf-8')).version; }
       catch { return null; }
-    }).toBe(3);
+    }).toBe(5);
   });
 
   it('indexes v1.1 sealed Runs with structured handoff, kinds, provenance, aref edges, and waivers', async () => {

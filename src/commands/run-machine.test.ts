@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { runResponseSchema } from '../run/protocol-schemas.js';
 import { SessionStore } from '../run/store.js';
 import { createTopicIdentity } from '../run/topic-identity.js';
+
+function v2Workspace(root: string): void {
+  mkdirSync(join(root, ".workflow"), { recursive: true });
+  writeFileSync(join(root, ".workflow", "config.json"), JSON.stringify({
+    session_schema: { schema_version: "session-schema-selection/1.0", writer: "session/1.3", features: { session_statusless: false } },
+  }));
+}
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -16,6 +23,8 @@ function invoke(root: string, args: string[]) {
 }
 function fixture(): { root: string; chain: string } {
   const root = mkdtempSync(join(tmpdir(), 'maestro-run-machine-')); roots.push(root);
+
+  v2Workspace(root);
   mkdirSync(join(root, '.claude', 'commands'), { recursive: true });
   writeFileSync(join(root, '.claude', 'commands', 'demo.md'), '---\nsession-mode: run\n---\n# Demo\n');
   mkdirSync(join(root, 'workflows'), { recursive: true });
@@ -27,6 +36,9 @@ function fixture(): { root: string; chain: string } {
 
 describe('built-bin run-response/1.0', () => {
   it('marks legacy mutation and recovery commands deprecated admin-only in help', () => {
+    const root = mkdtempSync(join(tmpdir(), 'maestro-run-machine-help-'));
+    roots.push(root);
+    v2Workspace(root);
     const commands = [
       ['run', 'recall-confirm'],
       ['run', 'fork'],
@@ -35,7 +47,7 @@ describe('built-bin run-response/1.0', () => {
       ['run', 'rebind'],
     ];
     for (const command of commands) {
-      const result = spawnSync(process.execPath, [resolve('bin/maestro.js'), ...command, '--help'], { encoding: 'utf8', cwd: resolve('.') });
+      const result = spawnSync(process.execPath, [resolve('bin/maestro.js'), ...command, '--help', '--workflow-root', root], { encoding: 'utf8', cwd: resolve('.') });
       expect(result.status, `${command.join(' ')}: ${result.stderr}`).toBe(0);
       const help = result.stdout.replace(/\s+/g, ' ');
       expect(help, command.join(' ')).toContain('[DEPRECATED, ADMIN-ONLY]');
@@ -44,7 +56,7 @@ describe('built-bin run-response/1.0', () => {
       expect(help, command.join(' ')).toMatch(/(?:not a force operation|no force bypass)/);
     }
 
-    const rebind = spawnSync(process.execPath, [resolve('bin/maestro.js'), 'run', 'rebind', '--help'], { encoding: 'utf8', cwd: resolve('.') });
+    const rebind = spawnSync(process.execPath, [resolve('bin/maestro.js'), 'run', 'rebind', '--help', '--workflow-root', root], { encoding: 'utf8', cwd: resolve('.') });
     const rebindHelp = rebind.stdout.replace(/\s+/g, ' ');
     expect(rebindHelp).toContain('strictly validates gate and produce compatibility');
     expect(rebindHelp).toContain('--reason is required and recorded in command-rebind.json');
@@ -63,6 +75,15 @@ describe('built-bin run-response/1.0', () => {
     const complete = invoke(root, ['run', 'next', '--session', emptyId, '--json']);
     for (const item of [ok, running, missing, complete]) { expect(item.lines).toHaveLength(1); expect(item.stderr).toBe(''); expect(item.body?.exit_code).toBe(item.status); }
     expect([ok.status, missing.status, complete.status, running.status], JSON.stringify({ ok: ok.body, running: running.body })).toEqual([0, 1, 2, 3]);
+    expect(ok.body?.continuation).toMatchObject({
+      action: 'load_run', authority: 'automatic', reason_code: 'RUN_ACTIVE',
+    });
+    expect(running.body?.continuation).toMatchObject({
+      action: 'load_run', run_id: (ok.body as any).result.run_id,
+    });
+    expect(complete.body?.continuation).toMatchObject({
+      action: 'seal_session', authority: 'automatic', reason_code: 'CHAIN_COMPLETE',
+    });
   });
 
   it('captures Commander missing arguments and invalid platform in machine mode', () => {
@@ -72,6 +93,47 @@ describe('built-bin run-response/1.0', () => {
     expect(missing.body).toMatchObject({ ok: false, exit_code: 2, error: { code: 'COMMANDER_USAGE' } });
     expect(platform.body).toMatchObject({ ok: false, exit_code: 1, error: { code: 'PLATFORM_INVALID' } });
     expect(missing.stderr).toBe(''); expect(platform.stderr).toBe('');
+  });
+
+  it('exposes an auditable artifact metadata validation bypass on run check', () => {
+    const { root } = fixture();
+    writeFileSync(join(root, '.claude', 'commands', 'demo.md'), `<contract>
+contract_version: 2
+consumes: []
+produces:
+  - kind: result
+    path: outputs/result.json
+    role: primary
+    required: true
+    schema: result/2.0
+gates:
+  entry: []
+  exit: []
+</contract>
+`);
+    const created = invoke(root, ['run', 'create', 'demo', '--json']);
+    const locator = (created.body as any).result as { session_id: string; run_id: string };
+    const outputDir = join(root, '.workflow', 'sessions', locator.session_id, 'runs', locator.run_id, 'outputs');
+    mkdirSync(outputDir, { recursive: true });
+    writeFileSync(join(outputDir, 'result.json'), JSON.stringify({
+      _meta: { kind: 'result', schema: 'result/1.0', role: 'attachment' },
+    }));
+
+    const strict = invoke(root, ['run', 'check', locator.run_id, '--session', locator.session_id, '--json']);
+    const bypassed = invoke(root, [
+      'run', 'check', locator.run_id, '--session', locator.session_id,
+      '--skip-artifact-metadata-validation', '--json',
+    ]);
+
+    expect((strict.body as any).result.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('_meta.schema result/1.0 does not match contract result/2.0'),
+      expect.stringContaining('_meta.role attachment does not match contract primary'),
+    ]));
+    expect((bypassed.body as any).result.errors).toEqual([]);
+    expect((bypassed.body as any).result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining('artifact metadata validation skipped'),
+    ]));
+    expect((bypassed.body as any).next.command).toBe(`maestro run complete ${locator.run_id}`);
   });
 
   it('emits a strict brief-result and one canonical next pointer', () => {
@@ -84,13 +146,19 @@ describe('built-bin run-response/1.0', () => {
       ok: true,
       next: { suggest_only: true, command: `maestro run check ${locator.run_id}` },
       result: {
-        schema_version: 'brief-result/1.0',
+        schema_version: 'brief-result/1.1',
         session: { session_id: locator.session_id, open_decisions: [] },
         run: { run_id: locator.run_id },
         recovery: { next: { suggest_only: true, command: `maestro run check ${locator.run_id}` } },
       },
     });
     expect((brief.body as any).next).toEqual((brief.body as any).result.recovery.next);
+    expect(brief.body?.continuation).toMatchObject({
+      action: 'execute_run',
+      authority: 'automatic',
+      reason_code: 'RUN_BRIEF_LOADED',
+      command: `maestro run check ${locator.run_id}`,
+    });
     for (const removed of ['args', 'argument_requirements', 'reuse_assessments', 'gates', 'outputs']) {
       expect((brief.body as any).result).not.toHaveProperty(removed);
     }
@@ -138,6 +206,7 @@ describe('built-bin run-response/1.0', () => {
 
     expect(applied.body).toMatchObject({
       operation: 'complete', ok: true, request_id: 'req-complete-machine', replay: { status: 'applied' },
+      continuation: { action: 'seal_session', authority: 'automatic', reason_code: 'CHAIN_COMPLETE' },
     });
     expect(replayed.body).toMatchObject({
       operation: 'complete', ok: true, request_id: 'req-complete-machine', replay: { status: 'replayed' },
@@ -145,6 +214,93 @@ describe('built-bin run-response/1.0', () => {
     expect(replayed.body?.replay?.transition_id).toBe(applied.body?.replay?.transition_id);
     expect(applied.stderr).toBe('');
     expect(replayed.stderr).toBe('');
+  });
+
+  it('continues complete through decide and injects strict constraints into the next Run', () => {
+    const { root } = fixture();
+    const chain = join(root, 'complete-decide-next.json');
+    writeFileSync(chain, JSON.stringify({
+      steps: [
+        { command: 'demo' },
+        { command: 'quality-gate', decision_ref: 'DP-quality' },
+        { command: 'demo', args: '--final' },
+      ],
+      decision_points: [
+        { point_id: 'DP-quality', after_step_id: 'step-000-demo', max_retries: 2 },
+      ],
+    }));
+    const created = spawnSync(process.execPath, [
+      resolve('bin/maestro.js'), 'session', 'create', 'complete-decide-next',
+      '--intent', 'complete decide next', '--chain-file', chain, '--workflow-root', root,
+    ], { encoding: 'utf8' });
+    expect(created.status, created.stderr).toBe(0);
+    const sessionId = JSON.parse(created.stdout).session_id as string;
+
+    const first = invoke(root, ['run', 'next', '--session', sessionId, '--json']);
+    const firstRunId = (first.body as any).result.run_id as string;
+    const completed = invoke(root, [
+      'run', 'complete', firstRunId, '--session', sessionId, '--verdict', 'done', '--json',
+    ]);
+    expect(completed.body?.continuation).toMatchObject({
+      action: 'evaluate_decision',
+      authority: 'automatic',
+      reason_code: 'DECISION_REQUIRED',
+      command: `maestro run next --session ${sessionId} --json`,
+    });
+
+    const decisionCard = invoke(root, ['run', 'next', '--session', sessionId, '--json']);
+    expect(decisionCard.body).toMatchObject({
+      operation: 'next',
+      ok: false,
+      error: { code: 'DECISION_REQUIRED' },
+      continuation: {
+        action: 'evaluate_decision',
+        authority: 'automatic',
+        reason_code: 'DECISION_CARD_READY',
+        command: null,
+        preconditions: expect.arrayContaining([
+          'decision_point=DP-quality',
+          'do not call run next again for this decision card',
+        ]),
+      },
+    });
+
+    const decided = invoke(root, [
+      'run', 'decide', 'DP-quality', '--session', sessionId,
+      '--verdict', 'proceed', '--confidence', 'high', '--json',
+    ]);
+    expect(decided.body?.continuation).toMatchObject({
+      action: 'dispatch_next',
+      authority: 'automatic',
+      reason_code: 'MORE_STEPS',
+      command: `maestro run next --session ${sessionId} --json`,
+    });
+
+    const second = invoke(root, ['run', 'next', '--session', sessionId, '--json']);
+    const secondResult = (second.body as any).result as {
+      run_id: string;
+      run_already_created: boolean;
+      step: { command: string };
+      args: string[];
+    };
+    expect(secondResult).toMatchObject({
+      run_already_created: true,
+      step: { command: 'demo' },
+      args: ['--final'],
+    });
+    expect(secondResult.run_id).not.toBe(firstRunId);
+    expect(second.body?.continuation).toMatchObject({
+      action: 'load_run',
+      authority: 'automatic',
+      run_id: secondResult.run_id,
+      preconditions: expect.arrayContaining([
+        `run_already_created=${secondResult.run_id}`,
+        'execute_command=demo',
+        'execute_args=["--final"]',
+        'session_goal="complete decide next"',
+        'do not call run create or allocate another Run',
+      ]),
+    });
   });
 
   it('keeps a paused topic Session outside automatic read-only routing', () => {
@@ -241,17 +397,46 @@ describe('built-bin run-response/1.0', () => {
     expect(checkMissing.body).toMatchObject({ operation: 'check', ok: false, exit_code: 1, error: { code: 'RUN_NOT_FOUND' } });
     expect(decide.body).toMatchObject({
       operation: 'decide', ok: true, replay: { status: 'applied' }, request_id: 'req-decide-machine',
+      continuation: { action: 'seal_session', authority: 'automatic', reason_code: 'CHAIN_COMPLETE' },
     });
-    expect(decideReplay.body).toMatchObject({ operation: 'decide', ok: true, replay: { status: 'replayed' } });
+    expect(decideReplay.body).toMatchObject({
+      operation: 'decide', ok: true, replay: { status: 'replayed' },
+      continuation: { action: 'seal_session', authority: 'automatic', reason_code: 'CHAIN_COMPLETE' },
+    });
     expect(decideMissing.body).toMatchObject({ operation: 'decide', ok: false, error: { code: 'SESSION_NOT_FOUND' } });
-    expect(seal.body).toMatchObject({ operation: 'seal-session', ok: true, result: { status: 'sealed' } });
+    expect(seal.body).toMatchObject({
+      operation: 'seal-session',
+      ok: true,
+      result: {
+        status: 'sealed',
+        knowledge: {
+          pending_candidates: 0,
+          promoting_candidates: 0,
+          promoted_candidates: 0,
+          review_command: 'maestro knowledge review seal-ok',
+        },
+      },
+    });
     expect(sealBlocked.body).toMatchObject({ operation: 'seal-session', ok: false, error: { code: 'SESSION_SEAL_BLOCKED' } });
+  });
+
+  it('treats omitted check run-id as active-target resolution, not Commander usage', () => {
+    const { root } = fixture();
+    const result = invoke(root, ['run', 'check', '--json']);
+    expect(result.lines).toHaveLength(1);
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(1);
+    expect(result.body).toMatchObject({
+      operation: 'check',
+      ok: false,
+      exit_code: 1,
+    });
+    expect((result.body as any).error.code).not.toBe('COMMANDER_USAGE');
   });
 
   it('captures every Commander usage exit in machine mode', () => {
     const { root } = fixture();
     const cases = [
-      { args: ['run', 'check', '--json'], operation: 'check' },
       { args: ['run', 'decide', '--json'], operation: 'decide' },
       { args: ['run', 'seal-session', '--json'], operation: 'seal-session' },
       { args: ['run', 'accept-reuse', 'missing', '--json'], operation: 'accept-reuse' },
@@ -271,6 +456,98 @@ describe('built-bin run-response/1.0', () => {
     }
   });
 
+  it('never reflects secret-bearing Commander argv in 1.0 or 1.1 envelopes', () => {
+    const { root } = fixture();
+    const cases = [
+      {
+        args: ['run', 'fork', '--confirmation-token', 'confirmation-secret-rv009', '--json'],
+        schema: 'run-response/1.0',
+        secrets: ['confirmation-secret-rv009'],
+      },
+      {
+        args: ['run', 'create', 'demo', '--retry-token', 'retry-secret-rv009', '--unknown-option', '--json'],
+        schema: 'run-response/1.0',
+        secrets: ['retry-secret-rv009'],
+      },
+      {
+        args: ['execution', 'handoff', 'accept', '--handoff-token', 'handoff-secret-rv009', '--json'],
+        schema: 'run-response/1.1',
+        operation: 'execution-handoff-accept',
+        secrets: ['handoff-secret-rv009'],
+      },
+      {
+        args: [
+          'execution', 'pause', '--lease-id', 'lease-secret-rv009',
+          '--claim-output', join(root, 'private', 'claim-secret-rv009.json'), '--json',
+        ],
+        schema: 'run-response/1.1',
+        secrets: ['lease-secret-rv009', 'claim-secret-rv009.json'],
+      },
+    ];
+
+    for (const item of cases) {
+      const result = invoke(root, item.args);
+      const emitted = `${result.lines.join('\n')}${result.stderr}${JSON.stringify(result.body)}`;
+      expect(result.status, emitted).toBe(2);
+      expect(result.lines).toHaveLength(1);
+      expect(result.stderr).toBe('');
+      expect(result.body).toMatchObject({
+        schema_version: item.schema,
+        ...(item.operation ? { operation: item.operation } : {}),
+        ok: false,
+        exit_code: 2,
+        error: { code: 'COMMANDER_USAGE' },
+      });
+      expect((result.body as any).error.details).toEqual({ commander_code: expect.any(String) });
+      for (const secret of item.secrets) expect(emitted).not.toContain(secret);
+    }
+  });
+
+  it('publishes human Execution claims privately in a fresh process and refuses existing targets', () => {
+    const { root } = fixture();
+    const store = new SessionStore(root);
+    store.createSession('fresh-claim', 'fresh claim');
+    const common = [
+      'execution', 'start', '--session', 'fresh-claim', '--request-id', 'req-fresh-claim',
+      '--expected-identity-revision', '1', '--expected-activity-revision', '0',
+      '--execution-owner', 'manual-fresh', '--owner-kind', 'manual', '--expected-lease-epoch', '0',
+      '--actor', 'manual-fresh', '--reason', 'fresh claim', '--evidence', 'TEST-fresh-claim',
+      '--workflow-root', root,
+    ];
+    const started = spawnSync(process.execPath, [resolve('bin/maestro.js'), ...common], {
+      encoding: 'utf8', cwd: resolve('.'),
+    });
+    expect(started.status, started.stderr).toBe(0);
+    expect(started.stderr).toBe('');
+    const projected = JSON.parse(started.stdout) as { claim_output: string; lease_claim: null };
+    const privateClaim = JSON.parse(readFileSync(projected.claim_output, 'utf8')) as { lease_id: string };
+    expect(projected.lease_claim).toBeNull();
+    expect(started.stdout).not.toContain(privateClaim.lease_id);
+    if (process.platform !== 'win32') {
+      expect(statSync(join(root, '.workflow', 'tmp', 'claims')).mode & 0o777).toBe(0o700);
+      expect(statSync(projected.claim_output).mode & 0o777).toBe(0o600);
+    }
+
+    store.createSession('fresh-existing', 'fresh existing target');
+    const existing = join(root, 'private', 'existing-claim.json');
+    mkdirSync(join(root, 'private'), { recursive: true });
+    writeFileSync(existing, 'do-not-replace\n');
+    const refused = spawnSync(process.execPath, [
+      resolve('bin/maestro.js'),
+      'execution', 'start', '--session', 'fresh-existing', '--request-id', 'req-fresh-existing',
+      '--expected-identity-revision', '1', '--expected-activity-revision', '0',
+      '--execution-owner', 'manual-fresh', '--owner-kind', 'manual', '--expected-lease-epoch', '0',
+      '--actor', 'manual-fresh', '--reason', 'fresh existing', '--evidence', 'TEST-fresh-existing',
+      '--claim-output', existing, '--workflow-root', root,
+    ], { encoding: 'utf8', cwd: resolve('.') });
+    expect(refused.status).toBe(1);
+    expect(refused.stdout).toBe('');
+    expect(refused.stderr).toContain('Unable to prepare private claim output securely');
+    expect(refused.stderr).not.toContain(existing);
+    expect(readFileSync(existing, 'utf8')).toBe('do-not-replace\n');
+    expect(store.readOpenExecution('fresh-existing')).toBeNull();
+  });
+
   it('rejects the non-machine mutations --json flag instead of succeeding silently', () => {
     const { root } = fixture();
     const result = spawnSync(process.execPath, [
@@ -288,5 +565,5 @@ describe('built-bin run-response/1.0', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).toBe('');
     expect(result.stdout).toContain('session-run release machine parity passed');
-  });
+  }, 120_000);
 });

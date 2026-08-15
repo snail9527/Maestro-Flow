@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import {
   classifySessionRunProfile,
@@ -11,7 +11,14 @@ import {
 } from '../session-run-profiles.mjs';
 import { lintSessionRunMirrors } from '../lint-session-run-mirrors.mjs';
 import {
+  canonicalBranch,
+  validateExecutionPromptSemantics,
+} from '../session-execution-prompt-semantics.mjs';
+import {
   validateCompanionRunCreate,
+  validateConsumesSchema,
+  validateExecutorLifecycleBoundary,
+  validateProducesAliases,
   validateRunCreateArgumentChannels,
 } from '../lint-session-run-prompts.mjs';
 
@@ -69,6 +76,22 @@ test('Companion creation lint requires intent in both metadata and command args'
   assert.ok(missing.includes('fixture.md: missing --arg "<intent>"'));
 });
 
+test('Run executor lint keeps completion ownership with the orchestrator', () => {
+  const complete = [
+    'maestro run brief <run-id>',
+    'maestro run check <run-id>',
+    'Do not call `maestro session done` or `maestro run complete` — completion is handled by the orchestrator',
+  ].join('\n');
+  assert.deepEqual(validateExecutorLifecycleBoundary(complete, 'executor.md'), []);
+
+  const missing = validateExecutorLifecycleBoundary(
+    'maestro run brief <run-id>\nmaestro run check <run-id>',
+    'executor.md',
+  );
+  assert.ok(missing.includes('executor.md: missing Do not call `maestro session done`'));
+  assert.ok(missing.includes('executor.md: missing handled by the orchestrator'));
+});
+
 test('mirror lint reports a deterministic missing-root diagnostic', () => {
   const root = mkdtempSync(join(tmpdir(), 'session-run-mirror-'));
   try {
@@ -106,13 +129,16 @@ test('mirror lint detects lifecycle profile divergence', () => {
   }
 });
 
-test('source lint accepts alias-free Odyssey workflows while enforcing prepare associations', () => {
+test('source lint reports only the known Odyssey dead alias while migration semantics pass independently', () => {
   const repoRoot = process.cwd();
-  const output = execFileSync(process.execPath, [join(repoRoot, 'scripts', 'lint-session-run-prompts.mjs')], {
+  const lint = spawnSync(process.execPath, [join(repoRoot, 'scripts', 'lint-session-run-prompts.mjs')], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
-  assert.match(output, /session-run prompt lint passed/);
+  assert.equal(lint.status, 1);
+  assert.match(lint.stderr, /prepare\\odyssey-ui\.md: consumes alias 'prior-ui-audit'.*dead alias/);
+  assert.match(lint.stderr, /session-run prompt lint failed: 1 issue\(s\)/);
+  assert.deepEqual(validateExecutionPromptSemantics(repoRoot), []);
   for (const mode of ['debug', 'improve', 'planex', 'review', 'ui']) {
     const text = readFileSync(join(repoRoot, 'workflows', `odyssey-${mode}.md`), 'utf8');
     assert.match(text, new RegExp(`prepare:\\s*odyssey-${mode}`));
@@ -139,6 +165,11 @@ test('source lint accepts alias-free Odyssey workflows while enforcing prepare a
   assert.match(lite, /team-session\.json.*single coordinator-owned state file/);
   assert.match(lite, /complete top-level `_meta` object/);
   assert.match(lite, /`kind` and `schema` are required together/);
+  assert.match(lite, /maestro knowledge stage knowhow/);
+  assert.match(lite, /--signal cited\|validated\|contradicted --signal-ids <comma-separated ids>/);
+  assert.match(lite, /maestro knowledge review <session_id>/);
+  assert.match(lite, /maestro execution seal/);
+  assert.match(lite, /does \*\*not\*\* require Session seal/);
 
   const full = readFileSync(join(repoRoot, 'workflows', 'run-mode.md'), 'utf8');
   assert.match(full, /complete top-level `_meta` object/);
@@ -146,21 +177,108 @@ test('source lint accepts alias-free Odyssey workflows while enforcing prepare a
   assert.match(full, /Session is a durable \*\*topic grouping\/index\*\*/);
   assert.match(full, /same Session.*canonical `upstream`\/Artifact Registry map/);
   assert.match(full, /Historical similarity is read-only evidence/);
-  assert.match(full, /Completion may return a structured `suggest_only` next action, but it never executes that action or creates another Run/);
+  assert.match(full, /Completion atomically registers `outputs\/`, seals the Run, updates the current Execution chain\/gates\/revision/);
   assert.match(full, /deprecated admin-only compatibility commands/);
+  assert.match(full, /compact `knowledge_context` reconciliation card/);
+  assert.match(full, /`brief-result\/1\.1` Resume Packet/);
+  assert.match(full, /knowledge-candidate-receipt\/1\.0/);
+  assert.match(full, /Routine Run completion MUST NOT call `maestro spec add` or `maestro knowhow add` directly/);
+  assert.match(full, /maestro capabilities --json/);
+  assert.match(full, /maestro execution seal/);
+  assert.match(full, /does \*\*not\*\* require Session seal/);
   assert.doesNotMatch(full, /same normalized intent/);
 
+  const seal = readFileSync(join(repoRoot, '.claude', 'commands', 'maestro-session-seal.md'), 'utf8');
+  assert.match(seal, /maestro knowledge review \{session_id\} --json/);
+  assert.match(seal, /maestro knowledge promote \{session_id\} --candidate/);
+  assert.doesNotMatch(seal, /Scan session artifacts|recommend `\/maestro-spec add/);
+
   const maestro = readFileSync(join(repoRoot, '.claude', 'commands', 'maestro.md'), 'utf8');
+  assert.match(maestro, /argument-hint: "<intent> \[-y\] \[-c\] \[--amend\] \[--dry-run\]"/);
   assert.match(maestro, /Compatibility commands are out of band/);
   assert.match(maestro, /Historical similarity remains read-only evidence/);
   assert.doesNotMatch(maestro, /resolved paused Session.*maestro session resume/);
   assert.doesNotMatch(maestro, /offer confirmation-token fork\/import/);
 
   const ralph = readFileSync(join(repoRoot, '.claude', 'commands', 'maestro-ralph.md'), 'utf8');
-  assert.match(ralph, /Sessions are topic grouping\/indexes/);
-  assert.match(ralph, /Compatibility commands are out of band/);
-  assert.match(ralph, /canonical upstream map/);
+  assert.match(ralph, /argument-hint: "<intent> \[-y\] \[-c\] \[--amend\]"/);
+  assert.match(ralph, /Session is identity; Execution is lifecycle/);
+  assert.match(ralph, /Legacy compatibility is out of band/);
+  assert.match(ralph, /Canonical upstream map/);
   assert.doesNotMatch(ralph, /Read state\.json\.artifacts/);
+  for (const prompt of [maestro, ralph]) {
+    assert.doesNotMatch(prompt, /maestro ralph\s/);
+  }
+
+  const codexMaestro = readFileSync(join(repoRoot, '.codex', 'skills', 'Maestro', 'SKILL.md'), 'utf8');
+  const codexRalph = readFileSync(join(repoRoot, '.codex', 'skills', 'maestro-ralph', 'SKILL.md'), 'utf8');
+  for (const prompt of [codexMaestro, codexRalph]) {
+    assert.match(prompt, /argument-hint: <intent> \[-y\] \[-c\] \[--amend\]/);
+    assert.doesNotMatch(prompt, /maestro ralph\s/);
+  }
+  for (const prompt of [ralph, codexRalph]) {
+    for (const token of [
+      'S_INFER → S_DECOMPOSE → S_ASSESS → S_BUILD → S_CREATE',
+      '### A_INFER',
+      '### A_DECOMPOSE',
+      '### A_ASSESS',
+      'confidence_score',
+      'risk ≠ high AND confidence_score ≥ 60',
+      'Confidence below 60 cannot enter S_RUN_LOOP',
+      'at least 2 independently releasable milestones',
+      '--platform {target_platform}',
+      'pi-maestro-flow',
+    ]) {
+      assert.match(prompt, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    }
+    assert.doesNotMatch(prompt, /maestro skills --steps --json --platform claude/);
+  }
+
+  const orchestratorLoop = readFileSync(join(repoRoot, 'workflows', 'orchestrator-run-loop.md'), 'utf8');
+  for (const token of [
+    '## Continuation Router',
+    'Turn 终止不变量',
+    'authority=automatic',
+    'authority=auto_mode_only',
+    'authority=user_required',
+    'assessment.acceptance_status=accepted',
+    '`QUALITY_MEDIUM`',
+    'handoff `next[]`',
+    '### `complete` / `decide` 闭环',
+    'run_already_created=true',
+    'maestro run decide',
+    'reason_code=DECISION_CARD_READY',
+  ]) {
+    assert.match(orchestratorLoop, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(ralph, /Decision is mandatory/);
+  assert.match(ralph, /every Ralph-created Execution chain/);
+  assert.match(ralph, /run decide --json/);
+  assert.match(ralph, /run complete --json/);
+  const amendFlow = readFileSync(join(repoRoot, 'workflows', 'ralph-amend-goal.md'), 'utf8');
+  assert.match(amendFlow, /maestro capabilities --json/);
+  assert.match(amendFlow, /maestro run next/);
+  assert.match(amendFlow, /maestro run complete \{run_id\}.*--execution \{execution_id\}/);
+  assert.match(amendFlow, /maestro execution seal/);
+  assert.doesNotMatch(canonicalBranch(amendFlow), /maestro session (?:meta|next|done|seal)/);
+  const ralphPrepare = readFileSync(join(repoRoot, 'prepare', 'ralph.md'), 'utf8');
+  assert.match(ralphPrepare, /\| init \| `init` \|/);
+  assert.match(ralphPrepare, /\| specs-setup \| `specs-setup` \|/);
+  assert.match(ralphPrepare, /--platform \{target_platform\}/);
+  assert.match(ralphPrepare, /package\.json#pi\.skills/);
+  assert.doesNotMatch(ralphPrepare, /maestro skills --steps --json --platform claude/);
+  const maestroPrepare = readFileSync(join(repoRoot, 'prepare', 'maestro.md'), 'utf8');
+  assert.match(maestroPrepare, /--platform \{target_platform\}/);
+  assert.match(maestroPrepare, /package\.json#pi\.skills/);
+  assert.doesNotMatch(maestroPrepare, /maestro skills --steps --json --platform claude/);
+  for (const workflow of [full, lite, orchestratorLoop, amendFlow]) {
+    assert.doesNotMatch(workflow, /maestro ralph\s/);
+    assert.doesNotMatch(workflow, /\bralph next\b/);
+    assert.doesNotMatch(
+      canonicalBranch(workflow),
+      /maestro session (?:start|next|done|decide|resolve|resume|seal|meta)\b/,
+    );
+  }
 });
 
 test('package release gate orders source lint, generation, freshness, then parity', () => {
@@ -168,6 +286,7 @@ test('package release gate orders source lint, generation, freshness, then parit
   assert.ok(pkg.files.includes('.codex/agent-overrides'));
   const build = pkg.scripts['build:mirrors'];
   const ordered = [
+    'lint-session-execution-prompts.mjs',
     'lint-session-run-prompts.mjs',
     'convert-claude-to-agy.mjs',
     'build-agents-standard.mjs',
@@ -184,6 +303,86 @@ test('package release gate orders source lint, generation, freshness, then parit
   }
   assert.match(
     pkg.scripts.prepublishOnly,
-    /^node scripts\/lint-invocation-policy\.mjs && node scripts\/lint-session-run-prompts\.mjs/,
+    /^npm run build:arch-kb && node scripts\/lint-invocation-policy\.mjs && node scripts\/lint-session-execution-prompts\.mjs && node scripts\/lint-session-run-prompts\.mjs/,
   );
+});
+
+test('validateConsumesSchema rejects v2.1 consumes missing schema/role and versionless contracts', () => {
+  const missingSchemaRole = validateConsumesSchema(
+    { contract_version: 2.1, consumes: [{ kind: 'execution', alias: 'current-execution', required: true }] },
+    'prepare/review.md',
+  );
+  assert.deepEqual(missingSchemaRole, [
+    'prepare/review.md: consumes[0] kind=execution: missing schema or schema_range (declare the producer artifact schema, or schema_range \'<kind>/<major>.x\' for major-compatible reuse, so reuse binds without a manual REVIEW)',
+    'prepare/review.md: consumes[0] kind=execution: missing role for contract_version 2.1',
+  ]);
+
+  const versionless = validateConsumesSchema(
+    { consumes: [{ kind: 'execution', required: true }] },
+    'prepare/legacy.md',
+  );
+  assert.deepEqual(versionless, [
+    'prepare/legacy.md: consumes without contract_version 2/2.1 parse as v1 where schema/role are metadata-only; declare contract_version: 2.1',
+  ]);
+
+  const v2SchemaOnly = validateConsumesSchema(
+    { contract_version: 2, consumes: [{ kind: 'execution', alias: 'current-execution', schema: 'execution/1.0', required: true }] },
+    'prepare/v2.md',
+  );
+  assert.deepEqual(v2SchemaOnly, []);
+
+  const v21Complete = validateConsumesSchema(
+    { contract_version: 2.1, consumes: [{ kind: 'execution', alias: 'current-execution', schema: 'execution/1.0', role: 'primary', required: true }] },
+    'prepare/review.md',
+  );
+  assert.deepEqual(v21Complete, []);
+
+  assert.deepEqual(validateConsumesSchema({ contract_version: 2.1, consumes: [] }, 'prepare/empty.md'), []);
+});
+
+test('validateProducesAliases requires an explicit alias on primary produces', () => {
+  const missing = validateProducesAliases(
+    { contract_version: 2.1, produces: [{ kind: 'result', path: 'outputs/r.json', role: 'primary', required: true, schema: 'result/1.0' }] },
+    'prepare/demo.md',
+  );
+  assert.equal(missing.length, 1);
+  assert.match(missing[0], /primary but declares no alias/);
+
+  const explicit = validateProducesAliases(
+    { contract_version: 2.1, produces: [{ kind: 'result', path: 'outputs/r.json', alias: 'current-result', role: 'primary', required: true, schema: 'result/1.0' }] },
+    'prepare/demo.md',
+  );
+  assert.deepEqual(explicit, []);
+
+  const attachment = validateProducesAliases(
+    { contract_version: 2.1, produces: [{ kind: 'note', path: 'outputs/n.json', role: 'attachment', required: false, schema: 'note/1.0' }] },
+    'prepare/demo.md',
+  );
+  assert.deepEqual(attachment, []);
+});
+
+test('validateConsumesSchema enforces schema/schema_range exclusivity and range format', () => {
+  const both = validateConsumesSchema(
+    { contract_version: 2.1, consumes: [{ kind: 'execution', alias: 'current-execution', schema: 'execution/1.0', schema_range: 'execution/1.x', role: 'primary', required: true }] },
+    'prepare/demo.md',
+  );
+  assert.deepEqual(both, ['prepare/demo.md: consumes[0] kind=execution: declares both schema and schema_range; pick exactly one']);
+
+  const badRange = validateConsumesSchema(
+    { contract_version: 2.1, consumes: [{ kind: 'execution', alias: 'current-execution', schema_range: 'execution/01.x', role: 'primary', required: true }] },
+    'prepare/demo.md',
+  );
+  assert.match(badRange[0], /schema_range must match/);
+
+  const wrongKind = validateConsumesSchema(
+    { contract_version: 2.1, consumes: [{ kind: 'execution', alias: 'current-execution', schema_range: 'plan/1.x', role: 'primary', required: true }] },
+    'prepare/demo.md',
+  );
+  assert.match(wrongKind[0], /schema_range must match/);
+
+  const okRange = validateConsumesSchema(
+    { contract_version: 2.1, consumes: [{ kind: 'execution', alias: 'current-execution', schema_range: 'execution/1.x', role: 'primary', required: true }] },
+    'prepare/demo.md',
+  );
+  assert.deepEqual(okRange, []);
 });

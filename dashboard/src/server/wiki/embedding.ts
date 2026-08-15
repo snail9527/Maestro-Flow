@@ -353,7 +353,7 @@ export function mergeRRFSignals(
   }
   const merged: RankedResult[] = [];
   for (const [docId, score] of scores) merged.push({ docId, score });
-  merged.sort((a, b) => b.score - a.score);
+  merged.sort((a, b) => b.score - a.score || a.docId.localeCompare(b.docId));
   return merged.slice(0, limit);
 }
 
@@ -389,11 +389,12 @@ export function mergeHybrid(
     if (seen.has(r.docId)) continue;
     seen.add(r.docId);
     const rn = rrfNorm.get(r.docId) ?? 0;
-    const bn = bm25Norm.get(r.docId) ?? 0;
+    // Vector-only docs get a floor so pure semantic matches aren't capped at alpha*rrf.
+    const bn = bm25Norm.get(r.docId) ?? 0.15;
     merged.push({ docId: r.docId, score: alpha * rn + (1 - alpha) * bn });
   }
 
-  merged.sort((a, b) => b.score - a.score);
+  merged.sort((a, b) => b.score - a.score || a.docId.localeCompare(b.docId));
   return merged.slice(0, limit);
 }
 
@@ -547,12 +548,12 @@ export function isModelCached(): boolean {
     } catch { /* ignore */ }
   }
 
-  // Check transformers.js cache (node_modules/@huggingface/transformers/.cache/)
+  // Check the cache next to the vendored Transformers.js runtime.
   try {
     const localRequire = createRequire(import.meta.url);
-    const tjsMainPath = localRequire.resolve('@huggingface/transformers');
+    const tjsMainPath = localRequire.resolve('#maestro-transformers');
     const normalized = tjsMainPath.replace(/\\/g, '/');
-    const marker = '@huggingface/transformers';
+    const marker = 'vendor/transformers';
     const idx = normalized.indexOf(marker);
     if (idx >= 0) {
       const tjsRoot = tjsMainPath.slice(0, idx + marker.length);
@@ -577,8 +578,8 @@ async function configureProxy(): Promise<void> {
   } catch { /* undici not available */ }
 }
 
-async function loadTransformers(): Promise<{ pipeline: any }> {
-  return await import('@huggingface/transformers');
+async function loadTransformers(): Promise<{ pipeline: any; env: any }> {
+  return await import('#maestro-transformers');
 }
 
 export type ModelProgressCallback = (info: { status: string; file?: string; progress?: number; loaded?: number; total?: number }) => void;
@@ -589,6 +590,15 @@ export function setProgressCallback(cb: ModelProgressCallback | null): void {
   _progressCallback = cb;
 }
 
+// 允许通过 HF_ENDPOINT 指向国内镜像（如 https://hf-mirror.com）。
+// @huggingface/transformers（JS 版）不读 HF_ENDPOINT（那是 Python huggingface_hub 约定），
+// 只认 env.remoteHost，故在此手动透传。
+function configureRemoteHost(env: any): void {
+  const endpoint = process.env.HF_ENDPOINT || process.env.HF_MIRROR;
+  if (!endpoint) return;
+  env.remoteHost = endpoint.endsWith('/') ? endpoint : `${endpoint}/`;
+}
+
 async function getPipeline(): Promise<any> {
   if (_pipeline) return _pipeline;
 
@@ -596,7 +606,8 @@ async function getPipeline(): Promise<any> {
   await configureOnnxRuntimeLogging();
   const config = await detectDevice();
   const modelId = resolveLocalModel();
-  const { pipeline } = await loadTransformers();
+  const { pipeline, env } = await loadTransformers();
+  configureRemoteHost(env);
   const pipelineOpts: Record<string, unknown> = {
     dtype: config.dtype,
     device: config.device,
@@ -686,14 +697,23 @@ export async function embedQuery(query: string): Promise<Float32Array> {
 // ---------------------------------------------------------------------------
 
 const ZVEC_DIR = 'embedding.zvec';
+const ZVEC_ID_ENCODING = 'sha256';
+
+function toZvecId(docId: string): string {
+  return createHash('sha256').update(docId).digest('hex');
+}
 
 export function vectorSearch(
   queryVector: Float32Array,
   index: EmbeddingIndex,
   limit: number,
+  allowedDocIds?: ReadonlySet<string>,
 ): VectorSearchResult[] {
-  if (index.dimension && queryVector.length !== index.dimension) return [];
-  return flatCosineSearch(queryVector, index, limit);
+  if (index.dimension && queryVector.length !== index.dimension) {
+    console.error(`[embedding] dimension mismatch: query=${queryVector.length} index=${index.dimension} — falling back to BM25-only (rebuild with "maestro embedding rebuild")`);
+    return [];
+  }
+  return flatCosineSearch(queryVector, index, limit, allowedDocIds);
 }
 
 /**
@@ -723,10 +743,16 @@ export async function vectorSearchZvec(
         topk: limit,
         outputFields: ['docId'],
       });
-      return docs.map(d => ({
-        docId: (d.fields.docId as string) ?? d.id,
-        score: 1 - d.score,
-      }));
+      return docs.map(d => {
+        const docId = d.fields.docId;
+        if (typeof docId !== 'string' || docId.length === 0) {
+          throw new Error(`zvec query result ${d.id} is missing its original docId`);
+        }
+        return {
+          docId,
+          score: 1 - d.score,
+        };
+      });
     } finally {
       collection.closeSync();
     }
@@ -739,13 +765,16 @@ function flatCosineSearch(
   queryVector: Float32Array,
   index: EmbeddingIndex,
   limit: number,
+  allowedDocIds?: ReadonlySet<string>,
 ): VectorSearchResult[] {
   const scored: VectorSearchResult[] = [];
   for (let i = 0; i < index.docIds.length; i++) {
+    const parentId = index.chunkDocIds?.[i] ?? index.docIds[i];
+    if (allowedDocIds && !allowedDocIds.has(parentId)) continue;
     const sim = cosineSimilarity(queryVector, index.vectors[i]);
     if (sim > 0) scored.push({ docId: index.docIds[i], score: sim });
   }
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) => b.score - a.score || a.docId.localeCompare(b.docId));
   return scored.slice(0, limit);
 }
 
@@ -873,7 +902,7 @@ async function _saveZvecIndexInner(zvec: ZvecModule, index: EmbeddingIndex, dir:
       const end = Math.min(i + BATCH_SIZE, index.docIds.length);
       for (let j = i; j < end; j++) {
         batch.push({
-          id: index.docIds[j],
+          id: toZvecId(index.docIds[j]),
           vectors: { embedding: index.vectors[j] },
           fields: { docId: index.docIds[j] },
         });
@@ -893,6 +922,7 @@ async function _saveZvecIndexInner(zvec: ZvecModule, index: EmbeddingIndex, dir:
       contentHashes: index.contentHashes,
       chunkDocIds: index.chunkDocIds,
       docIds: index.docIds,
+      zvecIdEncoding: ZVEC_ID_ENCODING,
     };
     writeFileSync(join(dir, ZVEC_DIR + '.meta.json'), JSON.stringify(metaSidecar));
   } finally {
@@ -966,6 +996,7 @@ function loadFromZvecMeta(metaPath: string, _collectionPath: string): EmbeddingI
     contentHashes?: string[];
     chunkDocIds?: string[];
     docIds: string[];
+    zvecIdEncoding?: typeof ZVEC_ID_ENCODING;
   };
 
   // Use cached zvec module if available, otherwise try sync require
@@ -985,18 +1016,21 @@ function loadFromZvecMeta(metaPath: string, _collectionPath: string): EmbeddingI
     // Fetch vectors in batches by ID
     const BATCH_SIZE = 500;
     for (let i = 0; i < meta.docIds.length; i += BATCH_SIZE) {
-      const batchIds = meta.docIds.slice(i, Math.min(i + BATCH_SIZE, meta.docIds.length));
-      const fetched = collection.fetchSync({ ids: batchIds, includeVector: true, outputFields: [] });
+      const docIds = meta.docIds.slice(i, Math.min(i + BATCH_SIZE, meta.docIds.length));
+      const zvecIds = meta.zvecIdEncoding === ZVEC_ID_ENCODING
+        ? docIds.map(toZvecId)
+        : docIds;
+      const fetched = collection.fetchSync({ ids: zvecIds, includeVector: true, outputFields: [] });
       const fetchedMap = Array.isArray(fetched)
         ? Object.fromEntries(fetched.map((d: any) => [d.id, d]))
         : fetched;
-      for (let j = 0; j < batchIds.length; j++) {
-        const doc = fetchedMap[batchIds[j]];
+      for (let j = 0; j < zvecIds.length; j++) {
+        const doc = fetchedMap[zvecIds[j]];
         if (doc?.vectors?.embedding) {
           const v = doc.vectors.embedding;
           vectors[i + j] = v instanceof Float32Array ? v : new Float32Array(v as number[]);
         } else {
-          vectors[i + j] = new Float32Array(meta.dimension);
+          throw new Error(`zvec collection is missing document ${zvecIds[j]}`);
         }
       }
     }

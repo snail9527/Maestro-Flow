@@ -1,25 +1,82 @@
 ---
 name: test
 description: Run conversational UAT, coverage, and optional browser acceptance on verified deliverables, inferring severity per scenario and closing gaps
-argument-hint: "[scope] [--smoke] [--auto-fix] [--frontend-verify]"
+argument-hint: '[scope] [--smoke] [--auto-fix] [--frontend-verify]'
 contract:
   consumes:
-    - { kind: verification, alias: latest-verification, required: true }
-    - { kind: review-findings, alias: latest-review, required: false }
-    - { kind: diagnosis, alias: latest-debug, required: false }
+  - kind: verification
+    alias: latest-verification
+    required: false
+    schema: verification/1.0
+    role: primary
+  - kind: plan
+    alias: current-plan
+    required: false
+    schema: plan/1.0
+    role: primary
+  - kind: artifact
+    alias: current-execution
+    required: false
+    schema: artifacts/1.0
+    role: primary
+  - kind: review-findings
+    alias: latest-review
+    required: false
+    schema: review-findings/1.0
+    role: primary
+  - kind: diagnosis
+    alias: latest-debug
+    required: false
+    schema: diagnosis/1.0
+    role: primary
   produces:
-    - { path: outputs/test-plan.json, kind: test-plan, role: attachment }
-    - { path: outputs/test-results.json, kind: test-results, alias: latest-test, role: primary }
-    - { path: outputs/acceptance.json, kind: acceptance, role: evidence }
-    - { path: outputs/coverage.json, kind: coverage, role: evidence }
-    - { path: outputs/uat.md, kind: uat-log, role: attachment }
-    - { path: outputs/issue-candidates.json, kind: issue-candidates, role: attachment, optional: true }
-    - { path: outputs/e2e-results.json, kind: e2e-results, role: evidence, optional: true }
+  - path: outputs/test-plan.json
+    kind: test-plan
+    role: attachment
+    required: false
+    schema: test-plan/1.0
+  - path: outputs/test-results.json
+    kind: test-results
+    alias: latest-test
+    role: primary
+    required: true
+    schema: test-results/1.0
+  - path: outputs/acceptance.json
+    kind: acceptance
+    role: evidence
+    required: false
+    schema: acceptance/1.0
+  - path: outputs/coverage.json
+    kind: coverage
+    role: evidence
+    required: false
+    schema: coverage/1.0
+  - path: outputs/uat.md
+    kind: uat-log
+    role: attachment
+    required: false
+    schema: uat-log/1.0
+  - path: outputs/issue-candidates.json
+    kind: issue-candidates
+    role: attachment
+    required: false
+    schema: issue-candidates/1.0
+  - path: outputs/e2e-results.json
+    kind: e2e-results
+    role: evidence
+    required: false
+    schema: e2e-results/1.0
   gates:
-    exit: [coverage-met, pass-rate-met]
+    exit:
+    - coverage-met
+    - pass-rate-met
+  contract_version: 2.1
 refs:
-  - { path: ref/frontend-verify.md, when: --frontend-verify is passed, taking the deterministic browser acceptance path }
-  - { path: ref/severity-inference.md, when: Inferring issue severity from the user's natural language }
+- path: ref/frontend-verify.md
+  when: --frontend-verify is passed
+  taking the deterministic browser acceptance path: null
+- path: ref/severity-inference.md
+  when: Inferring issue severity from the user's natural language
 ---
 
 # Pre-task Thinking: test
@@ -76,3 +133,7 @@ Context injection (optional, may continue if missing):
 
 - `coverage-met`: two components must both hold — (1) every mapped scenario source (requirements, tool steps, review findings, debug root causes) has a corresponding UAT scenario, and (2) the Readiness Gate passes (scenario_coverage ≥ 40%). `test-results.json` is written.
 - `pass-rate-met`: each scenario has a real observed outcome (timeout / no-response / missing-entry may never be scored as pass); under `--frontend-verify`, any `[UI-observable]` failure or a write endpoint with no UI entry forces NEEDS_RETRY.
+
+## Legacy `session/1.x/2.x` Compatibility Branch
+
+deprecated/legacy-only：v2 运行时以 `kind: execution / schema: execution/1.0`（alias `current-execution`）消费当前 Execution 状态记录；v3 下不存在 Execution 记录，等价消费为 Session artifact registry（`artifacts/1.0`）。

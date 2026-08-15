@@ -8,19 +8,19 @@
 ## Argument Shape
 
 ```
-/maestro-manage knowledge harvest                                      → scan all sources, interactive selection
-/maestro-manage knowledge harvest <session-id>                         → harvest specific session (ANL-*, WFS-*, etc.)
-/maestro-manage knowledge harvest <path>                               → harvest from explicit directory or file
-/maestro-manage knowledge harvest --recent 7                           → harvest from artifacts updated in last 7 days
-/maestro-manage knowledge harvest --source analysis                    → harvest only from analysis sessions
-/maestro-manage knowledge harvest <target> --to wiki                   → force all findings to wiki
-/maestro-manage knowledge harvest <target> --to spec                   → force all findings to spec
-/maestro-manage knowledge harvest <target> --to issue                  → force all findings to issue
-/maestro-manage knowledge harvest <target> --to auto                   → auto-classify routing (default)
-/maestro-manage knowledge harvest <target> --dry-run                   → preview without writing
-/maestro-manage knowledge harvest --prune                              → classify artifacts, graduate to knowhow, archive from state.json
-/maestro-manage knowledge harvest --prune --age 14                     → only graduate artifacts older than 14 days
-/maestro-manage knowledge harvest --prune --dry-run                    → preview prune plan without modifying state.json
+/maestro-knowledge harvest                                      → scan all sources, interactive selection
+/maestro-knowledge harvest <session-id>                         → harvest specific session (ANL-*, WFS-*, etc.)
+/maestro-knowledge harvest <path>                               → harvest from explicit directory or file
+/maestro-knowledge harvest --recent 7                           → harvest from artifacts updated in last 7 days
+/maestro-knowledge harvest --source analysis                    → harvest only from analysis sessions
+/maestro-knowledge harvest <target> --to wiki                   → force all findings to wiki
+/maestro-knowledge harvest <target> --to spec                   → force all findings to spec
+/maestro-knowledge harvest <target> --to issue                  → force all findings to issue
+/maestro-knowledge harvest <target> --to auto                   → auto-classify routing (default)
+/maestro-knowledge harvest <target> --dry-run                   → preview without writing
+/maestro-knowledge harvest --prune                              → classify artifacts, graduate to knowhow, archive from state.json
+/maestro-knowledge harvest --prune --age 14                     → only graduate artifacts older than 14 days
+/maestro-knowledge harvest --prune --dry-run                    → preview prune plan without modifying state.json
 ```
 
 | Flag | Effect |
@@ -219,11 +219,13 @@ Fragments extracted: 8 (filtered from 12 by confidence ≥ 0.5)
 
 ### 6a. Wiki routing
 
-`maestro wiki create --type <wiki_type> --slug harvest-<source_type>-<short_id>`. Fallback: write `.workflow/harvest/wiki-pending-{id}.md`; flag wiki entry as [LOW CONFIDENCE] (pending offline).
+New knowledge created here must flow through the candidate pipeline, not direct wiki writes: `maestro knowledge stage knowhow "<title>" --content-file <path|-> --run <run-id>` (or spec for patterns/decisions), then `maestro knowledge review <session-id>` → `promote`. Direct `maestro wiki create` is reserved for audited admin exceptions only. Fallback: write `.workflow/harvest/wiki-pending-{id}.md`; flag wiki entry as [LOW CONFIDENCE] (pending offline).
 
 ### 6b. Spec routing
 
-MANDATORY recommendation: `/maestro-spec add <spec_type> <content>`. Mapping: pattern→pattern, decision→decision, bug→bug, knowhow→rule.
+Spec-class fragments flow through the same candidate pipeline as 6a (never direct corpus writes): `maestro knowledge stage spec "<title>" --content-file <path|-> --run <run-id> --category <mapping>`. Mapping: pattern→`coding`, decision→`arch`, bug→`debug`, knowhow→`review`. Promotion happens post-seal via `review --refresh → promote`.
+
+When a harvested fragment originates from a window transcript (Pi/Codex/Claude conversation), attach the raw record as untrusted evidence with `--transcript-quote <descriptor.json>` (K13). Transcript-backed candidates auto-gate to `review_required` (K17): `--all` never promotes them — promote explicitly with `--resolve --as unique --reason "..."` after human review. Never paste raw quote text into candidate content (iron rule 10).
 
 ### 6c. Issue routing
 
@@ -325,9 +327,9 @@ Source: ANL-auth-20260410 (analysis)
 
 Next:
   → Review wiki entries: maestro wiki list --type note
-  → Triage issues: recommend `/maestro-manage issue list --source harvest`
-  → Connect wiki graph: recommend `/maestro-manage knowledge wiki --fix`
-  → View specs: recommend `/maestro-spec load --role implement`
+  → Triage issues: recommend `/maestro-issue list --source harvest`
+  → Connect wiki graph: recommend `/maestro-knowledge wiki --fix`
+  → View specs: recommend `maestro spec load --category coding`
 ```
 
 ---
@@ -387,7 +389,7 @@ Scan `accumulated_context` sub-arrays:
     ANL-003  analysis  2026-03-15  "Security audit P2"
     BRN-002  brainstorm 2026-03-10  "Cache strategy"
     WFS-005  session   2026-03-08  "Feature toggle impl"
-    → Run: /maestro-manage knowledge harvest ANL-003 BRN-002 WFS-005  (harvest before graduating)
+    → Run: /maestro-knowledge harvest ANL-003 BRN-002 WFS-005  (harvest before graduating)
 
   Estimated state.json reduction: 23 → 9 artifacts, 20 → 13 context entries
 ```
@@ -407,14 +409,12 @@ For each `graduated` artifact:
    - Top 3 fragment titles as representative items
    - Original path for disk reference
 
-2. **Create knowhow entry**:
+2. **Create knowhow candidate** (not a direct wiki write):
    ```bash
-   maestro wiki create --type knowhow \
-     --slug "graduated-{type}-{short_id}" \
-     --title "Graduated: {type} {id}" \
-     --tags "graduated,{type},{milestone}" \
-     --body "{compact_summary}"
+   maestro knowledge stage knowhow "Graduated: {type} {id}" --content-file <path|-> --run <run-id> \
+     --evidence run:<run-id>,artifact:<artifact-id>
    ```
+   Route through `maestro knowledge review <session-id>` → `promote` before it becomes project knowledge.
 
 3. **Archive in state.json**: Move from `artifacts[]` to `artifact_archive[]`:
    ```json
@@ -463,11 +463,11 @@ Append prune results to harvest report:
   Backup: .workflow/state.json.backup-prune-20260521T143022
 
   Stale (not harvested, action needed):
-    → /maestro-manage knowledge harvest ANL-003 BRN-002 WFS-005
+    → /maestro-knowledge harvest ANL-003 BRN-002 WFS-005
 
   Next:
-    → Review graduated knowhow: maestro wiki list --type knowhow --tags graduated
-    → Re-run prune after harvesting stale: /maestro-manage knowledge harvest --prune
+    → Review graduated knowhow: maestro wiki list --type knowhow --keyword graduated
+    → Re-run prune after harvesting stale: /maestro-knowledge harvest --prune
 ```
 
 ### Safety invariants

@@ -2,19 +2,20 @@
 name: maestro-guard
 disable-model-invocation: true
 description: Manage editing boundary restrictions
-argument-hint: on|off|status|allow|deny [path]
+argument-hint: on|off|status|allow|deny|remove|clear [path]
 allowed-tools:
   - Bash
   - Glob
   - Read
   - Write
+  - request_user_input
 session-mode: none
-version: 0.5.53
+version: 0.5.74
 ---
 
 <purpose>
 Configure directory-level write boundaries enforced by the workflow-guard PreToolUse hook.
-Subcommands: on, off, status, allow `<path>`, deny `<path>`.
+Subcommands: on, off, status, allow `<path>`, deny `<path>`, remove `<path>`, clear.
 </purpose>
 
 <context>
@@ -51,7 +52,7 @@ and blocks operations targeting files outside boundaries. Requires hooks level >
 ### Phase Gates (MANDATORY, BLOCKING)
 
 **GATE 1: Parse → Config Read**
-- REQUIRED: Subcommand parsed (on/off/status/allow/deny) or defaulted to `status`.
+- REQUIRED: Subcommand parsed (on/off/status/allow/deny/remove/clear) or defaulted to `status`.
 - BLOCKED if: invalid subcommand provided.
 
 **GATE 2: Config Read → Execute**
@@ -93,17 +94,27 @@ Read `.workflow/config.json`. If file missing, initialize with empty guard secti
 
 **`allow <path>`:**
 - Normalize path to forward slashes, ensure trailing slash for directories
-- If `guard.mode` is `deny`, request_user_input: "Switching from deny to allow mode will clear existing paths ({N} paths). Continue?" — abort if user declines.
+- If `guard.mode` is `deny`, request_user_input: "Switching from deny to allow mode will clear existing paths ({N} paths). Continue?" — abort if user declines. Clear `guard.paths` (mode switch invalidates previous path list).
+- Set `guard.mode = "allow"`
 - Add path to `guard.paths` (deduplicate)
 - Set `guard.enabled = true` if not already
 - Write config
 
 **`deny <path>`:**
 - Normalize path to forward slashes, ensure trailing slash for directories
-- If `guard.mode` is `allow`, request_user_input: "Switching from allow to deny mode will clear existing paths ({N} paths). Continue?" — abort if user declines.
+- If `guard.mode` is `allow`, request_user_input: "Switching from allow to deny mode will clear existing paths ({N} paths). Continue?" — abort if user declines. Clear `guard.paths` (mode switch invalidates previous path list).
 - Set `guard.mode = "deny"`
 - Add path to `guard.paths` (deduplicate)
 - Set `guard.enabled = true` if not already (symmetric with `allow`: adding a deny path auto-enables the guard)
+- Write config
+
+**`remove <path>`:**
+- Normalize path
+- Remove from `guard.paths` (if present)
+- Write config
+
+**`clear`:**
+- Set `guard.paths = []`
 - Write config
 
 **Step 4: Confirm**

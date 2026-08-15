@@ -321,18 +321,22 @@ Next steps:
   /{alt-command}      -- {description}
 ```
 
-### Ralph-invoked completion
+### Orchestrated Run completion
 
-Report completion via CLI (do not output text blocks):
+An executor reports `run_id`, check state, artifacts, summary, concerns, and optional proposal path to the orchestrator. It MUST NOT call `session done` itself. The orchestrator maps the result to:
+
 ```
-maestro ralph complete <idx> --status {STATUS} [--evidence {path}] [--concerns "..."]
+maestro session done --session <session-id> --verdict {verdict} \
+  [--chain-proposal outputs/chain-proposal.json] [--evidence <path>] [--note "..."]
 ```
 
-Status verdicts:
-- **DONE** — Normal completion
-- **DONE_WITH_CONCERNS** — Completed with caveats; pass `--concerns`
-- **NEEDS_RETRY** — Tooling error / transient issue; ralph will retry
-- **BLOCKED** — External hard blocker; pass `--reason`
+`--evidence` / `--artifact` / `--chain-proposal` paths resolve relative to the **Run directory**, not the shell CWD, and must stay inside it — pass run-relative paths (e.g. `outputs/…`) or absolute paths within the Run directory. A shell-CWD-relative reading is accepted only when it unambiguously reaches a file inside the Run directory (or its `outputs/` for chain proposals).
+
+Status verdicts (chain-advance vocabulary; ready-vocabulary aliases ready→done / ready_with_concerns→done-with-concerns / failed→needs-retry are also accepted and mapped):
+- **done** — Normal completion
+- **done-with-concerns** — Completed with caveats; pass `--note`
+- **needs-retry** — Tooling error / transient issue; the orchestrator may retry
+- **blocked** — External hard blocker; pass `--reason`
 
 ### Next-step routing
 
@@ -391,7 +395,7 @@ Line-by-line verifiable completion standards.
 - [ ] Every task has `convergence.criteria[]` with grep-verifiable conditions
 - [ ] Plan-checker passed (or minor issues acknowledged)
 - [ ] User confirmation captured (execute/modify/cancel)
-- [ ] Artifact declared by contract and registered by `maestro run complete`
+- [ ] Artifact declared by contract and registered by `maestro session done`
 </success_criteria>
 ```
 

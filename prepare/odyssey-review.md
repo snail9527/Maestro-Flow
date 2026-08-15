@@ -1,21 +1,52 @@
 ---
 name: odyssey-review
-description: "Odyssey review mode — multi-dimensional deep code review through archaeology, exploration, 4-dimension audit, exhaustive severity-tiered fix, and zero-residual confirmation, producing review findings with full evidence trail"
-goal: true
-argument-hint: "<target: file|dir|HEAD|staged|phase#|PR#> [--skip-fix] [--skip-generalize] [-y] [-c]"
+description: Odyssey review mode — multi-dimensional deep code review through archaeology, exploration, 4-dimension audit, exhaustive severity-tiered fix, and zero-residual confirmation, producing review
+  findings with full evidence trail
+argument-hint: '<target: file|dir|HEAD|staged|phase#|PR#> [--skip-fix] [--skip-generalize] [-y] [-c]'
 contract:
   consumes:
-    - { kind: session, alias: prior-session, required: false }
+  - kind: session
+    alias: review-session
+    required: false
+    schema: session/1.0
+    role: primary
   produces:
-    - { path: outputs/session.json, kind: session, alias: review-session, role: primary }
-    - { path: outputs/evidence.ndjson, kind: evidence, alias: review-evidence, role: evidence }
-    - { path: outputs/explore.json, kind: exploration, alias: review-explore, role: evidence }
-    - { path: outputs/understanding.md, kind: review-report, alias: review-understanding, role: primary }
+  - path: outputs/session.json
+    kind: session
+    alias: review-session
+    role: primary
+    required: true
+    schema: session/1.0
+  - path: outputs/evidence.ndjson
+    kind: evidence
+    alias: review-evidence
+    role: evidence
+    required: false
+    schema: evidence/1.0
+  - path: outputs/explore.json
+    kind: exploration
+    alias: review-explore
+    role: evidence
+    required: false
+    schema: exploration/1.0
+  - path: outputs/understanding.md
+    kind: review-report
+    alias: review-understanding
+    role: primary
+    required: false
+    schema: review-report/1.0
   gates:
-    exit: [discovery-complete, all-dimensions-reviewed, zero-remaining]
+    exit:
+    - discovery-complete
+    - all-dimensions-reviewed
+    - zero-remaining
+  contract_version: 2.1
 refs:
-  - { path: ref/cli-supplementary.md, when: CLI supplementary evidence collection is needed }
-  - { path: ref/finish-work.md, when: Entering the RECORD phase for wrap-up }
+- path: ref/cli-supplementary.md
+  when: CLI supplementary evidence collection is needed
+- path: ref/finish-work.md
+  when: Entering the RECORD phase for wrap-up
+goal: true
 ---
 
 # Pre-task Thinking: odyssey-review
@@ -61,11 +92,12 @@ When prior review artifacts of the same scope exist, check their findings first 
 
 - **State chain:** `S_INTAKE → S_ARCHAEOLOGY → S_EXPLORE → S_REVIEW → S_FIX → S_CONFIRM → [back-half]`
 - **Zero-residual applies** — fix ALL findings within fix_threshold (default: all severity levels). No partial-tier advancement.
-- **Evidence is append-only** — never delete or overwrite evidence.ndjson entries; each entry is an immutable observation.
+- **Evidence append-only** — evidence.ndjson entries are immutable observations; modifying or deleting them is forbidden.
 - **Phase goal tracking** — mark each goal done/failed before transition; no silent skips.
 - **4-dimension mandatory** — all dimensions (correctness, security, performance, architecture) must be reviewed. Zero dimensions reviewed is BLOCKED.
 - **Exhaustive fix by severity** — descend through [critical, high, medium, low], each tier fully addressed before advancing. Blanket "pre-existing" classification forbidden; each finding must be individually assessed.
 - **max_fix_rounds = 5** — hard limit on fix retry rounds. After 5 rounds with remaining > 0, escalate to user or classify as deferred.
+- **Test evidence reuse across S_FIX/S_CONFIRM** — a per-tier commit invalidates only tests covering the committed changes; unchanged passing results carry forward, and S_CONFIRM reruns only invalidated targets plus the modified-area re-review. Never rerun the full matrix merely because a tier advanced.
 - **Generalize is mandatory** unless `skip_generalize == true`; prior-phase convergence is NOT a valid skip reason.
 - **Fix scope:** source code modifications during fix phase are in-scope but MUST be committed per tier. Session artifacts target `{run_dir}/outputs/` only.
 - **In scope:** Multi-dimensional deep review → exhaustive fix → generalize. **Out of scope:** Root cause debug → `--mode debug` | Feature implementation → `--mode planex` | UI visual optimization → `--mode ui`.
@@ -86,4 +118,4 @@ When prior review artifacts of the same scope exist, check their findings first 
 
 - `discovery-complete`: archaeology and/or exploration phases have logged evidence, understanding.md §2-§3 are updated, and explore goal (G2) is marked. Archaeology partial results via W003 are acceptable; explore skip via W006 is acceptable if no CLI tools are available.
 - `all-dimensions-reviewed`: all 4 dimension agents (correctness, security, performance, architecture) have completed, findings are merged into review_result with severity classification, evidence phase=review is logged, and understanding.md §4 severity matrix is written. G1 is marked. Zero dimensions reviewed is BLOCKED (W002 partial with at least 1 dimension is allowed).
-- `zero-remaining`: exhaustive fix has been applied tier-by-tier, `remaining_actionable == 0` (or all remaining individually classified as deferred after 5-round escalation), tests pass, CLI re-review confirms no new findings, confirmation is written, understanding.md §5 is updated, and G3 is marked. `needs_rework` routes back to FIX. Skippable only when `skip_fix == true`.
+- `zero-remaining`: exhaustive fix has been applied tier-by-tier, `remaining_actionable == 0` (or all remaining individually classified as deferred after 5-round escalation), tests covering the modified areas pass (reusing still-valid live-run results from S_FIX rounds when nothing they cover changed since; rerunning only invalidated targets), CLI re-review confirms no new findings, confirmation is written, understanding.md §5 is updated, and G3 is marked. `needs_rework` routes back to FIX. Skippable only when `skip_fix == true`.

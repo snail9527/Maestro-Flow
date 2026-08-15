@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   const agentManager = new AgentManager(eventBus);
   const SUBPROCESS_AGENT_TYPES: AgentType[] = [
-    'claude-code', 'gemini', 'gemini-a2a', 'qwen', 'codex', 'codex-server', 'opencode',
+    'claude-code', 'gemini', 'gemini-a2a', 'qwen', 'codex', 'codex-server', 'opencode', 'agy', 'api-explore', 'pi',
   ];
   for (const type of SUBPROCESS_AGENT_TYPES) {
     agentManager.registerAdapter(await createAdapterForType(type));
@@ -242,6 +242,9 @@ async function main(): Promise<void> {
     },
     (info) => {
       console.log(`Dashboard server listening on http://${config.host}:${info.port}`);
+      console.log(
+        '💡 Tip: for a resident desktop view of agent calls / Session·Run / knowledge stats, try the Maestro Sidebar desktop app (maestro-sidebar/).',
+      );
     },
   );
 

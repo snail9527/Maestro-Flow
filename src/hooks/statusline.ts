@@ -358,7 +358,58 @@ interface GitInfo {
   behind: number;
 }
 
+/**
+ * Cross-process cache for the git segment.
+ *
+ * Every render is its own short-lived process, so the three `git` spawns below
+ * (measured 71 + 118 + 69 ms idle, worse under load) are paid in full each time
+ * with no in-process state to amortize them. The cache file lives in tmpdir,
+ * keyed by directory.
+ *
+ * Freshness: `.git/HEAD` and `.git/index` mtimes force an immediate refresh, so
+ * branch switches, commits and staging show up at once. A worktree edit touches
+ * neither, hence the TTL — the dirty marker can lag by up to that long, which is
+ * invisible at human glance and is the only thing traded for dropping three
+ * process spawns off a hot render path.
+ */
+const GIT_CACHE_TTL_MS = 2000;
+
+interface GitCacheEntry {
+  key: string;
+  at: number;
+  git: GitInfo | null;
+}
+
+function gitCachePath(dir: string): string {
+  let h = 0;
+  for (let i = 0; i < dir.length; i++) h = (h * 31 + dir.charCodeAt(i)) | 0;
+  return join(tmpdir(), `maestro-statusline-git-${(h >>> 0).toString(36)}.json`);
+}
+
+/** Cheap fingerprint of the repo state git would report on. */
+function gitCacheKey(dir: string): string {
+  const stamp = (rel: string): string => {
+    try { return String(statSync(join(dir, rel)).mtimeMs); } catch { return '-'; }
+  };
+  return `${dir}|${stamp('.git/HEAD')}|${stamp('.git/index')}`;
+}
+
 function readGitInfo(dir: string): GitInfo | null {
+  const cachePath = gitCachePath(dir);
+  const key = gitCacheKey(dir);
+  try {
+    const entry = JSON.parse(readFileSync(cachePath, 'utf8')) as GitCacheEntry;
+    if (entry.key === key && Date.now() - entry.at < GIT_CACHE_TTL_MS) return entry.git;
+  } catch { /* no or unreadable cache — fall through to the real read */ }
+
+  const git = readGitInfoUncached(dir);
+  try {
+    writeFileSync(cachePath, JSON.stringify({ key, at: Date.now(), git } satisfies GitCacheEntry));
+  } catch { /* cache is best-effort */ }
+  return git;
+}
+
+function readGitInfoUncached(dir: string): GitInfo | null {
   try {
     const opts = { cwd: dir, timeout: 2000, stdio: 'pipe' as const };
     const branch = execSync('git rev-parse --abbrev-ref HEAD', opts).toString().trim();
@@ -772,11 +823,17 @@ export function runStatusline(): void {
   process.stdin.on('data', (chunk) => (input += chunk));
   process.stdin.on('end', () => {
     clearTimeout(timeout);
+    // Exit explicitly once the output is flushed. Clearing the timeout removes
+    // the only forced exit, so any handle still held further down the render
+    // path would keep this process resident forever — observed in the wild as
+    // 19 statusline processes alive for up to 9 hours.
     try {
       const data: StatuslineInput = JSON.parse(input);
-      process.stdout.write(formatStatusline(data));
+      process.stdout.write(formatStatusline(data), () => process.exit(0));
+      return;
     } catch {
       // Silent fail
     }
+    process.exit(0);
   });
 }

@@ -3,10 +3,10 @@
 // chain definition, plus the three chain-edit verbs (insert / skip / replace).
 //
 // This is the canonical home for chain building and mutation that the CLI
-// (`maestro session create` / `maestro session chain …`) drives. The ralph
-// adapter reuses `createChainSession` (dependency direction ralph → run only;
-// src/run must never import src/ralph), so `chainStepId` lives here rather than
-// in src/ralph/session-adapter.ts.
+// (`maestro session create` / `maestro session chain …`) drives. The retired
+// ralph adapter once reused `createChainSession` (the dependency ran ralph → run
+// only; the src/ralph/ tree has since been removed), so `chainStepId` lives here
+// rather than in the former src/ralph/session-adapter.ts.
 //
 // Retryable edits go through SessionStore.replayOrApplyTransition so authority
 // and the idempotency receipt share one StoreTransaction.
@@ -22,6 +22,7 @@ import type {
   SessionState,
 } from './schemas.js';
 import { validateSessionId } from './ids.js';
+import { createTopicIdentity } from './topic-identity.js';
 import { checkLease } from './lease.js';
 import {
   assertTransitionMutationRevisions,
@@ -82,8 +83,8 @@ const chainDefBoundaryContractSchema = z.object({
 
 const chainDefDecompositionSchema = z.object({
   execution_criteria: z.array(z.string()).optional(),
-  goals: z.array(z.unknown()).optional(),
-  changelog: z.array(z.unknown()).optional(),
+  goals: decompositionSchema.shape.goals.optional(),
+  changelog: decompositionSchema.shape.changelog.optional(),
 }).strict();
 
 const chainDefExecutorSchema = z.object({
@@ -126,10 +127,13 @@ const DEFAULT_DECISION_MAX_RETRIES = 2;
 
 export interface CreateChainSessionOpts {
   intent?: string;
+  /** Optional explicit topic identity; without it topic_identity stays null. */
+  topic?: string;
   engine?: 'ralph' | 'coordinator' | 'manual';
   qualityMode?: 'quick' | 'standard' | 'full';
   autoMode?: boolean;
   boundaryContract?: SessionState['boundary_contract'];
+  executor?: NonNullable<SessionState['orchestration']['executor']>;
   definition?: ChainDefinition;
 }
 
@@ -194,15 +198,12 @@ function buildPosition(def: ChainDefinition): SessionState['orchestration']['pos
 
 function buildDecomposition(def: ChainDefinition): OrchestrationDecomposition | null {
   if (!def.decomposition) return null;
-  // The container is shaped here; store.update() re-parses the whole draft
-  // against sessionStateSchema, so a malformed goals/changelog entry is rejected
-  // there rather than silently persisted.
   const d = def.decomposition;
-  return {
+  return decompositionSchema.parse({
     execution_criteria: d.execution_criteria ?? [],
-    goals: (d.goals ?? []) as OrchestrationDecomposition['goals'],
-    changelog: (d.changelog ?? []) as OrchestrationDecomposition['changelog'],
-  };
+    goals: d.goals ?? [],
+    changelog: d.changelog ?? [],
+  });
 }
 
 function timestampId(): string {
@@ -244,6 +245,15 @@ export function createChainSession(
     throw new Error('intent is required (pass opts.intent or definition.intent)');
   }
 
+  // Materialize every nested persisted block before Session allocation. Any
+  // schema failure must leave no authority shell or occupied Session ID.
+  const materialized = def ? {
+    chain: buildChain(def.steps),
+    decisionPoints: buildDecisionPoints(def),
+    position: buildPosition(def),
+    decomposition: buildDecomposition(def),
+  } : null;
+
   const sessionId = deriveSessionId(slug);
   const store = new SessionStore(projectRoot);
   store.createSession(sessionId, intent, { ifExists: 'error' });
@@ -261,13 +271,17 @@ export function createChainSession(
     if (boundaryContract) {
       draft.session.boundary_contract = boundaryContract;
     }
-    if (def) {
-      o.chain = buildChain(def.steps);
-      o.decision_points = buildDecisionPoints(def);
-      o.position = buildPosition(def);
-      o.decomposition = buildDecomposition(def);
-      if (def.executor) o.executor = { platform: def.executor.platform, cli_tool: def.executor.cli_tool };
+    if (opts.topic) {
+      draft.session.topic_identity = createTopicIdentity(projectRoot, opts.topic);
     }
+    if (materialized) {
+      o.chain = materialized.chain;
+      o.decision_points = materialized.decisionPoints;
+      o.position = materialized.position;
+      o.decomposition = materialized.decomposition;
+    }
+    const executor = opts.executor ?? def?.executor;
+    if (executor) o.executor = { platform: executor.platform, cli_tool: executor.cli_tool };
     return null;
   });
 
@@ -278,20 +292,94 @@ export function createChainSession(
 // ── Chain edit verbs ─────────────────────────────────────────────────────────
 
 /**
- * The lowest chain index a new step may occupy. A step may only be inserted
- * after every completed / running / sealed / skipped step — i.e. into the still
- * -pending tail. This is one past the last non-pending step.
+ * The lowest chain index a new step may occupy. Sparse skipped markers after
+ * the first pending step (for example a pre-skipped legacy seal node) do not
+ * lock the pending head. Running/completed/sealed/failed steps remain an
+ * authority boundary even if an inconsistent pending step appears before them.
  */
 function activeBoundary(chain: OrchestrationStep[]): number {
   let boundary = 0;
-  for (let i = 0; i < chain.length; i++) {
-    if (chain[i].status !== 'pending') boundary = i + 1;
+  let pendingSeen = false;
+  for (let index = 0; index < chain.length; index++) {
+    const status = chain[index].status;
+    if (status === 'pending') {
+      pendingSeen = true;
+      continue;
+    }
+    if (pendingSeen && status === 'skipped') continue;
+    boundary = index + 1;
   }
   return boundary;
 }
 
-/** Resolve an `after` selector (step_id or numeric index) to a chain index. */
+function recordObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function stepHasRecordedAttempt(session: SessionState, stepId: string): boolean {
+  return session.requests.some(request => {
+    if (request.type !== 'transition') return false;
+    const payload = recordObject(request.payload);
+    const subject = recordObject(payload?.subject);
+    return payload?.operation === 'complete'
+      && subject?.chain_step_id === stepId
+      && typeof subject.run_id === 'string'
+      && subject.run_id.length > 0;
+  });
+}
+
+function replacementChangesSemantics(step: OrchestrationStep, opts: ReplaceChainStepOpts): boolean {
+  return (opts.command !== undefined && opts.command !== step.command)
+    || (opts.args !== undefined && opts.args !== step.args)
+    || (opts.stage !== undefined && opts.stage !== (step.stage ?? null))
+    || (opts.goalRef !== undefined && opts.goalRef !== (step.goal_ref ?? null));
+}
+
+function assertKnownGoalRef(bundle: SessionBundle, goalRef: string | null | undefined): void {
+  if (goalRef === undefined || goalRef === null) return;
+  const decomposition = bundle.session.orchestration.decomposition;
+  if (decomposition && !decomposition.goals.some(goal => goal.id === goalRef)) {
+    throw new Error(`goal_ref ${goalRef} does not exist in Session decomposition`);
+  }
+}
+
+function assertInsertGoalBinding(
+  bundle: SessionBundle,
+  opts: InsertChainStepOpts,
+  decisionRef: string | null,
+  anchor: OrchestrationStep | undefined,
+): void {
+  if (bundle.session.orchestration.decomposition
+    && opts.stage !== undefined
+    && opts.stage !== null
+    && !decisionRef
+    && (opts.goalRef === undefined || opts.goalRef === null)
+    && (!anchor || (anchor.goal_ref ?? null) !== null)) {
+    throw new Error(`inserting staged step ${opts.command} requires an explicit goal_ref`);
+  }
+  assertKnownGoalRef(bundle, opts.goalRef);
+}
+
+function assertReplacementGoalBinding(
+  bundle: SessionBundle,
+  step: OrchestrationStep,
+  opts: ReplaceChainStepOpts,
+): void {
+  const decomposition = bundle.session.orchestration.decomposition;
+  if (!decomposition) return;
+  const stageChanges = opts.stage !== undefined && opts.stage !== (step.stage ?? null);
+  if (stageChanges && (opts.goalRef === undefined || opts.goalRef === null)) {
+    throw new Error(`changing stage for ${step.step_id} requires an explicit goal_ref`);
+  }
+  assertKnownGoalRef(bundle, opts.goalRef);
+}
+
+/** Resolve an `after` selector (step_id, numeric index, or start sentinel) to a chain index. */
 function resolveAfterIndex(chain: OrchestrationStep[], after: string): number {
+  const normalized = after.trim().toLowerCase();
+  if (['start', 'head', 'beginning', 'none'].includes(normalized)) return -1;
   const asIndex = Number(after);
   if (Number.isInteger(asIndex) && String(asIndex) === after.trim()) {
     if (asIndex < 0 || asIndex >= chain.length) {
@@ -328,7 +416,7 @@ export interface InsertChainStepOpts {
   transition?: Partial<TransitionMutationOptions>;
 }
 
-type ChainMutation =
+export type ChainMutation =
   | { operation: 'insert'; options: InsertChainStepOpts }
   | { operation: 'skip'; stepId: string }
   | { operation: 'replace'; stepId: string; options: ReplaceChainStepOpts };
@@ -357,6 +445,7 @@ export function applyChainMutation(bundle: SessionBundle, mutation: ChainMutatio
       );
     }
     const decisionRef = opts.decisionRef ?? null;
+    assertInsertGoalBinding(bundle, opts, decisionRef, chain[afterIdx]);
     const step: OrchestrationStep = {
       step_id: uniqueStepId(chain, insertPos, opts.command), command: opts.command, status: 'pending',
       run_id: null, inserted_by: opts.insertedBy, decision_ref: decisionRef,
@@ -387,6 +476,13 @@ export function applyChainMutation(bundle: SessionBundle, mutation: ChainMutatio
     step.run_id = null;
   } else {
     const opts = mutation.options;
+    if (stepHasRecordedAttempt(bundle.session, step.step_id)
+      && replacementChangesSemantics(step, opts)) {
+      throw new Error(
+        `cannot replace semantics of ${step.step_id} after a recorded Run attempt; insert a new step instead`,
+      );
+    }
+    assertReplacementGoalBinding(bundle, step, opts);
     if (opts.command !== undefined) {
       step.command = opts.command;
       step.step_id = uniqueStepId(chain, index, opts.command, step);

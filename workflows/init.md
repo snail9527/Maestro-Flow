@@ -84,7 +84,7 @@ state.json exists → Path C (existing) | source files exist → Path B (brownfi
 1. Create `.workflow/` directory structure
 2. Create `.workflow/state.json` (status: "idle")
 3. Offer codebase mapping:
-   - "Map codebase first" → execute `/maestro-manage sync rebuild` to understand existing architecture, then return
+   - "Map codebase first" → run `maestro kg index` to build the code graph (understand existing architecture), then return
    - "Skip mapping" → proceed
 4. Run Workflow Preferences (same as Path A step 2) → `.workflow/config.json`
 5. Ask user for project vision, goals, constraints (same deep questioning as Path A step 1)
@@ -107,7 +107,7 @@ If `.workflow/specs/` does not exist:
 1. MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: Run `Bash("maestro spec init")` — creates empty seed files (skeleton only, no codebase scan)
 
 2. If project has existing source files (package.json, tsconfig.json, pyproject.toml, go.mod, etc.):
-   - MANDATORY recommendation: `/maestro-spec setup` — scan codebase and populate specs with detected conventions when invoked
+   - MANDATORY recommendation: `maestro run skill specs-setup` — scan codebase and populate specs with detected conventions when invoked
    - Note: Specs are further enriched by analyze, plan, and execute stages via `maestro spec add`
 
 3. If greenfield project (no source files):
@@ -119,7 +119,7 @@ If `.workflow/specs/` does not exist:
 If `.workflow/domain/` does not exist:
 
 1. MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: Run `Bash("maestro domain init")` — creates `.workflow/domain/glossary.yaml` with empty terms array
-2. If brownfield project (has source files): MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: run `maestro domain discover --auto` to scan codebase for initial term candidates, present top 5 for confirmation
+2. If brownfield project (has source files): MANDATORY, NOT SUBSTITUTABLE by manual Read/Grep: run `maestro domain discover` to scan codebase for initial term candidates, present top candidates for confirmation
 3. If greenfield project: skip discovery (no codebase to scan); domain terms will be populated by grill/brainstorm sessions via finish-work extraction
 
 
@@ -154,5 +154,4 @@ Verify all required directories and files exist:
 3. Route next steps:
    - "Run `roadmap --mode full` to create full spec package with roadmap (heavy path)"
    - "Run `roadmap` to create interactive roadmap directly (light path)"
-   - "Run `/maestro-manage status` to view project dashboard"
    - "Run `brainstorm` to explore ideas first"

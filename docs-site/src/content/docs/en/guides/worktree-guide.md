@@ -24,9 +24,9 @@ Main worktree (master)              Worktree (.worktrees/m2-production/)
 │       ├── 03-realtime/ [forked]   │       └── 04-billing/ (owned)
 │       └── 04-billing/ [forked]    │
 │                                   │   Execute normally here:
-│   Fix M1 bugs on main             │   /maestro-ralph --engine swarm --script wf-analyze 3
-│                                   │   /maestro-next "<plan intent> 3"
-│                                   │   /maestro-ralph continue
+│   Fix M1 bugs on main             │   /maestro "analyze 3"
+│                                   │   /maestro "plan 3"
+│                                   │   /maestro "execute 3"
 ```
 
 </details>
@@ -53,7 +53,7 @@ cd /project
 
 # Terminal B: Advance M2 in worktree
 cd .worktrees/m2-production/
-/maestro-ralph --engine swarm --script wf-analyze 3 && /maestro-next "<plan intent> 3" && /maestro-ralph continue
+/maestro "analyze 3" && /maestro "plan 3" && /maestro "execute 3"
 
 # M2 complete, merge back
 /maestro-merge -m 2
@@ -153,14 +153,14 @@ Inside a worktree, new artifacts auto-belong to the milestone in `worktree-scope
 | Command | Reason |
 |---------|--------|
 | `maestro-init` | Would reset project state |
-| `/maestro-ralph --roadmap` | Would re-decompose phases |
+| `/maestro "roadmap ..."` | Would re-decompose phases |
 | `/maestro "<specification intent>"` | Would modify global blueprint |
 | `maestro-fork` | Cannot fork from within a worktree |
 | `maestro-merge` | Must be executed from main |
 
 ## Dashboard Integration
 
-`/maestro-manage status` displays worktree status:
+`maestro session status` displays worktree status:
 
 <details>
 <summary>Dashboard Output Examples</summary>

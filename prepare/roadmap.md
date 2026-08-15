@@ -1,18 +1,36 @@
 ---
 name: roadmap
 description: Decompose requirements into a session DAG where each session is an atomic work unit with scope, success criteria, and dependency edges
-argument-hint: "<requirement> [-y] [-c] [-m progressive|direct|auto] [--from <source>] [--from-brainstorm SESSION-ID] [--revise [instructions]] [--review]"
+argument-hint: <requirement> [-y] [-c] [-m progressive|direct|auto] [--from <source>] [--from-brainstorm SESSION-ID] [--revise [instructions]] [--review]
 contract:
   consumes:
-    - { kind: context-package, alias: upstream-context, required: false }
+  - kind: context-package
+    alias: upstream-context
+    required: false
+    schema: context-package/1.0
+    role: attachment
   produces:
-    - { path: outputs/roadmap.json, kind: roadmap, role: primary, alias: current-roadmap }
-    - { path: outputs/roadmap.md, kind: roadmap-doc, role: attachment }
+  - path: outputs/roadmap.json
+    kind: roadmap
+    role: primary
+    alias: current-roadmap
+    required: true
+    schema: roadmap/1.0
+  - path: outputs/roadmap.md
+    kind: roadmap-doc
+    role: attachment
+    required: false
+    schema: roadmap-doc/1.0
   gates:
-    exit: [dag-valid, sessions-registered]
+    exit:
+    - dag-valid
+    - sessions-registered
+  contract_version: 2.1
 refs:
-  - { path: ref/interview-mechanics.md, when: Entering the interactive interview Q&A loop }
-  - { path: ref/roadmap-template.md, when: Generating the roadmap.md artifact }
+- path: ref/interview-mechanics.md
+  when: Entering the interactive interview Q&A loop
+- path: ref/roadmap-template.md
+  when: Generating the roadmap.md artifact
 ---
 
 # Pre-task Thinking: roadmap
@@ -30,7 +48,7 @@ $ARGUMENTS determines the execution mode:
 | Mode | Trigger | Behavior |
 |------|---------|----------|
 | Create (default) | requirement text / `@file` / `--from` provided | build a session DAG from the requirement or upstream context |
-| Revise | `--revise [instructions]` | read the `current-roadmap` artifact, apply changes, preserve already-completed sessions |
+| Revise | `--revise [instructions]` | read the `current-roadmap` artifact, apply changes, preserve already-sealed sessions |
 | Review | `--review` | read-only health assessment of the session DAG |
 | Resume | `-c` / `--continue` | continue from the last checkpoint |
 
@@ -47,7 +65,7 @@ Pre-load (all optional, continue if missing):
 
 - All output is written to `{run_dir}/outputs/`.
 - Do not write `.workflow/roadmap.md` — roadmap is a Run artifact, not a project-level file.
-- Sessions are registered into `state.json.sessions[]`; do not touch already-completed sessions, and do not write `milestones[]` / `current_milestone` / `accumulated_context` (deprecated fields).
+- Sessions are registered into `state.json.sessions[]`; do not touch already-sealed sessions, and do not write `milestones[]` / `current_milestone` / `accumulated_context` (deprecated fields).
 - Scope guard: define only the roadmap shape, do not pre-resolve task splitting or intra-session decomposition (which belongs to plan).
 - **Default is 1 session** — split only when all three hard-dependency conditions hold: Session B's code calls Session A's real output at runtime (cannot mock), the two cannot develop concurrently via a contract/interface agreement, and every Session A task must complete before any Session B task starts. If only 1-2 conditions hold, keep in one session and use wave dependencies.
 - **Minimum 5 tasks per session** — a session with fewer must be merged into an adjacent one.
@@ -57,11 +75,11 @@ Pre-load (all optional, continue if missing):
 ## Risk Checklist
 
 - Is the DAG acyclic and complete? Every session must have scope, success criteria, and valid dependency edges — a cycle or dangling edge breaks the lifecycle.
-- Are already-completed sessions preserved? `--revise` must not touch or renumber completed sessions in `state.json.sessions[]`.
+- Are already-sealed sessions preserved? `--revise` must not touch or renumber sealed sessions in `state.json.sessions[]`.
 - Did decomposition stay at roadmap altitude? Pre-resolving task splitting or intra-session decomposition is plan's job, not roadmap's.
 - Are deprecated fields avoided? Writing `milestones[]` / `current_milestone` / `accumulated_context` reintroduces removed concepts.
 
 ## Gate Intent
 
 - `dag-valid`: the session DAG is acyclic and complete — every session has scope, success criteria, and valid dependency edges, with no dangling or cyclic edges — before `roadmap.json` is finalized.
-- `sessions-registered`: sessions are written into `state.json.sessions[]` without touching already-completed sessions or the deprecated `milestones[]` / `current_milestone` / `accumulated_context` fields.
+- `sessions-registered`: sessions are written into `state.json.sessions[]` without touching already-sealed sessions or the deprecated `milestones[]` / `current_milestone` / `accumulated_context` fields.

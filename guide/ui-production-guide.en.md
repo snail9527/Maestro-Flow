@@ -17,7 +17,7 @@ impeccable --chain build  →  impeccable (auto pipeline)  →  ui-codify
 
 **Phase pipeline position**: `analyze -> ui-design -> plan -> execute -> verify` (design precedes planning)
 
-`maestro-impeccable` is an orchestration layer for the impeccable skill (23 commands / 6 categories), driving automated iteration loops via critique/audit scoring. The `design-ref/` produced by `--chain build` is auto-detected by `maestro-plan`, which injects design tokens into execution tasks' `read_first[]`.
+`maestro-impeccable` is an orchestration layer for the impeccable skill (23 commands / 6 categories), driving automated iteration loops via critique/audit scoring. The `design-ref/` produced by `--chain build` is auto-detected by the `plan` step, which injects design tokens into execution tasks' `read_first[]`.
 
 ---
 
@@ -51,7 +51,7 @@ Generate design prototypes with multiple style variants. After user selection, c
 
 | Next Step | Command |
 |-----------|---------|
-| Plan based on design | `/maestro-plan {milestone}` |
+| Plan based on design | `/maestro "{milestone}"` (coordinator dispatches the `plan` step) |
 | Refine design | `/maestro-impeccable "{phase}" --chain improve` |
 
 ---
@@ -148,12 +148,12 @@ S_PARSE → S_SETUP → S_CHAIN → S_GATE → S_REPORT
 
 ---
 
-### 2.3 maestro-ui-codify — UI Codification
+### 2.3 /maestro-impeccable --codify — UI Codification
 
 Reverse-engineer a design system from existing source code, generate a reference package, and persist as a knowledge asset.
 
 ```
-/maestro-ui-codify <source-path> [--package-name <name>] [--output-dir <path>] [--overwrite]
+/maestro-impeccable --codify <source-path> [--package-name <name>] [--output-dir <path>] [--overwrite]
 ```
 
 | Parameter | Default | Description |
@@ -170,7 +170,7 @@ Reverse-engineer a design system from existing source code, generate a reference
 | **Phase 1** Validate | Parameter validation, path verification, workspace setup | — |
 | **Phase 2** Parallel Extract | Style (color/typography/spacing) + Animation (duration/easing) + Layout (patterns) | 3 token JSON files |
 | **Phase 3** Reference Package | Copy tokens + generate interactive showcase | `preview.html` + `preview.css` |
-| **Phase 4** Persist | `codify-to-knowhow` skill | `knowhow-manifest.json` → knowhow + spec |
+| **Phase 4** Persist | manifest-driven direct writes (ui-codify-knowhow Step 4.4) | `knowhow-manifest.json` → knowhow + spec |
 
 ---
 
@@ -184,17 +184,16 @@ Reverse-engineer a design system from existing source code, generate a reference
 # Step 2: Automated production (build chain)
 /maestro-impeccable "new landing page" --chain build --threshold 28
 # Step 3: Reverse-engineer design system
-/maestro-ui-codify src/components --package-name my-design-system
+/maestro-impeccable --codify src/components --package-name my-design-system
 ```
 
-**Data flow**: `ui-design` → `design-ref/` → consumed by `maestro-plan` → `ui-craft` operates on source → `ui-codify` extracts knowledge, closing the loop.
+**Data flow**: `ui-design` → `design-ref/` → consumed by the `plan` step → `ui-craft` operates on source → `ui-codify` extracts knowledge, closing the loop.
 
 ### Phase Pipeline Integration
 
 ```bash
 /maestro-impeccable "1" --chain build  # Design first
-/maestro-plan 1                         # Plan based on design
-/maestro-execute 1                      # Execute implementation (with built-in verification gate E2.7)
+/maestro "1"                            # Coordinator runs plan → execute (with built-in verification gate E2.7)
 ```
 
 ### Single Command Mode
@@ -207,7 +206,7 @@ Reverse-engineer a design system from existing source code, generate a reference
 # Production hardening
 /maestro-impeccable "prepare for launch" --chain harden --threshold 30
 # Reverse extract
-/maestro-ui-codify src/ui --package-name company-components
+/maestro-impeccable --codify src/ui --package-name company-components
 ```
 
 ---
@@ -230,5 +229,5 @@ Reverse-engineer a design system from existing source code, generate a reference
 # Iterative optimization
 /maestro-impeccable "optimize dashboard" --chain improve --threshold 30 --max-loops 5
 # Knowledge consolidation
-/maestro-ui-codify src --package-name project-design-v1
+/maestro-impeccable --codify src --package-name project-design-v1
 ```

@@ -1,22 +1,53 @@
 ---
 name: odyssey-debug
-description: "Odyssey debug mode — symptom-driven investigation through archaeology, exploration, hypothesis testing, fix, and confirmation, producing diagnosis with full evidence trail"
-goal: true
-argument-hint: "<issue> [--template performance|memory-leak|race-condition|regression|crash] [--skip-fix] [--skip-generalize] [-y] [-c]"
+description: Odyssey debug mode — symptom-driven investigation through archaeology, exploration, hypothesis testing, fix, and confirmation, producing diagnosis with full evidence trail
+argument-hint: <issue> [--template performance|memory-leak|race-condition|regression|crash] [--skip-fix] [--skip-generalize] [-y] [-c]
 contract:
   consumes:
-    - { kind: session, alias: prior-session, required: false }
+  - kind: session
+    alias: debug-session
+    required: false
+    schema: session/1.0
+    role: primary
   produces:
-    - { path: outputs/session.json, kind: session, alias: debug-session, role: primary }
-    - { path: outputs/evidence.ndjson, kind: evidence, alias: debug-evidence, role: evidence }
-    - { path: outputs/explore.json, kind: exploration, alias: debug-explore, role: evidence }
-    - { path: outputs/understanding.md, kind: diagnosis-report, alias: debug-understanding, role: primary }
+  - path: outputs/session.json
+    kind: session
+    alias: debug-session
+    role: primary
+    required: true
+    schema: session/1.0
+  - path: outputs/evidence.ndjson
+    kind: evidence
+    alias: debug-evidence
+    role: evidence
+    required: false
+    schema: evidence/1.0
+  - path: outputs/explore.json
+    kind: exploration
+    alias: debug-explore
+    role: evidence
+    required: false
+    schema: exploration/1.0
+  - path: outputs/understanding.md
+    kind: diagnosis-report
+    alias: debug-understanding
+    role: primary
+    required: false
+    schema: diagnosis-report/1.0
   gates:
-    exit: [discovery-complete, diagnosis-confirmed, fix-confirmed]
+    exit:
+    - discovery-complete
+    - diagnosis-confirmed
+    - fix-confirmed
+  contract_version: 2.1
 refs:
-  - { path: ref/scientific-debug.md, when: Hypothesis testing and backward tracing discipline is needed }
-  - { path: ref/cli-supplementary.md, when: CLI supplementary evidence collection is needed }
-  - { path: ref/finish-work.md, when: Entering the RECORD phase for wrap-up }
+- path: ref/scientific-debug.md
+  when: Hypothesis testing and backward tracing discipline is needed
+- path: ref/cli-supplementary.md
+  when: CLI supplementary evidence collection is needed
+- path: ref/finish-work.md
+  when: Entering the RECORD phase for wrap-up
+goal: true
 ---
 
 # Pre-task Thinking: odyssey-debug
@@ -60,7 +91,7 @@ When prior debug artifacts of the same scope exist, check their root cause first
 ## Boundaries and Invariants
 
 - **State chain:** `S_INTAKE → S_ARCHAEOLOGY → S_EXPLORE → S_DIAGNOSE → S_FIX → S_CONFIRM → [back-half]`
-- **Evidence is append-only** — never delete or overwrite evidence.ndjson entries; each entry is an immutable observation.
+- **Evidence append-only** — evidence.ndjson entries are immutable observations; modifying or deleting them is forbidden.
 - **Phase goal tracking** — mark each goal done/failed before transition; no silent skips.
 - **Root cause confirmation requires evidence** — a hypothesis without reproduction or code/log evidence stays "suspected", never promoted to confirmed.
 - **3-strike escalation** — stop after 3 failed hypotheses and escalate (delegate or ask user); do not free-associate a 4th.
@@ -71,9 +102,9 @@ When prior debug artifacts of the same scope exist, check their root cause first
 
 ## Risk Checklist
 
-- Is every confirmed root cause backed by a reproduction or code/log evidence? A hypothesis without evidence must stay "suspected".
+- Is every confirmed root cause backed by a reproduction or code/log evidence? A hypothesis without evidence must stay "suspected", never promoted to confirmed.
 - Did you change only one variable at a time during diagnosis? Simultaneous changes make attribution impossible.
-- Have 3 hypotheses failed? Stop and escalate — do not propose a 4th hypothesis on your own.
+- Have 3 hypotheses failed? Stop and escalate to architecture inspection — do not propose a 4th hypothesis on your own.
 - Did the trace reach the true source? Fixing at the symptom rather than where correct data first turned wrong leaves the root cause live.
 - Are archaeology/explore results properly logged even on partial failure (W003/W006)? Missing evidence must be flagged, not silently omitted.
 - Is every discovery hit individually classified with a reason? Blanket "pre-existing" skips are forbidden.

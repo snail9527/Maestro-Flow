@@ -7,6 +7,8 @@
  * score-thresholded, and capped.
  */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { WikiIndexer } from '#maestro-dashboard/wiki/wiki-indexer.js';
 import { isDeprecatedKnowledgeEntry } from '../utils/knowledge-lifecycle.js';
 
@@ -24,6 +26,21 @@ const ALLOWED_TYPES = new Set(['spec', 'knowhow']);
 const INTERNAL_LIMIT = 10;
 const DEFAULT_LIMIT = 3;
 const DEFAULT_MIN_SCORE = 1.0;
+/**
+ * Daemon budget — also the total budget of this call whenever a daemon is live.
+ * Measured daemon latency is 220-305ms idle and 470-1870ms under load, so this
+ * leaves ~2x headroom over the idle case while keeping the worst case bounded
+ * well inside an interactive hook. Missing it yields no context, which is the
+ * correct trade on a prompt hot path: a wider budget would just move seconds of
+ * stall from the fallback into the wait.
+ */
+const DEFAULT_HOOK_DAEMON_TIMEOUT_MS = 700;
+/**
+ * Pathological-hang guard for the cold in-process indexer, which parses ~11MB of
+ * index JSON and legitimately needs ~2s. It only runs when no daemon is live, so
+ * it is the sole content source on that path and is not held to the hook budget.
+ */
+const DEFAULT_INDEXER_TIMEOUT_MS = 3000;
 /** Hybrid mode: keep hits scoring at least this fraction of the top hit. */
 const HYBRID_RELATIVE_FACTOR = 0.4;
 /** Scale heuristic: hybrid scores are ≤ ~1.2 while BM25 raw scores run far higher. */
@@ -57,17 +74,23 @@ interface RawHit {
 /**
  * Resolve the score threshold for a daemon response.
  *
- * Daemon hybrid scores are normalized (≤ ~1.2×decay) while BM25-only raw
- * scores commonly exceed 5 — a fixed absolute threshold silently empties
- * results whenever embedding is active. Hybrid mode uses a relative cut
- * against the top score; BM25 keeps the absolute default. When the response
- * does not report `embeddingUsed`, infer the mode from the score scale.
+ * Scale decides, not mode. The absolute default only means anything against raw
+ * BM25 magnitudes, which commonly exceed 5; a normalized response needs a cut
+ * relative to its own top score.
+ *
+ * This used to read `embeddingUsed ?? top < HYBRID_SCALE_CUTOFF`, which made the
+ * scale heuristic dead code whenever the daemon answered at all — it always
+ * reports the flag. The hook always asks with `skipEmbedding`, so the flag came
+ * back false, the absolute 1.0 was applied, and every hit was dropped: measured
+ * across 4 queries × BM25-only and hybrid, daemon top scores were 0.893-0.996 and
+ * `>= 1.0` left 0 of 9-10 typed hits every time. The daemon normalizes BM25-only
+ * responses too, so `embeddingUsed` was never the right signal.
  */
 function adaptiveMinScore(raw: RawHit[], embeddingUsed?: boolean): number {
   const top = raw.reduce((m, r) => Math.max(m, r.score), 0);
   if (top <= 0) return DEFAULT_MIN_SCORE;
-  const hybrid = embeddingUsed ?? top < HYBRID_SCALE_CUTOFF;
-  return hybrid ? HYBRID_RELATIVE_FACTOR * top : DEFAULT_MIN_SCORE;
+  const normalized = top < HYBRID_SCALE_CUTOFF || embeddingUsed === true;
+  return normalized ? HYBRID_RELATIVE_FACTOR * top : DEFAULT_MIN_SCORE;
 }
 
 function toHits(raw: RawHit[], limit: number, minScore: number): WikiSearchHit[] {
@@ -87,6 +110,11 @@ function toHits(raw: RawHit[], limit: number, minScore: number): WikiSearchHit[]
     }));
 }
 
+function hasPersistedSearchIndex(workflowRoot: string): boolean {
+  return existsSync(join(workflowRoot, 'search-cache.json'))
+    || existsSync(join(workflowRoot, 'wiki-index.json'));
+}
+
 /**
  * Search the wiki knowledge base. Best-effort — never throws.
  * Returns filtered spec + knowhow hits and the source that produced them.
@@ -94,15 +122,27 @@ function toHits(raw: RawHit[], limit: number, minScore: number): WikiSearchHit[]
 export async function searchWiki(
   workflowRoot: string,
   query: string,
-  opts?: { limit?: number; minScore?: number },
+  opts?: { limit?: number; minScore?: number; daemonTimeoutMs?: number; skipEmbedding?: boolean },
 ): Promise<{ hits: WikiSearchHit[]; source: WikiSearchSource }> {
   const limit = opts?.limit ?? DEFAULT_LIMIT;
+  const daemonTimeoutMs = opts?.daemonTimeoutMs ?? DEFAULT_HOOK_DAEMON_TIMEOUT_MS;
+  const skipEmbedding = opts?.skipEmbedding ?? true;
 
   try {
     // Fast path: try search daemon (no heavy imports)
+    let daemonLive = false;
     try {
-      const { tryDaemonSearch } = await import('../search/daemon-client.js');
-      const daemonResult = await tryDaemonSearch(workflowRoot, query, INTERNAL_LIMIT, false);
+      const { tryDaemonSearch, readDaemonInfo, isDaemonAlive } =
+        await import('../search/daemon-client.js');
+      const info = readDaemonInfo(workflowRoot);
+      daemonLive = !!info && isDaemonAlive(info);
+      const daemonResult = await tryDaemonSearch(
+        workflowRoot,
+        query,
+        INTERNAL_LIMIT,
+        skipEmbedding,
+        { timeoutMs: daemonTimeoutMs },
+      );
       if (daemonResult?.ok && daemonResult.results) {
         const raw = daemonResult.results as RawHit[];
         const minScore = opts?.minScore ?? adaptiveMinScore(raw, daemonResult.embeddingUsed);
@@ -112,14 +152,44 @@ export async function searchWiki(
       // Daemon unavailable — fall through to direct search
     }
 
-    // Fallback: direct WikiIndexer BM25 search (skipEmbedding → raw BM25 scale)
+    // A live daemon owns the same index the local indexer would rebuild. When it
+    // is up but did not answer in time, spending seconds to duplicate its work
+    // in-process is the worst outcome for an interactive hook — degrade to empty
+    // instead. The fallback exists for the daemon-absent case only.
+    if (daemonLive) {
+      return { hits: [], source: 'none' };
+    }
+
+    if (!hasPersistedSearchIndex(workflowRoot)) {
+      return { hits: [], source: 'none' };
+    }
+
+    // Fallback: direct WikiIndexer BM25 search (skipEmbedding → raw BM25 scale).
+    // Bounded — a cold process parses ~11MB of index JSON, so this must never be
+    // allowed to run unmetered on the prompt hot path.
     const indexer = await getIndexer(workflowRoot);
-    const { results } = await indexer.searchWithMeta(query, INTERNAL_LIMIT, { skipEmbedding: true });
+    const results = await withTimeout(
+      indexer.searchWithMeta(query, INTERNAL_LIMIT, { skipEmbedding: true }).then(r => r.results),
+      DEFAULT_INDEXER_TIMEOUT_MS,
+    );
+    if (!results) return { hits: [], source: 'none' };
     const minScore = opts?.minScore ?? DEFAULT_MIN_SCORE;
     return { hits: toHits(results as RawHit[], limit, minScore), source: 'indexer' };
   } catch {
     return { hits: [], source: 'none' };
   }
+}
+
+/** Resolve to null if the promise does not settle within `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    if (typeof timer.unref === 'function') timer.unref();
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      () => { clearTimeout(timer); resolve(null); },
+    );
+  });
 }
 
 /**

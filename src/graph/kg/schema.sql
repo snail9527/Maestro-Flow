@@ -55,6 +55,45 @@ CREATE TABLE IF NOT EXISTS nodes (
 );
 
 -- ---------------------------------------------------------------------------
+-- 可重放结构引用：syntax fact 与 materialized edge 分离
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS structural_refs (
+    ref_key                  TEXT PRIMARY KEY,
+    anchor_node_id           TEXT NOT NULL,
+    anchor_qualified_name    TEXT NOT NULL,
+    ref_kind                 TEXT NOT NULL CHECK (ref_kind IN ('type', 'owner')),
+    raw_target_name          TEXT NOT NULL CHECK (length(trim(raw_target_name)) > 0),
+    source_declaration_kind  TEXT NOT NULL,
+    lookup_scope             TEXT NOT NULL CHECK (lookup_scope IN ('file', 'module', 'project', 'external', 'project-and-external')),
+    relation_hint            TEXT NOT NULL CHECK (relation_hint IN ('inherits-or-conforms', 'extends', 'implements', 'decorates', 'contains-owner')),
+    edge_orientation         TEXT NOT NULL CHECK (edge_orientation IN ('anchor-to-target', 'target-to-anchor')),
+    target_kind_hints        TEXT NOT NULL DEFAULT '[]',
+    target_language_hints    TEXT NOT NULL DEFAULT '[]',
+    module_hints             TEXT NOT NULL DEFAULT '[]',
+    target_file_hints        TEXT NOT NULL DEFAULT '[]',
+    origin_file_path         TEXT NOT NULL,
+    origin_language          TEXT NOT NULL,
+    origin_line              INTEGER NOT NULL CHECK (origin_line > 0),
+    origin_column            INTEGER NOT NULL CHECK (origin_column > 0),
+    compilation_condition    TEXT,
+    evidence_provenance      TEXT NOT NULL CHECK (evidence_provenance = 'tree-sitter'),
+    resolved_node_id         TEXT,
+    status                   TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'resolved', 'ambiguous', 'not_found')),
+    candidates               TEXT NOT NULL DEFAULT '[]',
+    resolution_strategy      TEXT,
+    confidence               REAL,
+    created_at               INTEGER NOT NULL,
+    updated_at               INTEGER NOT NULL,
+    CHECK (
+      (ref_kind = 'owner' AND relation_hint = 'contains-owner' AND edge_orientation = 'target-to-anchor')
+      OR
+      (ref_kind = 'type' AND relation_hint != 'contains-owner' AND edge_orientation = 'anchor-to-target')
+    ),
+    FOREIGN KEY (anchor_node_id) REFERENCES nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (resolved_node_id) REFERENCES nodes(id) ON DELETE SET NULL
+);
+
+-- ---------------------------------------------------------------------------
 -- 统一边表
 -- 修订: 移除 UNIQUE 约束 → 保留多处 call site (不同行号的同一调用)
 -- ---------------------------------------------------------------------------
@@ -67,8 +106,10 @@ CREATE TABLE IF NOT EXISTS edges (
     line        INTEGER,
     col         INTEGER,
     provenance  TEXT,                        -- 细粒度来源追踪
+    origin_ref_key TEXT,                     -- structural_refs owns resolver edges
     FOREIGN KEY (source) REFERENCES nodes(id) ON DELETE CASCADE,
-    FOREIGN KEY (target) REFERENCES nodes(id) ON DELETE CASCADE
+    FOREIGN KEY (target) REFERENCES nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (origin_ref_key) REFERENCES structural_refs(ref_key) ON DELETE CASCADE
 );
 
 -- ---------------------------------------------------------------------------
@@ -134,6 +175,15 @@ CREATE INDEX IF NOT EXISTS idx_edges_kind ON edges(kind);
 CREATE INDEX IF NOT EXISTS idx_edges_source_kind ON edges(source, kind);
 CREATE INDEX IF NOT EXISTS idx_edges_target_kind ON edges(target, kind);
 CREATE INDEX IF NOT EXISTS idx_edges_provenance ON edges(provenance);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_origin_ref_key_unique
+    ON edges(origin_ref_key) WHERE origin_ref_key IS NOT NULL;
+
+-- 结构引用索引
+CREATE INDEX IF NOT EXISTS idx_structural_refs_anchor ON structural_refs(anchor_node_id);
+CREATE INDEX IF NOT EXISTS idx_structural_refs_resolved ON structural_refs(resolved_node_id);
+CREATE INDEX IF NOT EXISTS idx_structural_refs_status ON structural_refs(status);
+CREATE INDEX IF NOT EXISTS idx_structural_refs_target ON structural_refs(raw_target_name);
+CREATE INDEX IF NOT EXISTS idx_structural_refs_origin_file ON structural_refs(origin_file_path);
 
 -- 文件索引
 CREATE INDEX IF NOT EXISTS idx_files_language ON files(language);
@@ -152,6 +202,8 @@ CREATE INDEX IF NOT EXISTS idx_unresolved_from_name ON unresolved_refs(from_node
 -- ============================================================================
 
 -- 代码 FTS5 (keywords 列存放 camelCase 分词，unicode61 自动按 JSON 标点拆分)
+-- 注意: 必须为内部存储表 (不带 content=), 外部内容表会忽略触发器 WHERE 过滤,
+--       导致 code_fts/knowledge_fts 各索引全部节点 (v5 迁移修复)。
 CREATE VIRTUAL TABLE IF NOT EXISTS code_fts USING fts5(
     id,
     name,
@@ -159,9 +211,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS code_fts USING fts5(
     docstring,
     signature,
     keywords,
-    tokenize = 'unicode61 remove_diacritics 2',
-    content = 'nodes',
-    content_rowid = 'rowid'
+    tokenize = 'unicode61 remove_diacritics 2'
 );
 
 -- 知识 FTS5
@@ -172,12 +222,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
     body,
     aliases,
     keywords,
-    tokenize = 'trigram',
-    content = 'nodes',
-    content_rowid = 'rowid'
+    tokenize = 'trigram'
 );
 
--- FTS5 同步触发器 — 按 source_type 路由到不同索引 (D3.4: 移除 NULL 分支)
+-- FTS5 v8 同步触发器 — 按 source_type 路由到不同索引。
+-- 内部存储表支持普通 DELETE；UPDATE 必须先清理旧 rowid，再按 NEW.source_type 回填。
 CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
     INSERT INTO code_fts(rowid, id, name, qualified_name, docstring, signature, keywords)
     SELECT NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.docstring, NEW.signature, NEW.keywords
@@ -189,26 +238,18 @@ CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
-    INSERT INTO code_fts(code_fts, rowid, id, name, qualified_name, docstring, signature, keywords)
-    SELECT 'delete', OLD.rowid, OLD.id, OLD.name, OLD.qualified_name, OLD.docstring, OLD.signature, OLD.keywords
-    WHERE OLD.source_type = 'codegraph';
-
-    INSERT INTO knowledge_fts(knowledge_fts, rowid, id, name, definition, body, aliases, keywords)
-    SELECT 'delete', OLD.rowid, OLD.id, OLD.name, OLD.definition, OLD.body, OLD.aliases, OLD.keywords
-    WHERE OLD.source_type != 'codegraph';
+    DELETE FROM code_fts WHERE rowid = OLD.rowid;
+    DELETE FROM knowledge_fts WHERE rowid = OLD.rowid;
 END;
 
 CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
-    INSERT INTO code_fts(code_fts, rowid, id, name, qualified_name, docstring, signature, keywords)
-    SELECT 'delete', OLD.rowid, OLD.id, OLD.name, OLD.qualified_name, OLD.docstring, OLD.signature, OLD.keywords
-    WHERE OLD.source_type = 'codegraph';
+    DELETE FROM code_fts WHERE rowid = OLD.rowid;
+    DELETE FROM knowledge_fts WHERE rowid = OLD.rowid;
+
     INSERT INTO code_fts(rowid, id, name, qualified_name, docstring, signature, keywords)
     SELECT NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.docstring, NEW.signature, NEW.keywords
     WHERE NEW.source_type = 'codegraph';
 
-    INSERT INTO knowledge_fts(knowledge_fts, rowid, id, name, definition, body, aliases, keywords)
-    SELECT 'delete', OLD.rowid, OLD.id, OLD.name, OLD.definition, OLD.body, OLD.aliases, OLD.keywords
-    WHERE OLD.source_type != 'codegraph';
     INSERT INTO knowledge_fts(rowid, id, name, definition, body, aliases, keywords)
     SELECT NEW.rowid, NEW.id, NEW.name, NEW.definition, NEW.body, NEW.aliases, NEW.keywords
     WHERE NEW.source_type != 'codegraph';

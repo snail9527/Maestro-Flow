@@ -9,10 +9,19 @@ import { SessionStore } from './store.js';
 import { writeStateJson, migrateV1toV2 } from '../utils/state-schema.js';
 import type { SessionState } from './schemas.js';
 
+function v2Workspace(root: string): void {
+  mkdirSync(join(root, ".workflow"), { recursive: true });
+  writeFileSync(join(root, ".workflow", "config.json"), JSON.stringify({
+    session_schema: { schema_version: "session-schema-selection/1.0", writer: "session/1.3", features: { session_statusless: false } },
+  }));
+}
+
 const roots: string[] = [];
 
 function root(): string {
   const path = mkdtempSync(join(tmpdir(), 'maestro-next-'));
+
+  v2Workspace(path);
   roots.push(path);
   return path;
 }
@@ -401,6 +410,29 @@ describe('run next — atomic chain binding', () => {
     expect(readChain(projectRoot, 's')[0].status).toBe('pending');
   });
 
+  it.each(['sealed', 'archived'] as const)(
+    'reports a %s Session as terminal instead of recommending resume',
+    (status) => {
+      const projectRoot = root();
+      stepCommand(projectRoot, 'demo-plan', PLAN_CONTRACT);
+      seedSession(projectRoot, 's', `${status} authority`, [{ command: 'demo-plan', status: 'sealed' }], { active: true });
+      const store = new SessionStore(projectRoot);
+      store.update('s', draft => {
+        draft.session.status = status;
+        return null;
+      });
+
+      const outcome = runNextStep(projectRoot, { sessionId: 's' });
+      expect(outcome.exitCode).toBe(2);
+      expect(outcome.reasonCode).toBe('CHAIN_COMPLETE');
+      expect(outcome.message).toContain(`session is "${status}"`);
+      expect(outcome.message).toContain('no Run was allocated');
+      expect(outcome.message).not.toMatch(/resume|blocker|escalation/i);
+      expect(store.readBundle('s').session.active_run_id).toBeNull();
+      expect(readChain(projectRoot, 's')[0].status).toBe('sealed');
+    },
+  );
+
   it('allocates only after an explicit run next following resume', () => {
     const projectRoot = root();
     stepCommand(projectRoot, 'demo-plan', PLAN_CONTRACT);
@@ -422,7 +454,11 @@ describe('run next — atomic chain binding', () => {
       expectedActivityRevision: paused.activity_revision,
       target: { kind: 'decision', id: 'DP-recovery', disposition: 'proceed' },
     });
-    expect(resolved.next.command).toBe('maestro session resume --session s');
+    expect(resolved.next.command).toContain('maestro run recover --session s');
+    expect(resolved.next.command).toContain('--resume');
+    expect(resolved.next.command).toContain('--request-id <request-id>');
+    expect(resolved.next.command).toContain(`--expected-identity-revision ${store.readBundle('s').session.identity_revision}`);
+    expect(resolved.next.command).toContain(`--expected-activity-revision ${store.readBundle('s').session.activity_revision}`);
     expect(store.readBundle('s').session).toMatchObject({ status: 'paused', active_run_id: null });
 
     const afterResolve = store.readBundle('s').session;

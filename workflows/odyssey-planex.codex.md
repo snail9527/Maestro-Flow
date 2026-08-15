@@ -254,12 +254,15 @@ Max iterations (default 3) prevents infinite loops.
 
 ## Knowledge Persistence (§8)
 
+Follow-up = governed candidate staging, NEVER a direct corpus write: `maestro knowledge stage spec "<title>" --content-file <path|-> --run {run_id} --category <cat>` (stage BEFORE seal; promote only after seal with a fresh receipt).
+
+
 | Category | Content | Follow-up |
 |----------|---------|-----------|
-| Multi-round fix cycle pattern | Problem scenario + fix iteration + final approach | `$maestro-spec add debug` |
-| Reusable implementation pattern | Pattern + applicable scope + code template | `$maestro-spec add coding` |
-| Acceptance criteria template | Standard template + verify_method suggestion | `$maestro-spec add review` |
-| Generalization pattern | Signature + risk + fix template | `$maestro-spec add coding` |
+| Multi-round fix cycle pattern | Problem scenario + fix iteration + final approach | `stage spec → debug` |
+| Reusable implementation pattern | Pattern + applicable scope + code template | `stage spec → coding` |
+| Acceptance criteria template | Standard template + verify_method suggestion | `stage spec → review` |
+| Generalization pattern | Signature + risk + fix template | `stage spec → coding` |
 
 ---
 
@@ -333,7 +336,7 @@ Status:      {ALL_PASSED|PARTIAL|ESCALATED}
 - [ ] understanding.md sections written progressively (§1–§8)
 - [ ] Criteria verified by method (test/grep/cli-review/manual); fix loop if needed
 - [ ] Multi-layer generalization + discovery triage (unless --skip-generalize)
-- [ ] phase_goals derived, tracked, and hardened-audited; Goal Prompt once
+- [ ] phase_goals derived, tracked, and hardened-audited; goal_mode injected via prepare goal:true
 - [ ] Session resumable via -c; completion summary emitted
 - [ ] Status: ALL_PASSED / PARTIAL / ESCALATED
 
@@ -343,11 +346,11 @@ Status:      {ALL_PASSED|PARTIAL|ESCALATED}
 
 | Condition | Next |
 |-----------|------|
-| Discovery issues created | `$maestro-manage issue list --source planex-odyssey` |
+| Discovery issues created | `$maestro-issue list --source planex-odyssey` |
 | Deeper debug needed | `$maestro-odyssey <finding> --mode debug` |
 | Formal review of changes | `$maestro-odyssey <changed-files> --mode review` |
 | UI-related findings | `$maestro-odyssey <component> --mode ui` |
 | Document pattern | `$maestro-learn decompose <module>` |
 | Second opinion | `$maestro-learn consult <understanding.md>` |
-| Reusable pattern to persist | `$maestro-spec add coding "..."` |
+| Reusable pattern to persist | `stage spec → coding` |
 | Pending decisions | Filter evidence phase=decision status=pending |

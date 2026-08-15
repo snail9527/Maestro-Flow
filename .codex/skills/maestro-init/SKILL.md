@@ -18,7 +18,7 @@ allowed-tools:
   - spawn_agents_on_csv
   - wait_agent
 session-mode: bootstrap
-version: 0.5.53
+version: 0.5.74
 ---
 
 <bootstrap_mode>
@@ -126,26 +126,26 @@ Created:
 
 ### Ralph-invoked completion
 
-End the step by calling the CLI (no text block output):
+End the step through the v3 Run lifecycle (no text block output):
 ```
-maestro run complete --session {session_id} --verdict {VERDICT} [--evidence {path}]
+maestro run complete {run_id} --session {session_id} --participant {participant_id} --actor {actor_id} --request-id {request_id} --reason "<reason>" --expected-orchestration-revision {orchestration_revision} --expected-run-revision {run_revision} --verdict {VERDICT} [--summary "<summary>"] --advance --json
 ```
-(run-id 可省略 — 自动解析当前 running 步)
+(run-id 由 birth packet 提供 — 自动解析当前 running 步)
 
-Verdicts:
+Verdicts (v3 surface):
 - **done** — Normal completion
-- **done-with-concerns** — Completed with concerns; pass `--note`
-- **needs-retry** — Tooling error / transient issue; orchestrator will retry
-- **blocked** — External hard blocker; pass `--reason`
+- **done_with_concerns** — Completed with concerns; pass `--summary` and put concerns in `report.md` frontmatter
+- **needs-retry / blocked** — handled by `maestro run transition {run_id} failed|blocked ...` or `maestro run cancel {run_id} ...`; the orchestrator retries via a later fenced `run next`
 
 ### Next-step routing
 
 | Condition | Suggestion |
 |-----------|-----------|
-| Roadmap needed (default light) | step `roadmap` (`maestro run prepare --platform codex roadmap` + `maestro run create roadmap --session YYYYMMDD-roadmap-{topic} --intent "{goal}"`) |
-| Full spec package | step `blueprint` (`maestro run prepare --platform codex blueprint` + `maestro run create blueprint --session YYYYMMDD-blueprint-{topic} --intent "{goal}"`) |
-| Explore ideas first | step `brainstorm` (`maestro run prepare --platform codex brainstorm` + `maestro run create brainstorm --session YYYYMMDD-brainstorm-{topic} --intent "{goal}"`) |
-| View project dashboard | `/maestro-manage status` |
+| Roadmap needed (default light) | step `roadmap` — open a v3 Session and dispatch: `maestro session open "<goal>" --id YYYYMMDD-roadmap-{topic} --chain roadmap --participant {p} --actor {a} --request-id {r} --reason "<reason>" --json` → fenced `maestro run next --session {session_id} ... --json` (or route via `/maestro-next`) |
+
+Note: roadmap step is responsible for creating `state.json.sessions[]` entries and setting the first `active_session_id`.
+| Full spec package | step `blueprint` — open a v3 Session (`maestro session open "<goal>" --id YYYYMMDD-blueprint-{topic} --chain blueprint ... --json` → fenced `maestro run next`), or route via `/maestro-next` |
+| Explore ideas first | step `brainstorm` — open a v3 Session (`maestro session open "<goal>" --id YYYYMMDD-brainstorm-{topic} --chain brainstorm ... --json` → fenced `maestro run next`), or route via `/maestro-next` |
 | Quick ad-hoc task | `/maestro-companion "{goal}"` |
 </completion>
 
@@ -153,14 +153,16 @@ Verdicts:
 | Code | Severity | Condition | Recovery |
 |------|----------|-----------|----------|
 | E001 | error | No arguments provided when -y requires @ reference | Check arguments format, re-run with correct input |
-| E002 | error | .workflow/ already exists for greenfield init | Check .workflow/ directory state, resolve conflicts |
+| E002 | error | .workflow/ already exists (greenfield init) | Use --from to import existing state, or remove .workflow/ to start fresh |
 | E003 | error | Context source not found (--from / --from-brainstorm) | Check arguments format, re-run with correct input |
+| E004 | error | Template file missing in ~/.maestro/templates/ | Run maestro-update to restore templates |
+| E005 | warning | .workflow/ already exists (existing codebase onboarding) | Merge with existing state or overwrite; user chooses via request_user_input |
 | W001 | warning | Research agent failed, continuing with partial results | Retry research or proceed with partial results |
 </error_codes>
 
 <success_criteria>
 - [ ] `.workflow/project.md` created with Core Value, Requirements (Validated/Active/Out of Scope), Key Decisions
-- [ ] `.workflow/state.json` created with artifacts[] array, initialized to idle state
+- [ ] `.workflow/state.json` created with artifacts[] array and empty sessions[] array, initialized to idle state
 - [ ] `.workflow/config.json` created with workflow / execution / git / gates / codebase / guard / collab / specInjection / dashboard segments
 - [ ] `.workflow/specs/` initialized with convention files
 - [ ] All interview decisions written to project.md / config.json before proceeding

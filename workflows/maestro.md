@@ -1,4 +1,9 @@
-<!-- session-mode: inherited -->
+---
+name: maestro
+session-mode: inherited
+prepare: maestro
+commands: [maestro]
+---
 
 <required_reading>
 @~/.maestro/workflows/run-mode.md
@@ -6,9 +11,9 @@
 # Workflow: maestro — Chain Catalog
 
 > 本文件是 `/maestro` 命令体（A_CLASSIFY_INTENT）消费的**语义目录**：意图 → task_type → chain。
-> 执行流程（状态机、session 创建、`Agent(ralph-executor)` 派发、决策评估、compose/play 模板系统）全部在命令体内定义，本文件不含执行语义。
+> 执行流程由 `orchestrator-run-loop.md` 与 Run Runtime 定义，本文件只提供初始意图分类和 chain reference，不含 lifecycle 或 mutation 语义。
 >
-> **cmd 记法**：裸名称（`plan`、`execute`、`review`…）= first-tier step；`maestro-*` 与 `quality-refactor` = 独立 command 名。`team-*` 与 `maestro-odyssey` 是用户手动入口，明确排除在本目录的分类和 chain routing 之外。
+> **cmd 记法**：裸名称（`plan`、`execute`、`review`…）= first-tier step；`maestro-*` = 独立 command 名。`team-*` 与 `maestro-odyssey` 是用户手动入口，明确排除在本目录的分类和 chain routing 之外。
 
 ## Intent → task_type
 
@@ -16,7 +21,7 @@
 
 ```
 continue/next/go/继续/下一步 → 'state_continue'
-status/状态/dashboard        → 'status'
+status/状态/dashboard        → 'status'  (CLI short-circuit — 见 chain catalog)
 ```
 
 ### Semantic matching
@@ -48,13 +53,12 @@ Directly match user intent to the best `task_type` (maps to chain in chainMap). 
 | `debug` | Diagnose, troubleshoot, fix broken behavior |
 | `refactor` | Restructure, clean up, reduce tech debt |
 | `init` | Initialize project |
-| `sync` | Update/sync documentation |
+| `sync` | Re-index the codebase knowledge graph *(CLI short-circuit: `Bash("maestro kg index")` — no chain)* |
+| `status` | View project/Session state *(CLI short-circuit: `Bash("maestro session status")`; 无 compatible Session 时退回 `maestro session list` — no chain)* |
 | `retrospective` | Phase review, post-mortem, 复盘 |
 | `learn` | Capture insights, record learnings |
 | `fork` | Create worktree for parallel dev |
 | `merge` | Merge worktree back |
-| `compose` | Design/compose reusable workflows *(handled by command body A_COMPOSE_TEMPLATE — no chain)* |
-| `play` | Run a saved workflow template *(handled by command body A_PLAY_TEMPLATE — no chain)* |
 | `overlay` | Create/edit command overlays |
 | `update` | Update maestro itself |
 | `harvest` | Extract knowledge from artifacts |
@@ -70,10 +74,10 @@ Directly match user intent to the best `task_type` (maps to chain in chainMap). 
 | `issue_analyze` | Analyze a specific issue |
 | `issue_plan` | Plan fix for an issue |
 | `issue_execute` | Fix issue end-to-end (auto-upgrades to issue-full) |
-| `full-lifecycle` | Complete phase: plan→execute→review→test→session-seal |
+| `full-lifecycle` | Complete phase: plan→execute→review→test→harvest→session-seal |
 | `grill` | Stress-test a plan/idea against codebase reality (Socratic; `-y` → Auto mode code-answers, stage NOT skipped) |
 | `blueprint` | Formal spec package — 7-phase spec-generate |
-| `analyze-macro` | Broad/medium intent, no numeric phase — produces scope_verdict for ralph `post-analyze-scope` |
+| `analyze-macro` | Broad/medium intent, no numeric phase — produces scope evidence for a later decision node |
 | `brainstorm-driven` | Start from exploration/brainstorm |
 | `spec-driven` | From spec/requirements (heavy, with init) |
 | `roadmap-driven` | From requirements (light, with init) |
@@ -118,9 +122,9 @@ resolvePhase — priority order:
   3. From project state artifacts: in-progress execute → first incomplete phase → latest artifact phase
   4. null if chain is 'analyze-plan-execute' (uses {run_dir} instead)
   5. null if all chain commands are phase-independent:
-     maestro-manage status, maestro-manage issue, maestro-manage issue discover, maestro-init,
+     maestro-issue, maestro-issue discover, maestro-init,
      maestro-fork, maestro-merge, roadmap, maestro-spec setup,
-     maestro-manage knowledge (knowhow/capture/harvest/wiki/domain), maestro-manage sync (codebase/rebuild),
+     maestro-knowledge (knowhow/capture/harvest/wiki/domain),
      maestro-session-seal
   6. Ask user
 
@@ -138,7 +142,9 @@ When executing issue chains, replace `{issue_id}` in step args with resolved ID.
 ```javascript
 const chainMap = {
   // ── Single-step ──
-  'status':             [{ cmd: 'maestro-manage status' }],
+  // 'status' 与 'sync' 无 chainMap 条目——承载它们的 command 已退役，改为 CLI short-circuit
+  // （见 chain catalog 与 detectNextAction）。旧的 'codebase_rebuild'/'codebase_refresh'/'spec_map'
+  // 一并并入 'sync'，不再是独立 task_type。
   'init':               [{ cmd: 'maestro-init' }],
   'grill':              [{ cmd: 'grill', args: '"{description}"' }],
   'blueprint':          [{ cmd: 'blueprint', args: '"{description}"' }],
@@ -156,33 +162,29 @@ const chainMap = {
   'test':               [{ cmd: 'test', args: '{phase}' }],
   'debug':              [{ cmd: 'debug', args: '"{description}"' }],
   'integration_test':   [{ cmd: 'auto-test', args: '{phase}' }],
-  'refactor':           [{ cmd: 'quality-refactor', args: '"{description}"' }],
+  'refactor':           [{ cmd: 'analyze', args: '"{description}" -q' }, { cmd: 'plan', args: '--dir {run_dir}' }, { cmd: 'execute', args: '--dir {run_dir}' }],
   'review':             [{ cmd: 'review', args: '{phase}' }],
   'retrospective':      [{ cmd: 'retrospective', args: '{phase}' }],
-  'learn':              [{ cmd: 'maestro-manage knowledge capture', args: '"{description}"' }],
-  'sync':               [{ cmd: 'maestro-manage sync codebase' }],
+  'learn':              [{ cmd: 'maestro-knowhow', args: '"{description}"' }],
   'milestone_close':    [{ cmd: 'maestro-session-seal' }],
-  'milestone_audit':    [{ cmd: 'maestro-ralph', args: '"{description}" --engine swarm --script wf-milestone-audit' }],
+  'milestone_audit':    [{ cmd: 'review', args: '"{description}"' }],
   'milestone_complete': [{ cmd: 'maestro-session-seal' }],
-  'codebase_rebuild':   [{ cmd: 'maestro-manage sync rebuild' }],
-  'codebase_refresh':   [{ cmd: 'maestro-manage sync codebase' }],
   'spec_setup':         [{ cmd: 'maestro-spec setup' }],
   'spec_add':           [{ cmd: 'maestro-spec add', args: '"{description}"' }],
   'spec_load':          [{ cmd: 'maestro-spec load' }],
-  'spec_map':           [{ cmd: 'maestro-manage sync rebuild' }],
-  'domain_add':         [{ cmd: 'maestro-manage knowledge domain', args: '"{description}"' }],
-  'knowhow_capture':    [{ cmd: 'maestro-manage knowledge capture', args: '"{description}"' }],
-  'issue':              [{ cmd: 'maestro-manage issue', args: '"{description}"' }],
-  'issue_discover':     [{ cmd: 'maestro-manage issue discover', args: '"{description}"' }],
+  'domain_add':         [{ cmd: 'maestro-knowledge domain', args: '"{description}"' }],
+  'knowhow_capture':    [{ cmd: 'maestro-knowhow', args: '"{description}"' }],
+  'issue':              [{ cmd: 'maestro-issue', args: '"{description}"' }],
+  'issue_discover':     [{ cmd: 'maestro-issue discover', args: '"{description}"' }],
   'issue_analyze':      [{ cmd: 'analyze', args: '--gaps "{description}"' }],
   'issue_plan':         [{ cmd: 'plan', args: '--gaps' }],
   'issue_execute':      [{ cmd: 'execute', args: '' }],
-  'knowhow':            [{ cmd: 'maestro-manage knowledge knowhow', args: '"{description}"' }],
+  'knowhow':            [{ cmd: 'maestro-knowhow', args: '"{description}"' }],
   'fork':               [{ cmd: 'maestro-fork', args: '-m {milestone_num}' }],
   'merge':              [{ cmd: 'maestro-merge', args: '-m {milestone_num}' }],
 
   // ── Multi-step chains ──
-  'full-lifecycle':       [{ cmd: 'plan', args: '{phase}' }, { cmd: 'execute', args: '{phase}' }, { cmd: 'review', args: '{phase}' }, { cmd: 'test', args: '{phase}' }, { cmd: 'maestro-session-seal' }, { cmd: 'harvest', args: '--auto' }],
+  'full-lifecycle':       [{ cmd: 'plan', args: '{phase}' }, { cmd: 'execute', args: '{phase}' }, { cmd: 'review', args: '{phase}' }, { cmd: 'test', args: '{phase}' }, { cmd: 'harvest', args: '--auto' }, { cmd: 'maestro-session-seal' }],
   'spec-driven':          [{ cmd: 'maestro-init' }, { cmd: 'roadmap', args: '--mode full "{description}"' }, { cmd: 'plan', args: '{phase}' }, { cmd: 'execute', args: '{phase}' }, { cmd: 'harvest', args: '--auto' }],
   'roadmap-driven':       [{ cmd: 'maestro-init' }, { cmd: 'roadmap', args: '"{description}"' }, { cmd: 'plan', args: '{phase}' }, { cmd: 'execute', args: '{phase}' }, { cmd: 'harvest', args: '--auto' }],
   'grill-driven':         [{ cmd: 'grill', args: '"{description}"' }, { cmd: 'brainstorm', args: '"{description}" --from grill:{grill_id}' }, { cmd: 'plan', args: '{phase}' }, { cmd: 'execute', args: '{phase}' }, { cmd: 'harvest', args: '--auto' }],
@@ -197,11 +199,11 @@ const chainMap = {
   'next-milestone':       [{ cmd: 'roadmap', args: '"{description}"' }, { cmd: 'plan', args: '{phase}' }, { cmd: 'execute', args: '{phase}' }],
   'review-fix':           [{ cmd: 'plan', args: '{phase} --gaps' }, { cmd: 'execute', args: '{phase}' }, { cmd: 'review', args: '{phase}' }],
   'quality-loop-partial': [{ cmd: 'plan', args: '{phase} --gaps' }, { cmd: 'execute', args: '{phase}' }],
-  'issue-full':           [{ cmd: 'analyze', args: '--gaps {issue_id}' }, { cmd: 'plan', args: '--gaps' }, { cmd: 'execute', args: '' }, { cmd: 'review', args: '{phase}' }, { cmd: 'maestro-manage issue', args: 'close {issue_id} --resolution fixed' }, { cmd: 'harvest', args: '--auto' }],
-  'issue-quick':          [{ cmd: 'plan', args: '--gaps' }, { cmd: 'execute', args: '' }, { cmd: 'maestro-manage issue', args: 'close {issue_id} --resolution fixed' }],
+  'issue-full':           [{ cmd: 'analyze', args: '--gaps {issue_id}' }, { cmd: 'plan', args: '--gaps' }, { cmd: 'execute', args: '' }, { cmd: 'review', args: '{phase}' }, { cmd: 'maestro-issue', args: 'close {issue_id} --resolution fixed' }, { cmd: 'harvest', args: '--auto' }],
+  'issue-quick':          [{ cmd: 'plan', args: '--gaps' }, { cmd: 'execute', args: '' }, { cmd: 'maestro-issue', args: 'close {issue_id} --resolution fixed' }],
 
   'harvest':              [{ cmd: 'harvest', args: '"{description}"' }],
-  'wiki':                 [{ cmd: 'maestro-manage knowledge wiki' }],
+  'wiki':                 [{ cmd: 'maestro-knowledge wiki' }],
   'wiki_connect':         [{ cmd: 'wiki-connect' }],
   'wiki_digest':          [{ cmd: 'wiki-digest' }],
   'business_test':        [{ cmd: 'auto-test', args: '{phase}' }],
@@ -241,11 +243,15 @@ detectNextAction(state):
     default:    → 'status'
 ```
 
+`'status'` 是唯一的非 chain 落点：它没有 chainMap 条目，代表"无法判定下一步"。命中时执行
+`Bash("maestro session status")`（无 compatible Session 则 `maestro session list`），把输出呈现给用户后
+询问下一步——与 resolvePhase 第 6 步同一模式。不得据此自行推断并启动任何 chain。进入 Run 循环后所有 status/check/evidence 调用必须显式传 session_id。
+
 ### Chain Reference
 
 | Chain | Steps | Use Case |
 |-------|-------|----------|
-| `full-lifecycle` | plan → execute → review → test → session-seal → harvest | Full milestone completion |
+| `full-lifecycle` | plan → execute → review → test → harvest → session-seal (harvest stages candidates BEFORE seal; sealed runs reject stage writes) | Full milestone completion |
 | `blueprint-driven` | init → blueprint → plan → execute → harvest | From idea/requirements (heavy) |
 | `roadmap-driven` | init → roadmap → plan → execute → harvest | From requirements (light) |
 | `brainstorm-driven` | brainstorm → plan → execute → harvest | From exploration |
@@ -264,7 +270,7 @@ detectNextAction(state):
 | Input | task_type | Chain |
 |-------|-----------|-------|
 | `"continue"` | *(exact)* state_continue | (from state) |
-| `"status"` | *(exact)* status | maestro-manage status |
+| `"status"` | *(exact)* status | *(CLI short-circuit)* `maestro session status` |
 | `"plan phase 2"` | plan | plan 2 |
 | `"execute"` | execute | execute |
 | `"Add API endpoint"` | companion | `/maestro-companion "Add API endpoint"` |
@@ -273,13 +279,13 @@ detectNextAction(state):
 | `"修复登录问题"` | debug | debug "登录" |
 | `"fix issue ISS-abc-001"` | issue_execute | issue-full |
 | `"这个问题需要看看"` | analyze | analyze |
-| `"创建一个 issue 跟踪"` | issue | maestro-manage issue |
-| `"discover issues"` | issue_discover | maestro-manage issue discover |
+| `"创建一个 issue 跟踪"` | issue | maestro-issue |
+| `"discover issues"` | issue_discover | maestro-issue discover |
 | `"brainstorm notifications"` | brainstorm-driven | brainstorm→plan→execute |
 | `"spec generate auth"` | spec-driven | init→spec→plan→execute |
 | `"ui design landing"` | impeccable_build | maestro-impeccable --chain build |
 | `"优化界面交互"` | impeccable_improve | maestro-impeccable --chain improve |
-| `"refactor auth module"` | refactor | quality-refactor "auth module" |
+| `"refactor auth module"` | refactor | analyze→plan→execute |
 | `"复盘 phase 2"` | retrospective | retrospective 2 |
 | `"next phase"` | milestone-close | maestro-session-seal |
 | `-y "implement X"` | execute | execute (auto) |

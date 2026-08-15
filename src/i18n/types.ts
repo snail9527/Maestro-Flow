@@ -52,6 +52,7 @@ export interface LocaleStrings {
     groupMcp: string;
     groupAppearance: string;
     groupEmbedding: string;
+    groupEntryCommands: string;
     hubScope: string;
     hubGlobal: string;
     hubProject: string;
@@ -82,6 +83,9 @@ export interface LocaleStrings {
     hubDetailCodexMcp: string;
     hubDetailAgyHooks: string;
     hubDetailExtraMcp: string;
+
+    // Pi Agent — not installed by maestro; install the pi Maestro Flow plugin
+    piPluginReminder: string;
 
     // Hooks granular
     hooksIndividual: string;

@@ -11,6 +11,7 @@ import { ExtraMcpConfig } from './ExtraMcpConfig.js';
 import { StatuslineConfig } from './StatuslineConfig.js';
 import { BackupConfig } from './BackupConfig.js';
 import { EmbeddingPanel } from './EmbeddingPanel.js';
+import { EntryCommandsConfig } from './EntryCommandsConfig.js';
 import { InstallConfirm } from './InstallConfirm.js';
 import { InstallExecution, type InstallFlowResult } from './InstallExecution.js';
 import { InstallResult } from './InstallResult.js';
@@ -35,6 +36,7 @@ const CONFIG_STEPS = [
   'codex_hooks_config', 'codex_mcp_config',
   'agy_hooks_config', 'extra_mcp_config',
   'statusline_config', 'backup_config', 'embedding_config',
+  'entry_commands_config',
 ];
 
 export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initialStepIds, initialProjectPath }: InstallFlowProps) {
@@ -71,6 +73,7 @@ export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initia
       case 'extra_mcp_config': return [hub, t.install.groupMcp, t.install.hubLabelExtraMcp];
       case 'backup_config': return [hub, t.install.groupCore, t.install.hubLabelBackup];
       case 'embedding_config': return [hub, t.install.groupEmbedding, 'Embedding Model'];
+      case 'entry_commands_config': return [hub, t.install.groupEntryCommands, 'Entry Commands'];
       default: return null;
     }
   }, [s.step]);
@@ -239,6 +242,15 @@ export function InstallFlow({ pkgRoot, version, initialStep, initialMode, initia
           <EmbeddingPanel onDone={s.returnFromConfig} />
         )}
 
+        {s.step === 'entry_commands_config' && (
+          <EntryCommandsConfig
+            eligibleSteps={s.eligibleEntrySteps}
+            selectedSteps={s.selectedEntrySteps}
+            onSelectionChange={s.setSelectedEntrySteps}
+            onDone={s.returnFromConfig}
+          />
+        )}
+
         {s.step === 'confirm' && (
           <InstallConfirm
             config={s.flowConfig}
@@ -279,7 +291,6 @@ const PLATFORM_DEFS = [
   { id: 'qoder',           label: 'Qoder / Qoder CN',   desc: 'Skills, agents → .qoder/' },
   { id: 'codebuddy',       label: 'CodeBuddy',          desc: 'Skills, agents → .codebuddy/' },
   { id: 'droid',           label: 'Droid',              desc: 'Skills, agents → .factory/' },
-  { id: 'pi',              label: 'Pi Agent',           desc: 'Skills, agents → .pi/' },
   { id: 'trae',            label: 'Trae / Trae CN',     desc: 'Skills, agents → .trae/' },
   { id: 'roo',             label: 'Roo Code',           desc: 'Skills, agents → .roo/' },
   { id: 'aider-desk',      label: 'AiderDesk',          desc: 'Skills, agents → .aider-desk/' },
@@ -499,6 +510,12 @@ function PlatformSelector({
           <Text dimColor>]</Text>
         </Box>
         <Text dimColor>(Use Left/Right or h/l to page)</Text>
+      </Box>
+
+      {/* Pi Agent — installed via the pi Maestro Flow plugin, not by maestro */}
+      <Box marginTop={1}>
+        <Text color={C.warning}>⚠ </Text>
+        <Text color={C.warning} wrap="wrap">{t.install.piPluginReminder}</Text>
       </Box>
 
       <KeyHints hints={`[Space/1-9] Toggle  [Up/Down] Navigate  [Left/Right] Page  [g/p] Scope  [Enter] Next  [Esc] Exit`} />

@@ -21,13 +21,14 @@ Maestro 知识管理分为 **Spec**（编码约束/工具）和 **Wiki**（广�
 
 ### 文件与 Category 映射
 
-每个 spec 文件是一个 category 的主文档。`maestro-spec load --category` 加载主文档全文 + 跨文件 keyword 匹配条目。
+每个 spec 文件是一个 category 的主文档。`maestro spec load --category` 加载主文档全文 + 跨文件 keyword 匹配条目。
 
 | 文件 | Category | 隐式角色 | 用途 |
 |------|----------|---------|------|
 | `coding-conventions.md` | coding | implement | 命名、导入、格式、模式 |
 | `architecture-constraints.md` | arch | plan | 模块结构、层边界 |
-| `review-standards.md` | review | review | 质量规则、检查清单 |
+| `quality-rules.md` | quality | review | 质量标准、可维护性 |
+| `review-standards.md` | review | review | 评审检查清单、质量门禁 |
 | `debug-notes.md` | debug | analyze | 调试技巧、根因记录 |
 | `test-conventions.md` | test | test | 测试框架、覆盖率要求 |
 | `learnings.md` | learning | implement | Bug、陷阱、经验教训 |
@@ -51,13 +52,13 @@ Revoked column must be set rather than deleting tokens.
 
 | 属性 | 必需 | 说明 |
 |------|------|------|
-| `category` | 是 | 单值：coding, arch, review, debug, test, learning, ui |
+| `category` | 是 | 单值：coding, arch, quality, debug, test, review, learning, ui |
 | `keywords` | 是 | 逗号分隔，小写，跨 category 发现 |
 | `date` | 是 | `YYYY-MM-DD` |
 | `source` | 否 | 来源（manual / agent / phase） |
 | `ref` | 否 | 指向 knowhow 详情文档的路径 |
 | `confidence` | 否 | 置信度：`high` / `medium` / `low` / `contested` |
-| `sid` | 否 | 稳定身份标识（格式 `S-YYYYMMDD-xxxx`，`maestro-spec add` 自动生成） |
+| `sid` | 否 | 稳定身份标识（格式 `S-YYYYMMDD-xxxx`，`maestro spec add` 自动生成） |
 | `supersedes` | 否 | 此条目替代的旧条目 sid |
 | `superseded-by` | 否 | 替代此条目的新条目 sid |
 | `status` | 否 | 生命周期状态：`active`（默认）/ `deprecated` |
@@ -94,7 +95,7 @@ Revoked column must be set rather than deleting tokens.
 
 1. Agent 搜索知识 → 发现与当前上下文矛盾 → 调用 `maestro spec conflict mark` 标记
 2. 注入时：`contested` 条目移到末尾并显示警告；`low` 条目添加降级标记
-3. 审计清除：`/manage-knowledge-audit` 或 `maestro spec conflict clear` 消除标记
+3. 审计清除：`/maestro-knowledge audit` 或 `maestro spec conflict clear` 消除标记
 
 #### 健康检查
 
@@ -128,7 +129,7 @@ Store tokens in httpOnly cookies.
 
 ### Tool 发现
 
-Tool 是标记了 `tool: true` YAML 头的 knowhow 文档。`maestro-spec load --category` 自动扫描 `knowhow/` 中匹配 category + tool 的条目，追加摘要。
+Tool 是标记了 `tool: true` YAML 头的 knowhow 文档。`maestro spec load --category` 自动扫描 `knowhow/` 中匹配 category + tool 的条目，追加摘要。
 
 <details>
 <summary>Knowhow tool 示例 + spec ref 条目</summary>
@@ -160,8 +161,7 @@ Use when testing payment integration endpoints for retry safety.
 
 </details>
 
-- **注册**：`/maestro-tools-register` — 将可复用流程编码为 knowhow tool 文档
-- **执行**：`/maestro-tools-execute` — 按名称或 category 加载 tool，逐步执行
+Tool 无需专门的注册/执行命令：用 `/maestro-knowhow`（recipe 类型 + `--tool`）沉淀带 `tool: true` 的 knowhow 文档，agent 通过 `maestro spec load --category` 自动发现并注入摘要。
 
 ### Spec 命令
 
@@ -178,15 +178,15 @@ maestro spec load --keyword <kw>                     # 跨所有文件
 ### Progressive Fill
 
 ```
-maestro-init    → spec-setup     maestro-analyze → arch, coding
-maestro-plan    → coding, test   maestro-execute → learning, debug
-maestro-execute → review (via E2.7 verification gate)
+maestro-init → spec init      analyze → arch, coding
+plan         → coding, test   execute → learning, debug
+execute      → review (via E2.7 verification gate)
 ```
 
 ### 关键词系统
 
-- `maestro-spec add` 自动提取 3-5 个领域关键词
-- `maestro-spec load --keyword <kw>` 跨所有 category 文件匹配 `<spec-entry>` 的 keywords
+- `maestro spec add` 自动提取 3-5 个领域关键词
+- `maestro spec load --keyword <kw>` 跨所有 category 文件匹配 `<spec-entry>` 的 keywords
 - 旧版标题条目回退到文本搜索
 
 ---
@@ -274,8 +274,7 @@ Wiki 条目支持与 spec 一致的 `category` 标注。每个 category 映射�
 
 ```bash
 maestro wiki list --category coding    # 按 category 浏览
-maestro wiki list --keyword auth       # 按关键词过滤
-maestro wiki list --tool               # 列出所有 tool
+maestro wiki list --query auth         # 按关键词过滤
 maestro wiki load <id1> [id2...]       # 加载选定文档
 ```
 
@@ -290,7 +289,7 @@ maestro wiki load <id1> [id2...]       # 加载选定文档
 ### Wiki 命令
 
 ```bash
-maestro wiki list [--type <type>] [--category <cat>] [--keyword <kw>] [--tool] [-q <query>]
+maestro wiki list [--type <type>] [--category <cat>] [-q <query>]
 maestro wiki load <id1> [id2...] [--json]
 maestro wiki get <id> | search <query>
 maestro wiki create --type knowhow --slug <slug> --title <title>
@@ -298,7 +297,6 @@ maestro wiki append <containerId> --body <text> [--category <cat>] [--keywords <
 maestro wiki remove-entry <subEntryId>
 
 maestro knowhow add --type <type> --title <title> --body <text>
-maestro knowhow add --type asset --asset-type api-contract --code-paths "src/api/"
 maestro knowhow list [--type <type>] | search <query>
 
 maestro wiki health | graph | orphans | hubs
@@ -379,7 +377,7 @@ WikiIndexer 将 `<spec-entry>` 和 `<knowhow-entry>` 解析为独立的 WikiEntr
 # -- Spec -----------------------------------------------------------------
 maestro spec init [--scope <scope>] [--uid <uid>]
 maestro spec load [--category <cat>] [--keyword <kw>] [--scope <scope>] [--json] [--uid <uid>] [--stdin]
-maestro spec add <category> "<title>" "<content>" [--keywords kw1,kw2] [--description <desc>] [--source <src>] [--ref <path>] [--knowhow-type <type>] [--uid <uid>] [--stdin] [--json]
+maestro spec add <category> "<title>" "<content>" [--keywords kw1,kw2] [--description <desc>] [--source <src>] [--ref <path>] [--knowhow-type <type>] [--uid <uid>] [--json]
 maestro spec list [--scope <scope>] [--uid <uid>]
 maestro spec status [--scope <scope>] [--uid <uid>]
 
@@ -396,23 +394,19 @@ maestro spec analytics [--json] [--recent <n>] [--summary] [--clear] [--tui]
 
 # -- Supersession 演化替代 ----------------------------------------------------
 maestro spec supersede <old-sid> --by <new-sid>                            # 演化替代（旧条目 deprecated）
-maestro spec history <sid> [--json]                                        # 查看演化链（oldest → newest）
+maestro spec history <sid>                                            # 查看演化链（oldest → newest）
 maestro spec health [--json]                                               # 知识健康报告（统计 + 完整性校验）
 maestro spec backfill-sid                                                  # 回填存量无 sid 条目（幂等）
 
 # -- Conflict 置信度与冲突标记 ------------------------------------------------
-maestro spec conflict list [--json]                                       # 列出所有冲突/降级条目
-maestro spec conflict mark <file> <line> --note "<reason>" [--marker <id>] [--confidence <level>]
-maestro spec conflict clear <file> <line> [--confidence <level>]          # 清除冲突标记
+maestro spec conflict list                                       # 列出所有冲突/降级条目
+maestro spec conflict mark <file> <line> --note "<reason>"
+maestro spec conflict clear <file> <line>                                # 清除冲突标记
 maestro spec conflict set-confidence <file> <line> <level>                # 设置置信度
-maestro spec conflict clear-all <file> [--confidence <level>]             # 批量清除文件内所有冲突
-
-# -- Tool 发现 ------------------------------------------------------------
-/maestro-tools-register "<description>"
-/maestro-tools-execute "<name>" | --category <cat>
+maestro spec conflict clear-all <file>                                   # 批量清除文件内所有冲突
 
 # -- Wiki -----------------------------------------------------------------
-maestro wiki list [--type <type>] [--category <cat>] [--keyword <kw>] [--tool] [-q <query>] [--group] [--json]
+maestro wiki list [--type <type>] [--category <cat>] [-q <query>] [--json]
 maestro wiki load <id1> [id2...] [--json]
 maestro wiki get <id> [--json]
 maestro wiki search <query> [--json]                                       # [deprecated] 推荐 maestro search
@@ -421,8 +415,7 @@ maestro wiki append <containerId> --body <text> [--category <cat>] [--keywords <
 maestro wiki remove-entry <subEntryId> | update <id> [--title <title>] [--frontmatter <json>] | delete <id>
 
 # -- Knowhow --------------------------------------------------------------
-maestro knowhow add --type <type> --title <title> --body <text> [--keywords <csv>]
-maestro knowhow add --type asset --asset-type <type> --code-paths <paths>
+maestro knowhow add --type <type> --title <title> --body <text>
 maestro knowhow list [--type <type>] [--json] | search <query> [--json] | get <id> [--json]
 
 # -- 图 -------------------------------------------------------------------

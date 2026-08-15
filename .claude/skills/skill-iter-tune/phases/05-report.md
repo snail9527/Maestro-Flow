@@ -147,14 +147,7 @@ Write(`${state.work_dir}/iteration-state.json`, JSON.stringify(state, null, 2));
 
 ### Step 5.4: Close the Run (see run-mode.md)
 
-Before reporting completion, close the Run:
-
-```bash
-maestro run check {run_id}     # repair any reported gate
-maestro run complete {run_id}
-```
-
-Report success only after `run complete` succeeds.
+Before reporting completion, run `maestro run check {run_id}` and repair any reported gate. If this Run was self-started, use the complete fenced `maestro run complete ... --advance` (and `maestro session complete` when the chain is terminal) from `run-mode.md` with the current locator and `orchestration_revision`. If it was dispatched, return to the orchestrator. Report success only after the authoritative completion path succeeds.
 
 ### Step 5.5: Display Summary to User
 
@@ -178,4 +171,4 @@ Backups: {backupDir}/
 
 - **Files**: `final-report.md`
 - **State**: `status = completed`
-- **Next**: Run completed via `maestro run complete`. Return control to user.
+- **Next**: Run completed via `maestro run complete ... --advance`. Return control to the orchestrator (session completion is orchestrated, not executor-side).

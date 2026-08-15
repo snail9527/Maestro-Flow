@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import { paths } from '../config/paths.js';
 import {
+  chainEffectSchema,
   contractSnapshotSchema,
   type ContractSnapshot,
 } from './protocol-schemas.js';
@@ -55,10 +56,12 @@ const consumeV20Schema = z.object({
   required: z.boolean(),
   require_status: z.literal('sealed').optional(),
   schema: z.string().min(1).optional(),
+  schema_range: z.string().min(1).optional(),
 }).strict();
 
 const consumeV21Schema = consumeV20Schema.extend({
   role: z.enum(['primary', 'attachment', 'evidence', 'checkpoint']).optional(),
+  accepts_negative_evidence: z.boolean().optional(),
 }).strict();
 
 const commandArgumentSchema = z.object({
@@ -67,6 +70,15 @@ const commandArgumentSchema = z.object({
   required: z.boolean(),
   default: z.union([z.string(), z.number(), z.boolean()]).optional(),
   question: z.string().min(1).optional(),
+}).strict();
+
+export type ChainEffect = z.infer<typeof chainEffectSchema>;
+
+const orchestrationContractSchema = z.object({
+  chain_effects: z.array(chainEffectSchema).max(4).refine(
+    effects => new Set(effects).size === effects.length,
+    { message: 'duplicate chain effect' },
+  ),
 }).strict();
 
 const produceV2Schema = z.object({
@@ -91,15 +103,40 @@ const gateDefinitionV2Schema = z.union([
 ]);
 
 function refineStrictContract(
-  contract: { consumes: Array<{ alias?: string }>; produces: Array<{ alias?: string; path: string; role: string; required: boolean }> },
+  contract: {
+    consumes: Array<{ kind?: string; alias?: string; schema?: string; schema_range?: string }>;
+    produces: Array<{ alias?: string; path: string; role: string; required: boolean }>;
+  },
   context: z.RefinementCtx,
 ): void {
+  // Producer aliases must be unique within one contract so registry.aliases[alias]
+  // stays unambiguous after seal. A consume may reuse a producer alias: consume
+  // binds the alias target registered at create time (a previous sealed Run),
+  // while the same alias is registered/superseded only when this Run seals — the
+  // two phases never overlap.
   const aliases = new Set<string>();
-  for (const item of [...contract.consumes, ...contract.produces]) {
+  for (const item of contract.produces) {
     if (!item.alias) continue;
     if (aliases.has(item.alias)) context.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate contract alias: ${item.alias}` });
     aliases.add(item.alias);
   }
+  contract.consumes.forEach((item, index) => {
+    if (item.schema && item.schema_range) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `consumes[${index}] declares both schema and schema_range; pick exactly one`,        });
+    }
+    if (item.schema_range) {
+      const match = /^([^/]+)\/([0-9]+)\.x$/.exec(item.schema_range);
+      const majorNoLeadingZero = match ? match[2] === '0' || !match[2].startsWith('0') : false;
+      if (!match || !majorNoLeadingZero || match[1] !== item.kind) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `consumes[${index}].schema_range must match '<kind>/<major>.x' with kind equal to consumes kind and major without leading zeros: ${item.schema_range}`,
+        });
+      }
+    }
+  });
   const paths = new Set<string>();
   for (const output of contract.produces) {
     const normalized = output.path.replaceAll('\\', '/');
@@ -116,6 +153,7 @@ function refineStrictContract(
 
 const commandContractV20Schema = z.object({
   contract_version: z.literal(2),
+  orchestration: orchestrationContractSchema.optional(),
   consumes: z.array(consumeV20Schema).default([]),
   produces: z.array(produceV2Schema).default([]),
   gates: z.object({
@@ -126,6 +164,7 @@ const commandContractV20Schema = z.object({
 
 const commandContractV21Schema = z.object({
   contract_version: z.literal(2.1),
+  orchestration: orchestrationContractSchema.optional(),
   arguments: z.array(commandArgumentSchema).default([]),
   consumes: z.array(consumeV21Schema).default([]),
   produces: z.array(produceV2Schema).default([]),
@@ -141,7 +180,9 @@ export interface CommandContractConsume {
   required: boolean;
   require_status?: 'sealed';
   schema?: string;
+  schema_range?: string;
   role?: 'primary' | 'attachment' | 'evidence' | 'checkpoint';
+  accepts_negative_evidence?: boolean;
 }
 
 export interface CommandArgumentContract {
@@ -168,6 +209,7 @@ export interface CommandContract {
   consumes: CommandContractConsume[];
   arguments: CommandArgumentContract[];
   produces: CommandContractProduce[];
+  orchestration?: { chain_effects: ChainEffect[] };
   gates: { entry: ContractGateDefinition[]; exit: ContractGateDefinition[] };
   compatibility_warnings?: string[];
 }
@@ -201,11 +243,15 @@ export function parseCommandContract(raw: unknown): CommandContract {
         ...item,
         primary: item.role === 'primary',
       })),
+      ...(parsed.orchestration ? { orchestration: parsed.orchestration } : {}),
       gates: parsed.gates,
       compatibility_warnings: [],
     };
   }
   const parsed = commandContractV1Schema.parse(raw ?? {});
+  const orchestration = raw && typeof raw === 'object' && 'orchestration' in raw
+    ? orchestrationContractSchema.parse((raw as { orchestration: unknown }).orchestration)
+    : undefined;
   const warnings = semanticWarnings(parsed);
   return {
     contract_version: 1,
@@ -227,6 +273,7 @@ export function parseCommandContract(raw: unknown): CommandContract {
       required: false,
       ...(typeof item.schema === 'string' ? { schema: item.schema } : {}),
     })),
+    ...(orchestration ? { orchestration } : {}),
     gates: parsed.gates,
     compatibility_warnings: warnings,
   };
@@ -237,6 +284,7 @@ export function normalizedCommandContract(contract: CommandContract): Record<str
     const v21 = contract.contract_version === 2.1;
     return {
       contract_version: contract.contract_version,
+      ...(contract.orchestration ? { orchestration: contract.orchestration } : {}),
       ...(v21 ? { arguments: contract.arguments.map(item => ({ ...item })) } : {}),
       consumes: contract.consumes.map(item => ({
         kind: item.kind,
@@ -244,7 +292,9 @@ export function normalizedCommandContract(contract: CommandContract): Record<str
         required: item.required,
         ...(item.require_status ? { require_status: item.require_status } : {}),
         ...(item.schema ? { schema: item.schema } : {}),
+        ...(item.schema_range ? { schema_range: item.schema_range } : {}),
         ...(v21 && item.role ? { role: item.role } : {}),
+        ...(v21 && item.accepts_negative_evidence ? { accepts_negative_evidence: true } : {}),
       })),
       produces: contract.produces.map(item => ({
         kind: item.kind,
@@ -259,6 +309,7 @@ export function normalizedCommandContract(contract: CommandContract): Record<str
   }
   return {
     contract_version: 1,
+    ...(contract.orchestration ? { orchestration: contract.orchestration } : {}),
     consumes: contract.consumes.map(item => ({
       kind: item.kind,
       ...(item.alias ? { alias: item.alias } : {}),
@@ -345,16 +396,30 @@ function extractContract(raw: string): unknown {
   return {};
 }
 
+// ── Process-level cache for immutable step content. Command definitions are
+//    intentionally resolved fresh: project overrides and contract drift can
+//    appear while long-lived API/TUI processes are running. ─────────────────
+
+const stepContentCache = new Map<string, ResolvedStepContent>();
+
+/** Invalidate cached step-content resolutions (used by tests and long-lived servers). */
+export function invalidateResolutionCache(): void {
+  stepContentCache.clear();
+}
+
 export function resolveCommandSource(projectRoot: string, commandName: string): ResolvedCommandSource {
+  return resolveCommandSourceUncached(projectRoot, commandName);
+}
+
+function resolveCommandSourceUncached(projectRoot: string, commandName: string): ResolvedCommandSource {
   const normalized = commandName.replace(/^\//, '').replace(/\.md$/i, '');
   const names = Array.from(new Set([
     normalized,
     normalized.startsWith('maestro-') ? normalized.slice('maestro-'.length) : `maestro-${normalized}`,
   ]));
   const project = paths.project(projectRoot);
-  const prepareCandidates = names.flatMap(name => [
+  const projectPrepareCandidates = names.flatMap(name => [
     join(project.prepare, `${name}.md`),
-    join(paths.prepare, `${name}.md`),
     join(projectRoot, 'prepare', `${name}.md`),
   ]);
   const projectClaudeCandidates = names.flatMap(name => [
@@ -366,13 +431,20 @@ export function resolveCommandSource(projectRoot: string, commandName: string): 
     join(claudeHome, 'commands', `${name}.md`),
     join(claudeHome, 'skills', name, 'SKILL.md'),
   ]);
+  // Project-local definitions always win over the user-global library: a
+  // project's own prepare/`.claude/commands` override must never be shadowed
+  // by `~/.maestro/prepare/<name>.md` (e.g. a global `test.md` swallowing a
+  // project command or fixture, hollow-sealing a required consume gate).
   const projectCandidates = [
-    ...prepareCandidates,
+    ...projectPrepareCandidates,
     ...projectClaudeCandidates,
   ];
+  const globalPrepareCandidates = names.flatMap(name => [
+    join(paths.prepare, `${name}.md`),
+  ]);
   const path = projectCandidates.find(candidate => existsSync(candidate))
-    ?? resolveStepContent(projectRoot, normalized).prepare?.path
-    ?? globalClaudeCandidates.find(candidate => existsSync(candidate));
+    ?? resolveStepContentUncached(projectRoot, normalized).prepare?.path
+    ?? [...globalPrepareCandidates, ...globalClaudeCandidates].find(candidate => existsSync(candidate));
   if (!path) {
     const empty = '';
     const contract = parseCommandContract({});
@@ -491,11 +563,14 @@ const PLATFORM_SUFFIX_RE = /\.(?:codex|agy|pi)\.md$/;
 function stepRegistryDirs(projectRoot: string): { prepareDirs: string[]; workflowDirs: string[] } {
   const project = paths.project(projectRoot);
   return {
-    prepareDirs: [project.prepare, paths.prepare, join(projectRoot, 'prepare')],
+    // Project-local prepare dirs beat the user-global library (same priority
+    // as resolveCommandSourceUncached): a project override must never be
+    // shadowed by ~/.maestro/prepare.
+    prepareDirs: [project.prepare, join(projectRoot, 'prepare'), paths.prepare],
     workflowDirs: [
       join(project.workflow, 'workflows'),
-      paths.workflows,
       join(projectRoot, 'workflows'),
+      paths.workflows,
     ],
   };
 }
@@ -524,6 +599,19 @@ function resolveAssociatedWorkflow(
 }
 
 export function resolveStepContent(
+  projectRoot: string,
+  stepName: string,
+  platformSuffix?: string,
+): ResolvedStepContent {
+  const cacheKey = `${projectRoot}\0${stepName}\0${platformSuffix ?? ''}`;
+  const cached = stepContentCache.get(cacheKey);
+  if (cached) return cached;
+  const result = resolveStepContentUncached(projectRoot, stepName, platformSuffix);
+  stepContentCache.set(cacheKey, result);
+  return result;
+}
+
+function resolveStepContentUncached(
   projectRoot: string,
   stepName: string,
   platformSuffix?: string,
@@ -570,7 +658,7 @@ export interface StepRegistryEntry {
 /**
  * Enumerate every step name `resolveStepContent` can resolve: prepare/workflow
  * basenames plus workflow frontmatter command aliases. This is the build-time
- * mirror of the run-time step registry — `ralph skills --steps` exposes it so
+ * mirror of the run-time step registry — `maestro skills --steps` exposes it so
  * chain-build prevalidation validates against the same name space `run next`
  * loads from.
  */

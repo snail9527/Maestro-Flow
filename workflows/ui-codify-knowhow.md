@@ -5,7 +5,7 @@
 </required_reading>
 # UI Codify: Phase 4 — Knowledge Asset Generation
 
-读取提取的 JSON 文件，构建 knowhow-manifest.json，调用 codify-to-knowhow 固化为知识资产。
+读取提取的 JSON 文件，构建 knowhow-manifest.json，按 manifest 直接固化知识资产（写入 knowhow + spec 条目）。
 
 ## Prerequisites
 
@@ -203,19 +203,43 @@ echo "  knowhow-manifest.json written to ${package_dir}"
 
 ---
 
-## Step 4.4: Call codify-to-knowhow
+## Step 4.4: Persist Knowledge Assets（manifest 驱动，走治理管道）
 
-通过 Skill tool 调用 codify-to-knowhow：
+读取 knowhow-manifest.json，按声明**经 `maestro knowledge stage` 暂存候选**（codify-to-knowhow 已并入本步骤，不再调用独立 skill）。`.workflow/knowhow/` 与 `.workflow/specs/` 是受治理语料，唯一写入口是 post-seal `maestro knowledge promote` —— **本步骤绝不直接 Write 语料文件**：
 
 ```javascript
-MANDATORY recommendation: `/codify-to-knowhow "${package_dir}"`
+// 1. 读取 manifest
+const manifest = JSON.parse(Read("${package_dir}/knowhow-manifest.json"));
+
+// 2. knowhow 候选 —— 幂等（同标题已在语料库则跳过），内容写临时文件后 stage
+for (const kh of manifest.knowhow || []) {
+  const title = `${kh.title}（${package_name}）`;
+  if (Bash(`maestro wiki search "${title}" --json`).includes('"id"')) { echo(`  SKIP (exists): ${title}`); continue; }
+  const tmp = `${temp_dir}/knowhow-${kh.fileSlug}.md`;
+  Write(tmp, [
+    `由 ${package_name} 固化`,
+    ...(kh.codePaths||[]).map(p => `- 关联代码: \`${p}\``),
+    ``, ...kh.entries.map(e => `## ${e.title}\n\n${e.body}`),
+  ].join('\n'));
+  Bash(`maestro knowledge stage knowhow "${title}" --content-file ${tmp} --category coding --evidence "${(kh.codePaths||['manifest'])[0]}"`);
+}
+
+// 3. spec 候选 —— 同样经 stage（promote 时以 <spec-entry> 形态落 ${category}-conventions.md）
+for (const sp of manifest.specs || []) {
+  const tmp = `${temp_dir}/spec-${sp.ref}.md`;
+  Write(tmp, `${sp.body}\n\nref: ${sp.ref}`);
+  Bash(`maestro knowledge stage spec "${sp.title}" --content-file ${tmp} --category ${sp.category} --evidence "${sp.ref}"`);
+}
+
+// 4. 验证：stage 输出包含 candidate id；晋升在 seal 后经 review → promote 完成
+const staged = (manifest.knowhow?.length || 0) + (manifest.specs?.length || 0);
+echo(`  Knowledge candidates staged: ${staged}（promote 待 seal 后执行）`);
 ```
 
-等待 codify-to-knowhow 完成。它将：
-1. 读取 knowhow-manifest.json
-2. 创建 knowhow 文件（.workflow/knowhow/AST-*.md, DCS-*.md）
-3. 创建 spec 条目（.workflow/specs/coding-conventions.md, architecture-constraints.md）
-4. 验证 ref 链接
+写入规范：
+1. knowhow/spec 候选一律 `--content-file`（绝不 inline）；`--evidence` 指向关联代码路径或 manifest ref
+2. 幂等以语料库既有标题为准（wiki search），不再以 slug 文件存在为准
+3. 候选晋升走常规双源门禁（sealed + fresh receipt），本步骤不 promote
 
 ---
 

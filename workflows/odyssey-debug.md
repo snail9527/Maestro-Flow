@@ -25,13 +25,7 @@ Back-half: `S_GENERALIZE → S_DISCOVER → S_RECORD → END` (see odyssey-base.
 
 ## `--template <name>`
 
-| Template | Strategy | Use case |
-|----------|----------|----------|
-| `performance` | profiling → hot path → allocation → cache | Performance degradation |
-| `memory-leak` | heap snapshot → retention chain → lifecycle | Memory leaks |
-| `race-condition` | timeline → concurrent access → lock analysis | Race conditions |
-| `regression` | git bisect → diff analysis → boundary check | Regressions |
-| `crash` | stack trace → null chain → error propagation | Crashes / exceptions |
+Template strategies are defined in `prepare/odyssey-debug.md` §Input Interpretation — that is the canonical wording.
 
 ---
 
@@ -202,12 +196,15 @@ Confirmed root cause + applied fix.
 
 ## Knowledge Persistence (§9)
 
+Follow-up = governed candidate staging, NEVER a direct corpus write: `maestro knowledge stage spec "<title>" --content-file <path|-> --run {run_id} --category <cat>` (stage BEFORE seal; promote only after seal with a fresh receipt).
+
+
 | Category | Content | Follow-up |
 |----------|---------|-----------|
-| Recurring root cause pattern | Type + triggers + fix + detection | `/maestro-spec add debug` |
-| Non-obvious workaround | Problem + steps + why obvious fix fails | `/maestro-spec add learning` |
-| Architecture boundary violation | Violation + correct boundary + verification | `/maestro-spec add arch` |
-| Reusable generalization pattern | Signature + risk + fix template + scope | `/maestro-spec add coding` |
+| Recurring root cause pattern | Type + triggers + fix + detection | `stage spec → debug` |
+| Non-obvious workaround | Problem + steps + why obvious fix fails | `stage spec → learning` |
+| Architecture boundary violation | Violation + correct boundary + verification | `stage spec → arch` |
+| Reusable generalization pattern | Signature + risk + fix template + scope | `stage spec → coding` |
 
 ---
 
@@ -278,7 +275,7 @@ Goals:      {done}/{total} ({skipped} skipped)
 
 | Condition | Next |
 |-----------|------|
-| Discovery issues | `/maestro-manage issue list --source debug-odyssey` |
+| Discovery issues | `/maestro-issue list --source debug-odyssey` |
 | Document pattern | `/maestro-learn decompose <module>` |
 | Formal review | `/maestro-odyssey <changed-files> --mode review` |
 | Second opinion | `/maestro-learn consult <understanding.md>` |

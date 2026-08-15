@@ -9,7 +9,7 @@ allowed-tools:
   - Read
   - request_user_input
 session-mode: none
-version: 0.5.53
+version: 0.5.74
 ---
 
 # Maestro Help
@@ -56,7 +56,7 @@ Single source of truth: **[index/catalog.json](index/catalog.json)**
 | Field | Purpose |
 |-------|---------|
 | `commands[]` | 64 个 slash 命令，含分类和描述 |
-| `skills[]` | 44 个 Skill，含分类和描述 |
+| `skills[]` | 23 个 Skill（含 10 个选装 scholar-*，标 `optional: true`），含分类和描述 |
 | `agents[]` | 24 个 Agent，含分类和描述 |
 | `cli_commands[]` | 21 个终端命令 |
 | `guide_files[]` | 17 个 Guide 文档索引（planned，尚未创建） |
@@ -185,7 +185,7 @@ $ARGUMENTS → Parse:
 
 ### 上游起源 + 核心 (core)
 
-> 裸名称为 first-tier step：经 `/maestro "<意图>"` 自动路由，或 `maestro run prepare --platform codex <step>` + `maestro run create <step> ...` 直接执行；`/` 前缀为独立命令。
+> 裸名称为 first-tier step：经 `/maestro "<意图>"` 自动路由，或 `maestro run create <step> [args...] --session {session_id} ...` 直接执行（v3 无独立 `run prepare` 命令——prepare 指引内嵌于 birth packet 的 guidance）；`/` 前缀为独立命令。
 
 | 命令 | 用途 |
 |------|------|
@@ -217,23 +217,16 @@ $ARGUMENTS → Parse:
 | `auto-test` | 自动测试 |
 | `test` | 业务测试 |
 | `debug` | 质量调试 |
-| `/quality-refactor` | 重构 |
 | `retrospective` | 复盘 |
 
 ### 管理命令 (manage)
 
 | 命令 | 用途 |
 |------|------|
-| `/maestro-manage issue` | Issue 管理 |
-| `/maestro-manage issue discover` | Issue 发现 |
-| `/maestro-manage knowledge knowhow` | 知识管理 |
-| `/maestro-manage knowledge capture` | 知识捕获 |
-| `/maestro-manage status` | 状态查看 |
-| `/maestro-manage knowledge wiki` | Wiki 管理 |
-| `/maestro-manage knowledge harvest` | 收获 |
-| `/maestro-manage sync rebuild` | 代码库重建 |
-| `/maestro-manage knowledge extractors` | 知识图谱提取器管理 |
-| `/maestro-manage knowledge audit` | 知识审计 |
+| `/maestro-issue` | Issue 管理（意图驱动：报告/列出/关闭/关联） |
+| `/maestro-issue discover` | Issue 发现 |
+| `/maestro-knowledge` | 知识存储管理（意图驱动：audit/harvest/wiki/extractors/domain） |
+| `/maestro-knowhow` | KnowHow 沉淀（意图驱动：按类型捕获可复用知识） |
 
 ### Odyssey 长周期循环 (odyssey)
 
@@ -294,7 +287,7 @@ Odyssey 长周期循环（独立路径）
 | Path E | 纯规格文档 | `blueprint "project idea"` → (供人阅读) |
 | Path F | 纯探索 | `brainstorm "idea"` → (供人决策) |
 | 轻量修复 | 已知简单问题 | `/maestro-companion "修复描述"` |
-| Bug 追踪 | Issue 闭环 | `/maestro-manage issue discover` → `/maestro-manage issue create` → analyze/plan/execute → close |
+| Bug 追踪 | Issue 闭环 | `/maestro-issue discover` → `/maestro-issue create` → analyze/plan/execute → close |
 | 全自动 | /maestro 入口 | `/maestro -y "任务描述"` |
 | 代码审查 | 质量管线 | `review` → `auto-test` → `test` |
 | 多 CLI 交叉验证 | Collab step | `collab "需求描述"` |
@@ -332,7 +325,7 @@ Odyssey 长周期循环（独立路径）
 
 - **Slash 命令**: 64 个（13 个分类：core/pipeline/milestone/manage/quality/spec/learn/worktree/team/ralph/ui/tools/odyssey）
 - **CLI 命令**: 21 个
-- **Skills**: 44 个（5 个分类：meta/team/knowledge/quality/scholar）
+- **Skills**: 23 个（3 个分类：meta/team/scholar；scholar-* 为选装，标 `optional: true`）
 - **Agents**: 24 个（4 个分类：workflow/team/cli/ui）
 - **Guide 文档**: 17 个（planned，尚未创建）
 - **工作流路径**: 7 个合法路径 (Path A-G) + 4 个辅助流程

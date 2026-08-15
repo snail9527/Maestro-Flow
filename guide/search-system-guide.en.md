@@ -4,6 +4,8 @@ title: "Search System Guide"
 
 Maestro Search is based on BM25F algorithm, providing unified knowledge search capabilities across multiple data sources including spec, knowhow, issue, and domain.
 
+For retrieval boundaries, canonical identity, and anti-concentration behavior in the full knowledge lifecycle, see [Maestro Knowledge System Architecture](../docs/knowledge-system-architecture.md).
+
 ---
 
 ## Overview
@@ -29,7 +31,7 @@ maestro search "jwt token" --type spec
 maestro search --category coding
 
 # Combined query
-maestro search "oauth pkce" --type spec --category arch --limit 10
+maestro search "oauth pkce" --type spec --category arch
 
 # Code search (requires MaestroGraph enabled)
 maestro search "UserService" --code
@@ -38,7 +40,7 @@ maestro search "UserService" --code
 maestro search "UserService" --kg
 
 # Search all sources (wiki + code), unified normalized ranking
-maestro search "UserService" --all
+maestro search "UserService"
 
 # Skip embedding, use BM25 only (avoid ONNX cold start)
 maestro search "jwt token" --no-emb
@@ -237,7 +239,7 @@ Search hits asynchronously update node `search_hits` counts (via `CredibilitySto
 - **Trigger condition**: After Write or Edit tool calls
 - **Scope**: Only active in workspace (`requiresWorkspace: true`)
 - **Behavior**: Automatically rebuilds WikiIndexer index, ensuring search results reflect latest file content
-- **Persisted version**: `search-cache.json` currently uses **cache v3** (`version: 3`); legacy cache generations are rejected and atomically rebuilt through the existing cache path
+- **Persisted version**: `search-cache.json` currently uses **cache v5** (`version: 5`); legacy cache generations are rejected and atomically rebuilt through the existing cache path
 
 This hook is enabled by default in the standard hook collection, no manual configuration needed. When modifying spec/knowhow files under `.workflow/` via Write|Edit, the search index automatically updates.
 
@@ -450,11 +452,11 @@ If an entry has abnormally high score, it may be due to:
 
 ```bash
 # Unified search (recommended)
-maestro search <query> [--type <type>] [--category <cat>] [--kind <kind>] [--code] [--kg] [--all] [--no-emb] [--json]
+maestro search <query> [--type <type>] [--category <cat>] [--kind <kind>] [--code] [--kg] [--no-emb] [--json]
 
 # Wiki system search
 maestro wiki search <query> [--json]
-maestro wiki list [--type <type>] [--category <cat>] [--keyword <kw>]
+maestro wiki list [--type <type>] [--category <cat>] [-q <query>]
 
 # Knowledge graph search (deprecated, use maestro search --kg instead)
 maestro kg search <symbol>   # [deprecated] Use "maestro search --kg" instead
@@ -476,3 +478,5 @@ maestro wiki health
 # Knowledge health check (freshness, evolution chain integrity)
 maestro spec health
 ```
+
+`--kg` shares the `--type`, `--category`, lifecycle, and diversity constraints of normal search. A KG result exposes a loadable canonical `id`, while `graphId` and `aliases` preserve graph traversal and backward-compatible identities.

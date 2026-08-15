@@ -7,6 +7,7 @@ import {
   intentIdentitySchema,
   persistedTransitionRecordSchema,
   ralphAuthoritySchema,
+  reuseAssessmentReadSchema,
   reuseAssessmentSchema,
   sessionProvenanceSchema,
   topicIdentitySchema,
@@ -61,9 +62,9 @@ const orchestrationStepSchema = z.object({
 }).strict();
 
 // ── ralph-meta decomposition types, zod-ified locally ────────────────────────
-// Migrated from RalphTaskDecompositionItem / GoalChangelogEntry in
-// src/ralph/status-schema.ts. Defined here (not imported) because src/run must
-// never depend on src/ralph.
+// Migrated from RalphTaskDecompositionItem / GoalChangelogEntry, which lived in
+// the now-removed src/ralph/status-schema.ts. Defined locally in run rather than
+// imported — the src/ralph/ tree no longer exists to depend on.
 
 const taskDecompositionItemSchema = z.object({
   id: nonEmptyString,
@@ -149,6 +150,42 @@ const decisionPointSchema = z.object({
   evidence_ref: z.string().nullable(),
 }).strict();
 
+export const executionLeaseSchema = z.object({
+  schema_version: z.literal('execution-lease/1.0'),
+  session_id: nonEmptyString,
+  execution_id: nonEmptyString,
+  owner_id: nonEmptyString,
+  owner_kind: z.enum(['pi', 'claude', 'codex', 'agy', 'manual']),
+  epoch: z.number().int().positive(),
+  lease_id: nonEmptyString,
+  acquired_at: nonEmptyString,
+  heartbeat_at: nonEmptyString,
+  handoff_to: z.string().min(1).nullable(),
+}).strict();
+
+export const executionStateSchema = z.object({
+  schema_version: z.literal('execution/1.0'),
+  execution_id: nonEmptyString,
+  session_id: nonEmptyString,
+  generation: z.number().int().positive(),
+  status: z.enum(['active', 'paused', 'sealed']),
+  revision: z.number().int().nonnegative(),
+  active_run_id: z.string().min(1).nullable(),
+  chain: z.array(orchestrationStepSchema),
+  decision_points: z.array(decisionPointSchema),
+  gates_ref: nonEmptyString,
+  artifacts_ref: nonEmptyString,
+  evidence_ref: nonEmptyString,
+  lease: executionLeaseSchema.nullable(),
+  started_at: nonEmptyString,
+  sealed_at: z.string().min(1).nullable(),
+  seal_summary: z.string().nullable(),
+  final_outcome: z.enum(['done', 'done_with_concerns', 'failed']).nullable(),
+}).strict();
+
+/** Canonical execution/1.0 writer schema. */
+export const executionSchema = executionStateSchema;
+
 const legacySessionRequestSchema = z.object({
   request_id: nonEmptyString,
   type: nonEmptyString,
@@ -216,33 +253,194 @@ export const sessionStateV13Schema = sessionStateV12Schema
   })
   .strict();
 
+/**
+ * Statusless Session identity/index authority. Execution lifecycle, chain,
+ * gates, artifacts, and evidence deliberately live outside this strict shape.
+ */
+export const sessionStateV20Schema = z.object({
+  schema_version: z.literal('session/2.0'),
+  session_id: nonEmptyString,
+  intent: nonEmptyString,
+  topic_identity: topicIdentitySchema.nullable(),
+  identity_revision: z.number().int().nonnegative(),
+  activity_revision: z.number().int().nonnegative(),
+  current_execution_id: z.string().min(1).nullable(),
+  latest_execution_id: z.string().min(1).nullable(),
+  latest_completed_run_id: z.string().min(1).nullable(),
+  archived_at: z.string().min(1).nullable(),
+  archived_by: z.string().min(1).nullable(),
+}).strict().superRefine((session, ctx) => {
+  if ((session.archived_at === null) !== (session.archived_by === null)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['archived_at'],
+      message: 'archived_at and archived_by must both be null or both be present',
+    });
+  }
+});
+
+export const sessionStatusV30Schema = z.enum([
+  'open', 'completed', 'archived', 'failed',
+]);
+
+/**
+ * Read-only status vocabulary for pre-simplification session/3.0 documents.
+ * The retired `paused` status no longer exists in the engine; readers that
+ * accept it must map it to `open` (see SessionStore.readSessionV30).
+ */
+const sessionStatusV30ReadSchema = z.enum([
+  'open', 'paused', 'completed', 'archived', 'failed',
+]);
+
+export const sessionChainStepV30Schema = z.object({
+  step_id: nonEmptyString,
+  command: nonEmptyString,
+  args: z.array(z.string()),
+  status: z.enum(['pending', 'running', 'completed', 'failed', 'skipped']),
+  run_ids: z.array(nonEmptyString),
+  goal_ref: z.string().min(1).nullable(),
+  // Decision gate declaration: when non-null, the decision identified by this
+  // id must be `resolved` before the chain may advance past this step (run
+  // next checks the completed predecessor) and before the Session completes.
+  // Default null keeps pre-gate session/3.0 files parseable; the write path
+  // always assigns it explicitly.
+  decision_ref: z.string().min(1).nullable().default(null),
+  decision_refs: z.array(nonEmptyString),
+  stage: z.string().min(1).nullable().optional(),
+}).strict();
+
+export const sessionDecisionRefV30Schema = z.object({
+  decision_id: nonEmptyString,
+  after_step_id: z.string().min(1).nullable(),
+  status: z.enum(['open', 'resolved', 'escalated']),
+  evidence_refs: z.array(nonEmptyString),
+}).strict();
+
+/** Session/Run minimal-state authority. activity_revision is observational, never a CAS target. */
+export const sessionStateV30Schema = z.object({
+  schema_version: z.literal('session/3.0'),
+  session_id: nonEmptyString,
+  objective: nonEmptyString,
+  definition_of_done: z.string(),
+  status: sessionStatusV30Schema,
+  orchestration_revision: z.number().int().nonnegative(),
+  activity_revision: z.number().int().nonnegative(),
+  chain: z.array(sessionChainStepV30Schema),
+  decisions: z.array(sessionDecisionRefV30Schema),
+  active_run_ids: z.array(nonEmptyString),
+  artifacts_ref: nonEmptyString,
+  evidence_ref: nonEmptyString,
+  created_at: nonEmptyString,
+  updated_at: nonEmptyString,
+  completed_at: z.string().min(1).nullable(),
+  archived_at: z.string().min(1).nullable(),
+}).strict();
+
+/**
+ * Read-tolerant session/3.0 variant. Pre-simplification documents may still
+ * carry the retired `identity_revision`/`gates_ref` fields and the retired
+ * `paused` status. Retired keys are stripped on read (the write path stays
+ * strict and never re-emits them); callers map `paused` to `open` (the
+ * engine no longer has a paused Session status — see SessionStore.readSessionV30).
+ */
+export const sessionStateV30ReadSchema = sessionStateV30Schema
+  .extend({ status: sessionStatusV30ReadSchema })
+  .strip();
+
+export const sessionSchemaWriterSchema = z.enum([
+  'session/1.3', 'session/2.0', 'session/3.0',
+]);
+
+export const sessionSchemaSelectionSchema = z.object({
+  schema_version: z.literal('session-schema-selection/1.0'),
+  writer: sessionSchemaWriterSchema,
+  features: z.object({
+    session_statusless: z.boolean(),
+  }).strict(),
+}).strict().superRefine((selection, ctx) => {
+  const enabled = selection.writer === 'session/2.0';
+  if (selection.features.session_statusless !== enabled) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['features', 'session_statusless'],
+      message: 'session_statusless must be enabled exactly when writer is session/2.0',
+    });
+  }
+});
+
+export const projectSessionSchemaConfigSchema = z.object({
+  session_schema: sessionSchemaSelectionSchema.optional(),
+}).passthrough();
+
+/**
+ * Passthrough fallback for unknown future session schema versions.
+ * Preserves all fields without validation so older CLI versions can read
+ * session.json written by newer versions without crashing.
+ *
+ * The refinement ensures this fallback ONLY matches truly unknown versions —
+ * known versions with invalid data still fail the union (correct behavior).
+ */
+const KNOWN_SESSION_VERSIONS = new Set([
+  'session/1.0', 'session/1.1', 'session/1.2', 'session/1.3', 'session/2.0', 'session/3.0',
+]);
+const sessionStateUnknownSchema = z.object({
+  schema_version: z.string(),
+}).passthrough().refine(
+  (data) => !KNOWN_SESSION_VERSIONS.has(data.schema_version),
+  { message: 'Known session version with invalid data should not match the passthrough fallback' },
+);
+
 export type SessionStateInput = z.infer<typeof sessionStateV1ReadSchema>
   | z.infer<typeof sessionStateV12Schema>
-  | z.infer<typeof sessionStateV13Schema>;
+  | z.infer<typeof sessionStateV13Schema>
+  | z.infer<typeof sessionStateUnknownSchema>;
 
 export function normalizeSessionState(session: SessionStateInput): z.infer<typeof sessionStateV13Schema> {
-  if (session.schema_version === 'session/1.3') return session;
+  if (session.schema_version === 'session/1.3') return session as z.infer<typeof sessionStateV13Schema>;
   if (session.schema_version === 'session/1.2') {
     return sessionStateV13Schema.parse({ ...session, schema_version: 'session/1.3', topic_identity: null });
   }
-  return sessionStateV13Schema.parse({
-    ...session,
-    schema_version: 'session/1.3',
-    intent_identity: null,
-    topic_identity: null,
-    provenance: {
-      source: 'legacy-inferred',
-      forked_from: null,
-      imported_from: [],
-      created_by: 'legacy',
-    },
-    ralph_authority: null,
-  });
+  if (session.schema_version === 'session/1.0' || session.schema_version === 'session/1.1') {
+    return sessionStateV13Schema.parse({
+      ...session,
+      schema_version: 'session/1.3',
+      intent_identity: null,
+      topic_identity: null,
+      provenance: {
+        source: 'legacy-inferred',
+        forked_from: null,
+        imported_from: [],
+        created_by: 'legacy',
+      },
+      ralph_authority: null,
+    });
+  }
+  // Unknown future version — return as-is with best-effort cast.
+  // The write path always produces session/1.3, so this only affects reads.
+  return session as unknown as z.infer<typeof sessionStateV13Schema>;
 }
 
-export const sessionStateReadSchema = z.union([sessionStateV13Schema, sessionStateV12Schema, sessionStateV1ReadSchema]);
-/** Backward-compatible read schema. New writes must use sessionStateV13Schema. */
-export const sessionStateSchema = sessionStateReadSchema.transform(session => normalizeSessionState(session));
+/** Strict known-version reader with schema_version as the type discriminator. */
+export const knownSessionStateReadSchema = z.discriminatedUnion('schema_version', [
+  sessionStateV30ReadSchema,
+  sessionStateV20Schema,
+  sessionStateV13Schema,
+  sessionStateV12Schema,
+  sessionStateV1ReadSchema,
+]);
+
+/** Typed reader for known generations plus the existing future-version fallback. */
+export const sessionStateReadSchema = z.union([
+  knownSessionStateReadSchema,
+  sessionStateUnknownSchema,
+]);
+/** Backward-compatible legacy reader. It intentionally rejects session/2.0 and session/3.0. */
+export const sessionStateSchema = z.union([
+  sessionStateV13Schema,
+  sessionStateV12Schema,
+  sessionStateV1ReadSchema,
+  sessionStateUnknownSchema,
+]).transform(session => normalizeSessionState(session));
 
 const gateCheckSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('session'), field: nonEmptyString, equals: z.unknown() }).strict(),
@@ -465,56 +663,171 @@ export const commandRunV13Schema = commandRunV12Schema
   })
   .strict();
 
-export const commandRunReadSchema = z.union([commandRunV13Schema, commandRunV12Schema, commandRunV11Schema, commandRunV1Schema]);
+export const commandRunV14Schema = commandRunV13Schema
+  .omit({ schema_version: true, input: true })
+  .extend({
+    schema_version: z.literal('command-run/1.4'),
+    input: commandRunBaseSchema.shape.input.extend({
+      reuse_assessments: z.array(reuseAssessmentReadSchema),
+    }).strict(),
+    execution_id: nonEmptyString,
+    generation: z.number().int().positive(),
+  })
+  .strict();
+
+export const runStatusV30Schema = z.enum([
+  'pending', 'running', 'blocked', 'completed', 'failed', 'cancelled', 'sealed',
+]);
+
+export const runV30Schema = z.object({
+  schema_version: z.literal('run/3.0'),
+  run_id: nonEmptyString,
+  session_id: nonEmptyString,
+  step_id: nonEmptyString,
+  parent_run_id: z.string().min(1).nullable(),
+  retry_of_run_id: z.string().min(1).nullable(),
+  attempt: z.number().int().positive(),
+  command: nonEmptyString,
+  args: z.array(z.string()),
+  goal: z.string().min(1).nullable(),
+  status: runStatusV30Schema,
+  revision: z.number().int().nonnegative(),
+  actor_id: nonEmptyString,
+  input_refs: z.array(nonEmptyString),
+  output_refs: z.array(nonEmptyString),
+  primary_artifact_id: z.string().min(1).nullable(),
+  verdict: z.enum(['done', 'done_with_concerns', 'needs_retry', 'blocked']).nullable(),
+  summary: z.string().nullable(),
+  legacy_execution_generation: z.number().int().positive().nullable().optional(),
+  created_at: nonEmptyString,
+  started_at: z.string().min(1).nullable(),
+  ended_at: z.string().min(1).nullable(),
+  sealed_at: z.string().min(1).nullable(),
+}).strict();
+
+/**
+ * Read-tolerant run/3.0 variant. Pre-simplification documents may still carry
+ * the retired `participant_id`/`gate_refs` fields; they are stripped on read
+ * so the write path stays strict and never re-emits them.
+ */
+export const runV30ReadSchema = runV30Schema.strip();
+
+/**
+ * Passthrough fallback for unknown future command-run/run schema versions.
+ * The refinement ensures this fallback ONLY matches truly unknown versions.
+ */
+const KNOWN_RUN_VERSIONS = new Set([
+  'command-run/1.0', 'command-run/1.1', 'command-run/1.2', 'command-run/1.3', 'command-run/1.4', 'run/3.0',
+]);
+const commandRunUnknownSchema = z.object({
+  schema_version: z.string(),
+}).passthrough().refine(
+  (data) => !KNOWN_RUN_VERSIONS.has(data.schema_version),
+  { message: 'Known run version with invalid data should not match the passthrough fallback' },
+);
+
+export const commandRunReadSchema = z.union([
+  commandRunV14Schema,
+  commandRunV13Schema,
+  commandRunV12Schema,
+  commandRunV11Schema,
+  commandRunV1Schema,
+  commandRunUnknownSchema,
+]);
+
+/** Canonical Run reader for legacy command-run documents, v3, and unknown future versions. */
+export const runReadSchema = z.union([
+  runV30ReadSchema,
+  commandRunV14Schema,
+  commandRunV13Schema,
+  commandRunV12Schema,
+  commandRunV11Schema,
+  commandRunV1Schema,
+  commandRunUnknownSchema,
+]);
 export type CommandRunInput = z.infer<typeof commandRunReadSchema>;
+export type RunRead = z.infer<typeof runReadSchema>;
 export type CommandRun = z.infer<typeof commandRunV13Schema>;
+export type CommandRunV14 = z.infer<typeof commandRunV14Schema>;
+export type RunV30 = z.infer<typeof runV30Schema>;
 
 export function normalizeCommandRun(
   run: CommandRunInput,
   fallbackPlatform: z.infer<typeof targetPlatformSchema> = 'claude',
 ): CommandRun {
-  if (run.schema_version === 'command-run/1.3') return run;
+  if (run.schema_version === 'command-run/1.4') {
+    const { execution_id: _executionId, generation: _generation, ...compatibilityRun } = run;
+    return { ...compatibilityRun, schema_version: 'command-run/1.3' } as CommandRun;
+  }
+  if (run.schema_version === 'command-run/1.3') return run as CommandRun;
   if (run.schema_version === 'command-run/1.2') {
     return commandRunV13Schema.parse({
       ...run,
       schema_version: 'command-run/1.3',
-      input: { ...run.input, reuse_assessments: [] },
+      input: { ...(run as z.infer<typeof commandRunV12Schema>).input, reuse_assessments: [] },
     });
   }
-  const v11 = run.schema_version === 'command-run/1.1' ? run : commandRunV11Schema.parse({
-    ...run,
-    schema_version: 'command-run/1.1',
-    chain_step_id: null,
-    resolved_platform: fallbackPlatform,
-    goal_binding: null,
-    checkpoint_expectation: null,
-    checkpoint: null,
-    retry_fence: null,
-  });
-  const v12 = commandRunV12Schema.parse({
-    ...v11,
-    schema_version: 'command-run/1.2',
-    contract_snapshot: null,
-    guidance_snapshot: null,
-    creation_decision: null,
-    creation_provenance: {
-      schema_version: 'creation-provenance/1.0',
-      provenance: run.schema_version === 'command-run/1.1' ? 'verified-v1' : 'legacy-inferred',
-      source_workspace_id: null,
-      source_session_id: null,
-      source_run_id: null,
-      imported_artifact_hashes: [],
-    },
-    transition: null,
-  });
-  return commandRunV13Schema.parse({
-    ...v12,
-    schema_version: 'command-run/1.3',
-    input: { ...v12.input, reuse_assessments: [] },
+  if (run.schema_version === 'command-run/1.0' || run.schema_version === 'command-run/1.1') {
+    const v11 = run.schema_version === 'command-run/1.1' ? run : commandRunV11Schema.parse({
+      ...run,
+      schema_version: 'command-run/1.1',
+      chain_step_id: null,
+      resolved_platform: fallbackPlatform,
+      goal_binding: null,
+      checkpoint_expectation: null,
+      checkpoint: null,
+      retry_fence: null,
+    });
+    const v12 = commandRunV12Schema.parse({
+      ...v11,
+      schema_version: 'command-run/1.2',
+      contract_snapshot: null,
+      guidance_snapshot: null,
+      creation_decision: null,
+      creation_provenance: {
+        schema_version: 'creation-provenance/1.0',
+        provenance: run.schema_version === 'command-run/1.1' ? 'verified-v1' : 'legacy-inferred',
+        source_workspace_id: null,
+        source_session_id: null,
+        source_run_id: null,
+        imported_artifact_hashes: [],
+      },
+      transition: null,
+    });
+    return commandRunV13Schema.parse({
+      ...v12,
+      schema_version: 'command-run/1.3',
+      input: { ...v12.input, reuse_assessments: [] },
+    });
+  }
+  // Unknown future version — return as-is with best-effort cast.
+  return run as unknown as CommandRun;
+}
+
+/**
+ * Promote either compatibility or execution-bound input to command-run/1.4.
+ * Callers reading a legacy Run must supply its resolved Execution binding;
+ * no synthetic execution identity is inferred at the schema boundary.
+ */
+export function normalizeCommandRunV14(
+  run: CommandRunInput,
+  binding?: { execution_id: string; generation: number },
+  fallbackPlatform: z.infer<typeof targetPlatformSchema> = 'claude',
+): CommandRunV14 {
+  if (run.schema_version === 'command-run/1.4') return commandRunV14Schema.parse(run);
+  if (!binding) {
+    throw new Error('execution binding is required to normalize a legacy command Run to command-run/1.4');
+  }
+  const compatibilityRun = normalizeCommandRun(run, fallbackPlatform);
+  return commandRunV14Schema.parse({
+    ...compatibilityRun,
+    schema_version: 'command-run/1.4',
+    execution_id: binding.execution_id,
+    generation: binding.generation,
   });
 }
 
-/** Backward-compatible read schema. New writes must use commandRunV13Schema. */
+/** Backward-compatible read schema. New legacy-path writes must use commandRunV13Schema. */
 export const commandRunSchema = commandRunReadSchema.transform(run => normalizeCommandRun(run));
 
 export const artifactMetaSchema = z.object({
@@ -524,29 +837,113 @@ export const artifactMetaSchema = z.object({
   alias: z.string().min(1).optional(),
 }).strict();
 
-export const reportFrontmatterSchema = z.object({
-  verdict: z.enum(['ready', 'ready_with_concerns', 'blocked', 'failed']).default('ready'),
-  summary: z.string().default(''),
-  constraints: z.array(z.object({
-    id: nonEmptyString,
-    text: z.string(),
-    status: z.enum(['locked', 'open', 'deferred']),
-  }).strict()).default([]),
-  decisions: z.array(z.object({
-    id: nonEmptyString,
-    text: z.string(),
-    status: z.enum(['proposed', 'accepted', 'rejected']),
-  }).strict()).default([]),
-  concerns: z.array(z.string()).default([]),
-  next: z.array(z.object({
+// report.md frontmatter contract — the LLM's half-structured exit.
+// `id` is CLI-derived: the schema accepts items with or without an explicit
+// id (and even legacy plain-string shorthand) and stamps deterministic
+// C-{n} / D-{n} ids on parse, so a Run check never rejects a report whose
+// author followed the documented {text, status} / {command, reason, needs}
+// examples.
+const reportConstraintItemSchema = z
+  .union([
+    z.string(),
+    z.object({
+      id: nonEmptyString.optional(),
+      text: z.string(),
+      status: z.enum(['locked', 'open', 'deferred']),
+    }).strict(),
+    z.object({ locked: z.string() }).strict(),
+    z.object({ open: z.string() }).strict(),
+    z.object({ deferred: z.string() }).strict(),
+  ])
+  .transform((item) => {
+    if (typeof item === 'string') return { text: item, status: 'open' as const };
+    if ('text' in item) return item;
+    const entry = Object.entries(item)[0] as [keyof typeof item, string];
+    return { text: entry[1], status: entry[0] };
+  });
+
+const reportDecisionItemSchema = z
+  .union([
+    z.string(),
+    z.object({
+      id: nonEmptyString.optional(),
+      text: z.string(),
+      status: z.enum(['proposed', 'accepted', 'rejected']),
+    }).strict(),
+    z.object({ proposed: z.string() }).strict(),
+    z.object({ accepted: z.string() }).strict(),
+    z.object({ rejected: z.string() }).strict(),
+  ])
+  .transform((item) => {
+    if (typeof item === 'string') return { text: item, status: 'proposed' as const };
+    if ('text' in item) return item;
+    const entry = Object.entries(item)[0] as [keyof typeof item, string];
+    return { text: entry[1], status: entry[0] };
+  });
+
+const reportNextItemSchema = z.union([
+  z.string(),
+  z.object({
     command: nonEmptyString,
     reason: z.string().default(''),
     needs: z.array(z.string()).default([]),
-  }).strict()).default([]),
+  }).strict(),
+]);
+
+/** Frontmatter verdict accepts the chain-advance tokens too and maps them onto
+ * the report-layer ready vocabulary (mirroring the CLI alias table), so an
+ * agent that mirrors `session done --verdict` and writes `verdict: done` in
+ * report.md never hard-fails the frontmatter. Ready tokens stay exact/case
+ * sensitive, as before. */
+const reportVerdictSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== 'string') return value;
+    const token = value.trim().toLowerCase().replace(/_/g, '-');
+    if (token === 'done') return 'ready';
+    if (token === 'done-with-concerns') return 'ready_with_concerns';
+    if (token === 'needs-retry') return 'failed';
+    return value;
+  },
+  z.enum(['ready', 'ready_with_concerns', 'blocked', 'failed']).default('ready'),
+);
+
+export const reportFrontmatterSchema = z.object({
+  verdict: reportVerdictSchema,
+  summary: z.string().default(''),
+  constraints: z.array(reportConstraintItemSchema).default([]),
+  decisions: z.array(reportDecisionItemSchema).default([]),
+  concerns: z.array(z.string()).default([]),
+  next: z.array(reportNextItemSchema).default([]),
   details: z.record(z.string(), z.unknown()).default({}),
-}).passthrough();
+}).passthrough().transform((fm) => ({
+  ...fm,
+  constraints: fm.constraints.map((item, index) => {
+    if (typeof item === 'string') {
+      return { id: `C-${String(index + 1).padStart(3, '0')}`, text: item, status: 'open' as const };
+    }
+    return { ...item, id: item.id ?? `C-${String(index + 1).padStart(3, '0')}` };
+  }),
+  decisions: fm.decisions.map((item, index) => {
+    if (typeof item === 'string') {
+      return { id: `D-${String(index + 1).padStart(3, '0')}`, text: item, status: 'proposed' as const };
+    }
+    return { ...item, id: item.id ?? `D-${String(index + 1).padStart(3, '0')}` };
+  }),
+  next: fm.next.map((item) => {
+    if (typeof item === 'string') return { command: item, reason: '', needs: [] as string[] };
+    return item;
+  }),
+}));
 
 export type SessionState = z.infer<typeof sessionStateV13Schema>;
+export type SessionIdentityV20 = z.infer<typeof sessionStateV20Schema>;
+export type SessionStateV30 = z.infer<typeof sessionStateV30Schema>;
+export type SessionStateRead = z.infer<typeof sessionStateReadSchema>;
+export type SessionSchemaWriter = z.infer<typeof sessionSchemaWriterSchema>;
+export type SessionSchemaSelection = z.infer<typeof sessionSchemaSelectionSchema>;
+export type Execution = z.infer<typeof executionSchema>;
+export type ExecutionState = Execution;
+export type ExecutionLease = z.infer<typeof executionLeaseSchema>;
 export type OrchestrationStep = z.infer<typeof orchestrationStepSchema>;
 export type PendingRetryToken = z.infer<typeof pendingRetryTokenSchema>;
 export type OrchestrationPosition = z.infer<typeof positionSchema>;

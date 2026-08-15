@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { basename, join, relative } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   classifySessionRunProfile,
   parseFrontmatter,
   SESSION_MODES,
 } from './session-run-profiles.mjs';
+import { validateExecutionPromptSemantics } from './session-execution-prompt-semantics.mjs';
 
 const root = process.cwd();
 const errors = [];
@@ -15,9 +17,7 @@ const skillDir = join(root, '.claude', 'skills');
 const obsoleteRunMode = /\.workflow\/(?:scratch|\.scratchpad)|Legacy Compatibility Mapping|state\.json\.artifacts\[\]|<run_mode>|## Run Mode Contract|## Run Artifact Boundary|\{run_dir\}\/outputs\/(?:\*|\{YYYYMMDD\}|\$\{date\})/;
 const legacyTeamStateFile = /team-state\.json|(?<!team-)session\.json/;
 const runCreateArgumentChannelTokens = [
-  '--intent',
   'Session metadata only',
-  '--arg <value>',
   '-- <args...>',
 ];
 
@@ -33,6 +33,18 @@ export function validateCompanionRunCreate(text, label) {
     '--intent "<intent>"',
     '--arg "<intent>"',
     'required command arguments',
+  ];
+  return required
+    .filter(token => !text.includes(token))
+    .map(token => `${label}: missing ${token}`);
+}
+
+export function validateExecutorLifecycleBoundary(text, label) {
+  const required = [
+    'maestro run brief',
+    'maestro run check',
+    'Do not call `maestro run complete`',
+    'handled by the orchestrator',
   ];
   return required
     .filter(token => !text.includes(token))
@@ -82,7 +94,19 @@ function validatePrompt(path, kind) {
 }
 
 for (const file of readdirSync(commandDir).filter((name) => name.endsWith('.md'))) {
-  validatePrompt(join(commandDir, file), 'command');
+  const path = join(commandDir, file);
+  validatePrompt(path, 'command');
+  if (file === 'maestro.md' || file === 'maestro-ralph.md') {
+    const text = readFileSync(path, 'utf8');
+    for (const [pattern, message] of [
+      [/maestro ralph skills\b/, 'must use the canonical maestro skills namespace'],
+      [/\bralph[-_]executor\b/, 'must dispatch the canonical run-executor'],
+      [/--engine\s+ralph\b|engine\s*={1,2}\s*["']ralph["']/, 'must not classify a Session by Ralph engine'],
+      [/(?:session_type|chain_mode|strategy)\s*[:=]\s*["']?(?:static|adaptive|maestro|ralph|fixed|dynamic)\b/i, 'must not persist a static/dynamic or Maestro/Ralph Session type'],
+    ]) {
+      if (pattern.test(text)) errors.push(`${relative(root, path)}: ${message}`);
+    }
+  }
 }
 
 for (const dir of readdirSync(skillDir)) {
@@ -196,25 +220,126 @@ for (const dir of readdirSync(skillDir)) {
   }
 }
 
+for (const semanticError of validateExecutionPromptSemantics(root)) errors.push(semanticError);
+
 const canonicalRunMode = join(root, 'workflows', 'run-mode.md');
 if (!existsSync(canonicalRunMode)) errors.push('workflows/run-mode.md: missing canonical Run workflow');
 else {
   const text = readFileSync(canonicalRunMode, 'utf8');
-  for (const token of ['maestro run create', 'topic grouping/index', 'same Session', 'Historical similarity is read-only', '{run_dir}/outputs/', 'complete top-level `_meta` object', '`kind` and `schema` are required together', 'maestro run check', 'maestro run complete', 'suggest_only', 'maestro run next', 'deprecated admin-only']) {
+  for (const token of [
+    'maestro run create',
+    'topic grouping/index',
+    'same Session',
+    'Historical similarity is read-only',
+    '{run_dir}/outputs/',
+    'complete top-level `_meta` object',
+    '`kind` and `schema` are required together',
+    'maestro run check',
+    'maestro run complete',
+    'suggest_only',
+    'maestro run next',
+    'deprecated admin-only',
+    'brief-result/3.0',
+    'knowledge_context',
+    '--signal-ids',
+    'maestro knowledge stage',
+    'maestro knowledge record',
+    '--transcript-quote',
+    'review_required',
+    'knowledge-candidate-receipt/1.0',
+    'maestro knowledge promote',
+    'run-response/1.2',
+    'orchestration_revision',
+    'artifact_compatibility_v1',
+    'atomic_run_complete_seal',
+    'generation_scoped_seal_receipts',
+    'run_already_created',
+    'blocked consumer attempt -> needs-retry/cancel -> artifact inspect -> semantic republish -> explicit retry/next',
+    'Migration preserves sealed source bytes',
+    'MUST NOT use chain skip, Run rebind, a direct Artifact Registry edit/rewrite',
+  ]) {
     if (!text.includes(token)) errors.push(`workflows/run-mode.md: missing ${token}`);
   }
   errors.push(...validateRunCreateArgumentChannels(text, 'workflows/run-mode.md'));
   if (text.includes('same normalized intent')) errors.push('workflows/run-mode.md: obsolete intent-only Session routing remains');
+  if (/maestro ralph\s|\bralph next\b/.test(text)) errors.push('workflows/run-mode.md: normal lifecycle must use only maestro run');
+}
+
+for (const relativePath of ['prepare/execute.md', 'prepare/review.md']) {
+  const path = join(root, relativePath);
+  if (!existsSync(path)) {
+    errors.push(`${relativePath}: missing prepare contract`);
+    continue;
+  }
+  const text = readFileSync(path, 'utf8');
+  for (const token of [
+    'blocked consumer attempt -> needs-retry/cancel -> artifact inspect -> semantic republish -> explicit retry/next',
+    'classification=semantic_republish_required',
+    'atomic complete-and-seal',
+    'Migration must preserve the sealed source bytes and raw registry role/alias semantics',
+    'chain skip, Run rebind, direct Artifact Registry edits/rewrites, or source Artifact mutation',
+  ]) {
+    if (!text.includes(token)) errors.push(`${relativePath}: missing Artifact recovery token: ${token}`);
+  }
 }
 
 const canonicalRunModeLite = join(root, 'workflows', 'run-mode-lite.md');
 if (!existsSync(canonicalRunModeLite)) errors.push('workflows/run-mode-lite.md: missing canonical team Run workflow');
 else {
   const text = readFileSync(canonicalRunModeLite, 'utf8');
-  for (const token of ['Team State Authority', 'team-session.json', 'merge-write', 'complete top-level `_meta` object', '`kind` and `schema` are required together']) {
+  for (const token of [
+    'Team State Authority',
+    'team-session.json',
+    'merge-write',
+    'complete top-level `_meta` object',
+    '`kind` and `schema` are required together',
+    '--signal-ids',
+    'maestro knowledge stage',
+    'maestro knowledge review',
+    'run-response/1.2',
+    'maestro run complete',
+  ]) {
     if (!text.includes(token)) errors.push(`workflows/run-mode-lite.md: missing ${token}`);
   }
   errors.push(...validateRunCreateArgumentChannels(text, 'workflows/run-mode-lite.md'));
+  if (/maestro ralph\s|\bralph next\b/.test(text)) errors.push('workflows/run-mode-lite.md: normal lifecycle must use only maestro run');
+}
+
+const canonicalOrchestratorLoop = join(root, 'workflows', 'orchestrator-run-loop.md');
+if (!existsSync(canonicalOrchestratorLoop)) {
+  errors.push('workflows/orchestrator-run-loop.md: missing canonical orchestrator loop');
+} else {
+  const text = readFileSync(canonicalOrchestratorLoop, 'utf8');
+  for (const token of [
+    '## Continuation Router',
+    'Turn 终止不变量',
+    'authority=automatic',
+    'authority=auto_mode_only',
+    'authority=user_required',
+    'assessment.acceptance_status=accepted',
+    '`QUALITY_MEDIUM`',
+    '`REJECT`',
+    '`CONFLICT`',
+    'handoff `next[]`',
+    '### `complete` / `decide` 闭环',
+    'run_already_created=true',
+    'maestro run decide',
+  ]) {
+    if (!text.includes(token)) errors.push(`workflows/orchestrator-run-loop.md: missing ${token}`);
+  }
+}
+
+const canonicalRalphCommand = join(commandDir, 'maestro-ralph.md');
+if (existsSync(canonicalRalphCommand)) {
+  const text = readFileSync(canonicalRalphCommand, 'utf8');
+  for (const token of [
+    'Decision is mandatory',
+    'every Ralph-created Session chain',
+    'run decide --json',
+    'run complete --json',
+  ]) {
+    if (!text.includes(token)) errors.push(`.claude/commands/maestro-ralph.md: missing ${token}`);
+  }
 }
 
 const canonicalCompanion = join(commandDir, 'maestro-companion.md');
@@ -233,6 +358,31 @@ else {
   }
 }
 
+const canonicalRunExecutor = join(root, '.claude', 'agents', 'run-executor.md');
+if (!existsSync(canonicalRunExecutor)) errors.push('.claude/agents/run-executor.md: missing canonical Run executor');
+else errors.push(...validateExecutorLifecycleBoundary(
+  readFileSync(canonicalRunExecutor, 'utf8'),
+  '.claude/agents/run-executor.md',
+));
+const legacyRunExecutor = join(root, '.claude', 'agents', 'ralph-executor.md');
+if (!existsSync(legacyRunExecutor)) errors.push('.claude/agents/ralph-executor.md: missing compatibility alias');
+else if (!readFileSync(legacyRunExecutor, 'utf8').includes('run-executor')) {
+  errors.push('.claude/agents/ralph-executor.md: compatibility alias must delegate to run-executor');
+}
+
+for (const path of [
+  join(root, '.codex', 'skills', 'maestro-ralph', 'SKILL.md'),
+  join(root, '.codex', 'skills', 'maestro-ralph', 'optimization-strategy.md'),
+  join(root, '.codex', 'multi-agents-v2-schema.md'),
+  join(root, 'docs-site', 'src', 'client', 'data', 'inventory-v2.json'),
+  join(root, 'docs-site', 'src', 'content', 'docs', 'commands', 'reference.md'),
+]) {
+  if (!existsSync(path)) continue;
+  if (/\bralph[-_]executor\b/i.test(readFileSync(path, 'utf8'))) {
+    errors.push(`${relative(root, path)}: active Ralph surface must use the canonical run-executor`);
+  }
+}
+
 
 for (const dir of readdirSync(skillDir)) {
   const skillPath = join(skillDir, dir, 'SKILL.md');
@@ -246,12 +396,92 @@ for (const dir of readdirSync(skillDir)) {
   }
 }
 
-if (errors.length > 0) {
-  console.error(errors.join('\n'));
-  console.error(`session-run prompt lint failed: ${errors.length} issue(s)`);
-  process.exit(1);
+// v2/v2.1 contracts must declare the artifact schema or schema_range (and role
+// for 2.1) on every consumes entry: a missing constraint yields
+// ARTIFACT_SCHEMA_UNKNOWN in reuse assessment and forces a manual REVIEW
+// acceptance on an otherwise eligible artifact. Also cross-check consume
+// aliases against declared producer aliases (a dead alias silently never binds
+// upstream) and require an explicit contract_version once a contract consumes
+// anything.
+export function validateConsumesSchema(contract, label) {
+  const errors = [];
+  const consumes = Array.isArray(contract?.consumes) ? contract.consumes : [];
+  if (consumes.length === 0) return errors;
+  const version = contract.contract_version;
+  if (version !== 2 && version !== 2.1) {
+    errors.push(`${label}: consumes without contract_version 2/2.1 parse as v1 where schema/role are metadata-only; declare contract_version: 2.1`);
+    return errors;
+  }
+  consumes.forEach((item, index) => {
+    const id = `${label}: consumes[${index}] kind=${item?.kind ?? '?'}`;
+    const schema = typeof item?.schema === 'string' ? item.schema : '';
+    const schemaRange = typeof item?.schema_range === 'string' ? item.schema_range : '';
+    if (schema.length === 0 && schemaRange.length === 0) {
+      errors.push(`${id}: missing schema or schema_range (declare the producer artifact schema, or schema_range '<kind>/<major>.x' for major-compatible reuse, so reuse binds without a manual REVIEW)`);
+    } else if (schema.length > 0 && schemaRange.length > 0) {
+      errors.push(`${id}: declares both schema and schema_range; pick exactly one`);
+    }
+    if (schemaRange.length > 0) {
+      const match = /^([^/]+)\/([0-9]+)\.x$/.exec(schemaRange);
+      const majorNoLeadingZero = match ? match[2] === '0' || !match[2].startsWith('0') : false;
+      if (!match || !majorNoLeadingZero || match[1] !== item?.kind) {
+        errors.push(`${id}: schema_range must match '<kind>/<major>.x' with kind equal to consumes kind and major without leading zeros: ${schemaRange}`);
+      }
+    }
+    if (version === 2.1 && (typeof item?.role !== 'string' || item.role.length === 0)) {
+      errors.push(`${id}: missing role for contract_version 2.1`);
+    }
+  });
+  return errors;
 }
 
-const commandCount = readdirSync(commandDir).filter((name) => name.endsWith('.md')).length;
-const skillCount = readdirSync(skillDir).filter((dir) => existsSync(join(skillDir, dir, 'SKILL.md'))).length;
-console.log(`session-run prompt lint passed: ${commandCount} commands, ${skillCount} skills`);
+const prepareDir = join(root, 'prepare');
+export function validateProducesAliases(contract, label) {
+  const errors = [];
+  for (const [index, produce] of (contract?.produces ?? []).entries()) {
+    if (produce?.role === 'primary' && (typeof produce.alias !== 'string' || produce.alias.length === 0)) {
+      errors.push(`${label}: produces[${index}] kind=${produce.kind ?? '?'} is primary but declares no alias (an explicit alias is mandatory so consumers bind deterministically; defaultAlias inference is legacy-only)`);
+    }
+  }
+  return errors;
+}
+
+const contractSources = [];
+for (const file of readdirSync(prepareDir).filter((name) => name.endsWith('.md'))) {
+  const path = join(prepareDir, file);
+  const contract = frontmatter(readFileSync(path, 'utf8'))?.contract;
+  if (contract) contractSources.push({ path, contract });
+}
+for (const file of readdirSync(commandDir).filter((name) => name.endsWith('.md'))) {
+  const path = join(commandDir, file);
+  const contract = frontmatter(readFileSync(path, 'utf8'))?.contract;
+  if (contract) contractSources.push({ path, contract });
+}
+const producedAliases = new Set();
+for (const { contract } of contractSources) {
+  for (const produce of contract.produces ?? []) {
+    if (typeof produce?.alias === 'string') producedAliases.add(produce.alias);
+  }
+}
+for (const { path, contract } of contractSources) {
+  const label = relative(root, path);
+  errors.push(...validateConsumesSchema(contract, label));
+  errors.push(...validateProducesAliases(contract, label));
+  for (const item of contract.consumes ?? []) {
+    if (typeof item?.alias === 'string' && item.alias.length > 0 && !producedAliases.has(item.alias)) {
+      errors.push(`${label}: consumes alias '${item.alias}' (kind=${item.kind ?? '?'}) has no declared producer alias; the upstream can never bind (dead alias)`);
+    }
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (errors.length > 0) {
+    console.error(errors.join('\n'));
+    console.error(`session-run prompt lint failed: ${errors.length} issue(s)`);
+    process.exit(1);
+  }
+
+  const commandCount = readdirSync(commandDir).filter((name) => name.endsWith('.md')).length;
+  const skillCount = readdirSync(skillDir).filter((dir) => existsSync(join(skillDir, dir, 'SKILL.md'))).length;
+  console.log(`session-run prompt lint passed: ${commandCount} commands, ${skillCount} skills`);
+}

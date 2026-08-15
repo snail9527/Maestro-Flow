@@ -23,29 +23,42 @@
 // its chain position (head or --pick) — it must be adjudicated via `run decide`
 // before any later step may start.
 //
-// Exit codes mirror `maestro ralph next`:
+// Exit codes preserve the historical step-driver contract:
 //   0 — printed a step birth packet
 //   2 — no dispatchable step (decision node gates the chain, or all complete)
 //   3 — refused: a step is already running (complete it first)
 //   1 — generic error (unresolvable session, ambiguous session, bad content,
 //       bad --pick target)
 //
-// src/run must not depend on src/ralph, so the chain helpers live in
-// src/run/chain.ts (canonical) rather than being imported from the ralph adapter.
+// The chain helpers live in src/run/chain.ts as the canonical source; the ralph
+// adapter that once reused them (via a ralph → run dependency) was removed with
+// the rest of the src/ralph/ tree.
 // ---------------------------------------------------------------------------
 
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveStepContent } from './contract.js';
-import { createRun, resolveArgumentRequirements, type CreateRunResult, type NamedGateBlocker, type PrevHandoff, type RunUpstream } from './runtime.js';
+import {
+  briefRun,
+  createExecutionRun,
+  createRun,
+  projectSessionEntry,
+  resolveArgumentRequirements,
+  resolveUnknownFlags,
+  type CreateRunResult,
+  type NamedGateBlocker,
+  type PrevHandoff,
+  type RunUpstream,
+} from './runtime.js';
 import {
   activeStepIndex,
   nextPendingIndex,
   nextPendingDecisionIndex,
 } from './chain.js';
-import { checkLease } from './lease.js';
+import { assertExecutionLease, checkLease, type ExecutionLeaseClaim } from './lease.js';
 import { SessionStore } from './store.js';
-import { readStateJson } from '../utils/state-schema.js';
+import { readResolvedSession } from './session-resolver.js';
+import { readStateJson, writeStateJson, ensureSessionProjection } from '../utils/state-schema.js';
 import type { SessionState, Handoff } from './schemas.js';
 import type { TargetPlatform } from '../core/skill-converter.js';
 
@@ -91,14 +104,17 @@ export interface NextResult {
   queue?: QueueEntry[];
   /** Prior step handoff.next[] suggestions (command + reason + needs). */
   recommended?: RecommendedEntry[];
+  /** Full brief data when --inline-brief is requested (avoids a separate run brief call). */
+  inline_brief?: unknown;
 }
 
 export interface NextCmdOptions {
   sessionId?: string;
   json?: boolean;
   /**
-   * Command args forwarded to `createRun` (stored in run.command.args). Used by
-   * the ralph adapter to carry per-step args from ralph-meta; `run next` leaves
+   * Command args forwarded to `createRun` (stored in run.command.args). The
+   * retired ralph adapter used this to carry per-step args from ralph-meta;
+   * `run next` leaves
    * this unset so its own behaviour is unchanged.
    */
   args?: string[];
@@ -111,11 +127,26 @@ export interface NextCmdOptions {
   /**
    * Lease claim checked against session.orchestration.lease before advancing.
    * A null lease (or a lease with a null owner) skips verification entirely, so
-   * non-leased sessions are unaffected. A mismatch is exit 1 (mirrors ralph).
+   * non-leased sessions are unaffected. A mismatch is exit 1 (mirrors the
+   * retired ralph lease behaviour).
    */
   executionOwner?: string;
   ownerEpoch?: number;
   leaseId?: string;
+  /**
+   * Include full brief-level data (guidance, execution contract, continuity)
+   * in the result. The executor can use this directly instead of calling
+   * `maestro run brief` separately — the normal forward flow path.
+   */
+  inlineBrief?: boolean;
+  /** Internal execution binding; omitted legacy calls retain the current unleased path. */
+  execution?: {
+    executionId: string;
+    generation: number;
+    expectedRevision: number;
+    lease: ExecutionLeaseClaim;
+    requestId: string;
+  };
 }
 
 export type NextReasonCode =
@@ -133,6 +164,7 @@ export type NextReasonCode =
   | 'PICK_DECISION_NODE'
   | 'COMMAND_CONTENT_MISSING'
   | 'ARGUMENT_REQUIRED'
+  | 'ARGUMENT_INVALID'
   | 'INTERNAL_ERROR';
 
 export interface NextOutcome {
@@ -165,8 +197,10 @@ function listRunningSessions(store: SessionStore): SessionCandidate[] {
   for (const name of names) {
     if (!store.sessionExists(name)) continue;
     try {
-      const session = store.readBundle(name).session;
-      if (session.status === 'running') candidates.push({ sessionId: name, session });
+      const resolved = readResolvedSession(store, name);
+      if (resolved.derivedStatus === 'running') {
+        candidates.push({ sessionId: name, session: resolved.bundle.session });
+      }
     } catch {
       /* skip corrupt */
     }
@@ -199,8 +233,10 @@ function resolveSession(projectRoot: string, store: SessionStore, sessionId?: st
   const active = state?.active_session_id;
   if (active && store.sessionExists(active)) {
     try {
-      const session = store.readBundle(active).session;
-      if (session.status === 'running') return { kind: 'ok', sessionId: active, session };
+      const resolved = readResolvedSession(store, active);
+      if (resolved.derivedStatus === 'running') {
+        return { kind: 'ok', sessionId: active, session: resolved.bundle.session };
+      }
     } catch {
       /* fall through to scan */
     }
@@ -531,6 +567,101 @@ export function runNextStep(projectRoot: string, opts: NextCmdOptions = {}): Nex
 
   const { sessionId } = resolved;
   let session = resolved.session;
+  const sessionRecord = store.readSessionRecord(sessionId);
+  const statusless = sessionRecord.schema_version === 'session/2.0';
+
+  if (statusless && sessionRecord.archived_at) {
+    return {
+      exitCode: 2,
+      reasonCode: 'CHAIN_COMPLETE',
+      result: null,
+      message: `[run next] Session ${sessionId} is archived; automatic dispatch is closed.`,
+    };
+  }
+  if (statusless && !opts.execution) {
+    return {
+      exitCode: 1,
+      reasonCode: 'INTERNAL_ERROR',
+      result: null,
+      message: `[run next] Session ${sessionId} uses session/2.0; an explicit current Execution binding is required.`,
+    };
+  }
+
+  if (opts.execution) {
+    const existing = store.readExecutionTransition(sessionId, opts.execution.executionId, opts.execution.requestId);
+    const execution = store.readExecution(sessionId, opts.execution.executionId);
+    if (statusless && sessionRecord.current_execution_id !== execution.execution_id) {
+      return {
+        exitCode: 1,
+        reasonCode: 'RESUME_REQUIRED',
+        result: null,
+        message: `[run next] Execution ${execution.execution_id} is not the current Execution for Session ${sessionId}`,
+      };
+    }
+    if (execution.generation !== opts.execution.generation) {
+      return { exitCode: 1, reasonCode: 'INTERNAL_ERROR', result: null, message: '[run next] Execution generation changed' };
+    }
+    if (!existing && execution.revision !== opts.execution.expectedRevision) {
+      return {
+        exitCode: 1,
+        reasonCode: 'INTERNAL_ERROR',
+        result: null,
+        message: `[run next] execution revision conflict: expected ${opts.execution.expectedRevision}, current ${execution.revision}`,
+      };
+    }
+    if (existing && (existing.payload.operation !== 'next'
+      || existing.payload.subject.execution_id !== execution.execution_id
+      || existing.payload.subject.generation !== execution.generation)) {
+      return {
+        exitCode: 1,
+        reasonCode: 'INTERNAL_ERROR',
+        result: null,
+        message: `[run next] request_id ${opts.execution.requestId} was already used for another transition`,
+      };
+    }
+    if (execution.status !== 'active') {
+      return { exitCode: 1, reasonCode: 'RESUME_REQUIRED', result: null, message: `[run next] Execution is ${execution.status}` };
+    }
+    try {
+      assertExecutionLease(execution.lease, opts.execution.lease);
+    } catch (error) {
+      return { exitCode: 1, reasonCode: 'LEASE_CONFLICT', result: null, message: `[run next] ${(error as Error).message}` };
+    }
+
+    session = structuredClone(session);
+    if (existing) {
+      const replayStepId = existing.payload.subject.chain_step_id;
+      const replayRunId = existing.outcome.result.value && typeof existing.outcome.result.value === 'object'
+        ? (existing.outcome.result.value as { run_id?: unknown }).run_id
+        : null;
+      const replayStep = replayStepId
+        ? session.orchestration.chain.find(step => step.step_id === replayStepId)
+        : null;
+      if (!replayStep || typeof replayRunId !== 'string'
+        || replayStep.status !== 'running' || replayStep.run_id !== replayRunId
+        || session.active_run_id !== replayRunId) {
+        return {
+          exitCode: 1,
+          reasonCode: 'INTERNAL_ERROR',
+          result: null,
+          message: `[run next] request_id ${opts.execution.requestId} outcome diverged from current Run authority`,
+        };
+      }
+      replayStep.status = 'pending';
+      replayStep.run_id = null;
+      session.active_run_id = null;
+    } else {
+      for (const step of session.orchestration.chain) {
+        if (step.status !== 'running' || !step.run_id) continue;
+        try {
+          const status = store.readRun(sessionId, step.run_id).status;
+          if (status === 'sealed' || status === 'completed') step.status = 'sealed';
+        } catch {
+          // The fenced create transaction revalidates every candidate.
+        }
+      }
+    }
+  }
 
   // Lease guard (§1.4): a leased session refuses advancement unless the claim
   // matches. Inert for null-lease sessions, so it also replaces the old engine
@@ -544,7 +675,16 @@ export function runNextStep(projectRoot: string, opts: NextCmdOptions = {}): Nex
     return { exitCode: 1, reasonCode: 'LEASE_CONFLICT', result: null, message: `[run next] ${conflict}` };
   }
 
-  if (session.status !== 'running') {
+  if (!statusless && (session.status === 'sealed' || session.status === 'archived')) {
+    return {
+      exitCode: 2,
+      reasonCode: 'CHAIN_COMPLETE',
+      result: null,
+      message: `[run next] session is "${session.status}"; dispatch is permanently closed and no Run was allocated.`,
+    };
+  }
+
+  if (!statusless && session.status !== 'running') {
     const escalated = session.orchestration.decision_points
       .filter(point => point.status === 'escalated')
       .map(point => point.point_id);
@@ -571,7 +711,9 @@ export function runNextStep(projectRoot: string, opts: NextCmdOptions = {}): Nex
   // the driver does not stall on a step the executor completed via `run complete`.
   // `run complete` seals the Run without touching the chain, keeping it engine-
   // agnostic; the step-driver owns chain progression.
-  session = reconcileSealedSteps(projectRoot, store, session);
+  if (!opts.execution) {
+    session = reconcileSealedSteps(projectRoot, store, session);
+  }
 
   // Refuse when a step is already running — caller must complete it first. The
   // single-running guard wins over --pick.
@@ -640,19 +782,49 @@ export function runNextStep(projectRoot: string, opts: NextCmdOptions = {}): Nex
   const args = opts.args ?? (chainStep.args ? [chainStep.args] : []);
   const argumentRequirements = resolveArgumentRequirements(projectRoot, chainStep.command, args);
   const missingArguments = argumentRequirements.filter(item => item.required && item.missing);
-  if (missingArguments.length > 0) {
+  const invalidArguments = argumentRequirements.filter(item => item.invalid !== undefined);
+  if (missingArguments.length > 0 || invalidArguments.length > 0) {
+    // A failed first dispatch still leaves the Session directory on disk but
+    // state.json carries no projection (ensureSessionProjection is written only
+    // by a successful createRun / seal). Without a projection the Pi-side
+    // canonical resolution cannot see the Session, which dead-locks every
+    // mutation command (`run edit`, `session chain replace`, `session next`)
+    // against it. Best-effort write the projection so the orphan stays
+    // canonical-reachable and repairable via `session chain replace --args`.
+    // Persistence failure is surfaced as a warning, never silently dropped.
+    let projectionWarning: string | null = null;
+    try {
+      const state = readStateJson(projectRoot);
+      if (state) {
+        writeStateJson(projectRoot, ensureSessionProjection(
+          state,
+          projectSessionEntry(session, store.readSessionRecord(sessionId)),
+        ));
+      } else {
+        projectionWarning = 'state.json missing; session projection not registered';
+      }
+    } catch (error) {
+      projectionWarning = `session projection registration failed: ${(error as Error).message}`;
+    }
+    const unknownFlags = resolveUnknownFlags(projectRoot, chainStep.command, args);
+    const unknownNote = unknownFlags.length > 0 ? ` Unknown flags: ${unknownFlags.join(', ')}.` : '';
+    const warningNote = projectionWarning ? `\n[warn] ${projectionWarning}` : '';
+    const detail = missingArguments.length > 0
+      ? 'missing required arguments for ' + chainStep.command + ': '
+        + missingArguments.map(item => `${item.name}: ${item.question}`).join('; ')
+      : 'invalid values for ' + chainStep.command + ': '
+        + invalidArguments.map(item => `${item.name}="${item.invalid}" (expected one of: ${(item.choices ?? []).join(', ')} or an explicit definition)`).join('; ');
     return {
       exitCode: 1,
-      reasonCode: 'ARGUMENT_REQUIRED',
+      reasonCode: missingArguments.length > 0 ? 'ARGUMENT_REQUIRED' : 'ARGUMENT_INVALID',
       result: null,
-      message: `[run next] missing required arguments for ${chainStep.command}: `
-        + missingArguments.map(item => `${item.name}: ${item.question}`).join('; '),
+      message: `[run next] ${detail}${unknownNote}${warningNote}`,
     };
   }
 
   let created;
   try {
-    created = createRun({
+    const createOptions = {
       projectRoot,
       command: chainStep.command,
       sessionId,
@@ -668,7 +840,18 @@ export function runNextStep(projectRoot: string, opts: NextCmdOptions = {}): Nex
         ownerEpoch: opts.ownerEpoch,
         leaseId: opts.leaseId,
       },
-    });
+    };
+    created = opts.execution
+      ? createExecutionRun({
+          ...createOptions,
+          executionId: opts.execution.executionId,
+          generation: opts.execution.generation,
+          expectedExecutionRevision: opts.execution.expectedRevision,
+          executionLease: opts.execution.lease,
+          requestId: opts.execution.requestId,
+          transitionOperation: 'next',
+        })
+      : createRun(createOptions);
   } catch (err) {
     const current = store.readBundle(sessionId).session;
     const concurrentRunning = activeStepIndex(current);
@@ -715,12 +898,47 @@ export function runNextStep(projectRoot: string, opts: NextCmdOptions = {}): Nex
     recommended,
   };
 
+  // Inline brief: attach full brief data so the executor can skip a separate
+  // `maestro run brief` CLI call in the normal forward flow.
+  if (opts.inlineBrief) {
+    try {
+      result.inline_brief = briefRun(projectRoot, result.run_id, sessionId);
+    } catch {
+      // Degrade gracefully: brief is optional inline; the executor can still
+      // call `maestro run brief` separately if the inline data is absent.
+      result.inline_brief = null;
+    }
+  }
+
   return {
     exitCode: 0,
     reasonCode: 'DISPATCHED',
     result,
     message: opts.json ? JSON.stringify(result, null, 2) : renderBirthPacket(result),
   };
+}
+
+export interface NextExecutionOptions extends Omit<NextCmdOptions, 'execution'> {
+  sessionId: string;
+  executionId: string;
+  generation: number;
+  expectedExecutionRevision: number;
+  executionLease: ExecutionLeaseClaim;
+  requestId: string;
+}
+
+/** Execution-aware next; all legacy runNextStep callers remain unchanged. */
+export function runNextExecutionStep(projectRoot: string, options: NextExecutionOptions): NextOutcome {
+  return runNextStep(projectRoot, {
+    ...options,
+    execution: {
+      executionId: options.executionId,
+      generation: options.generation,
+      expectedRevision: options.expectedExecutionRevision,
+      lease: options.executionLease,
+      requestId: options.requestId,
+    },
+  });
 }
 
 /**

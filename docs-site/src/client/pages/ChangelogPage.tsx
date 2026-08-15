@@ -17,6 +17,175 @@ interface ChangelogEntry {
 
 const changelog: ChangelogEntry[] = [
   {
+    version: '0.5.74',
+    date: '2026-08',
+    changes: [
+      { type: 'fix', text_en: 'Migration deadlock removed: session migrate --to-v3 accepts running Runs (projected run/3.0 running, active run bound) and orphaned running/failed steps project as pending; the v3 face can resume and complete in-flight work. E2E: running Run → migrate → run brief → run complete --advance → session complete', text_zh: '迁移死锁消除：session migrate --to-v3 接受 running Run（投影为 run/3.0 running，active run 绑定）与 orphaned running/failed step（投影 pending）；v3 面可继续完成在途工作。E2E：running Run → migrate → run brief → run complete --advance → session complete' },
+      { type: 'fix', text_en: 'knowledge stage works against session/3.0: the knowledge sidecar opens the v3 branch for staging; artifact evidence roots resolve from session.artifacts_ref through the registry', text_zh: 'knowledge stage 支持 session/3.0：knowledge sidecar 打开 v3 分支供 stage；artifact 证据根从 session.artifacts_ref 经 registry 解析' },
+      { type: 'fix', text_en: 'CAS fence is derived from the explicit --session target (not a stale state.json active); session unarchive is a v3 orchestration target; publishPlanV3 replays open/insert as idempotent with stable request ids', text_zh: 'CAS fence 从显式 --session 目标派生（不再依赖 stale state.json active）；session unarchive 成为 v3 orchestration target；publishPlanV3 的 open/insert 重放幂等（稳定 request-id）' },
+      { type: 'fix', text_en: 'Execution selection prefers the unique non-sealed Execution; a stale sealed current_execution_id no longer hides the open chain; v2 residue removed from run-executor/skill-iter-tune/maestro-help canonical sources and the Codex conversion profile', text_zh: 'Execution 选择优先唯一 non-sealed Execution；stale sealed current_execution_id 不再隐藏 open chain；run-executor/skill-iter-tune/maestro-help 规范源与 Codex 转换配置的 v2 残留清零' },
+      { type: 'chore', text_en: 'Prepublish gates: skill-surface check (123 invocations cross-validated + v3 knowledge-stage smoke), packaged-install isolated-HOME smoke, legacy multi-generation migration and compaction-reattach tests', text_zh: '发布门禁补强：skill-surface 检查（123 处命令调用交叉验证 + v3 knowledge-stage 冒烟）、packaged-install 隔离 HOME 冒烟、legacy 多代迁移与 compaction-reattach 测试' },
+    ],
+  },
+  {
+    version: '0.5.73',
+    date: '2026-08',
+    changes: [
+      { type: 'feat', text_en: 'Canonical v3 convergence: session/3.0 becomes the default workspace writer with the six-key capability set; run next emits a full birth packet (run_dir/step_id/upstream/guidance/knowledge_context/brief.command/run_already_created); run brief returns a brief-result/3.0 Resume Packet with orchestration_revision and a suggest-only next hint; replays return the identical packet via the persisted receipt', text_zh: 'Canonical v3 收敛：session/3.0 成为默认 workspace writer（六键能力集）；run next 输出完整 birth packet（run_dir/step_id/upstream/guidance/knowledge_context/brief.command/run_already_created）；run brief 返回 brief-result/3.0 Resume Packet（含 orchestration_revision 与 suggest-only next hint）；同 request 重放经持久化 receipt 返回相同 packet' },
+      { type: 'refactor', text_en: 'Canonical prompts, gates and mirrors v3-ified: run-mode/orchestrator-run-loop/run-mode-lite/ralph/prepare/* and all .claude/.agents/.codex/.agy mirrors describe the session/3.0 + run/3.0 surface with the six-key capability gate; v2 content moved into labeled Legacy branches; gate scripts enforce v3 tokens and the new default writer; existing workspaces keep their stored writer (legacy escape hatch: config session-schema set session/1.3|2.0)', text_zh: 'Canonical 文档/门禁/镜像 v3 化：run-mode/orchestrator-run-loop/run-mode-lite/ralph/prepare/* 及全部 .claude/.agents/.codex/.agy 镜像改用 session/3.0 + run/3.0 面与六键能力门；v2 内容移入带标签的 Legacy 分支；门禁脚本强制执行 v3 token 与新默认 writer；既有 workspace 保留已存 writer（legacy 逃生口：config session-schema set session/1.3|2.0）' },
+    ],
+  },
+  {
+    version: '0.5.72',
+    date: '2026-08',
+    changes: [
+      { type: 'fix', text_en: 'Atomic knowledge staging: run complete persists knowledge candidates into the knowledge-delta in the same transaction as the completion receipt, making them visible to knowledge review immediately; summarizeSessionKnowledge reads are schema-agnostic', text_zh: '知识闭环原子化：run complete 在完成 receipt 的同一事务内将知识候选写入 knowledge-delta，立即对 knowledge review 可见；summarizeSessionKnowledge 读取与 schema 无关' },
+      { type: 'fix', text_en: 'Cross-repo audit round: run create enforces predecessor publication authority before creating Run shells and clears engine-injected input_refs on replay; transition receipts force participant_id = actor_id; ResumeMap drops identityRevision/paused; resolved or escalated decisions cannot be bound as new gates; run next derives the Run ID deterministically from the request ID so retries replay the original mutation; the canonical orchestration-revision flag replaces the retired session-revision flag', text_zh: '跨仓审查修复：run create 先通过前驱 publication authority 再建 Run shell，replay 时清除引擎注入的 input_refs；transition receipt 强制 participant_id = actor_id；ResumeMap 删除 identityRevision/paused；resolved/escalated 决策不可再绑为新门；run next 缺省 Run ID 从 request ID 确定性派生以支持重放；artifact flag 改用规范 orchestration-revision' },
+      { type: 'chore', text_en: 'Release gate proofs: drop the retired use-participant-status assertion and align the v3 proof sequence with the open-revision-1 orchestration contract; all 30 build-backed release-machine proofs pass', text_zh: '发布门禁修复：删除已退役的 use-participant-status 断言，v3 证明序列对齐 open-revision-1 orchestration 合同；30 项 build-backed release-machine 证明全部通过' },
+    ],
+  },
+  {
+    version: '0.5.71',
+    date: '2026-08',
+    changes: [
+      { type: 'feat', text_en: 'Add v3 decision gates: chain steps may declare a decision_ref; run next/create block on unresolved predecessor gates (DECISION_GATE_BLOCKED with run-decide next actions); session complete blocks on open gates while escalated gates pass with concerns; decide escalate no longer pauses the Session', text_zh: '新增 v3 决策门：chain step 可声明 decision_ref；未决前驱决策门阻断 run next/create（DECISION_GATE_BLOCKED + run-decide next actions）；session complete 阻断 open 门、escalated 门以 concerns 通过；decide escalate 不再暂停 Session' },
+      { type: 'refactor', text_en: 'Simplify v3 by the ralph-run anchor: remove chain-proposal application, TC-P0-3 extra completion inputs (--artifact/--note/--decision), 22 retired v2-only subcommand stubs, session fail/chain audit, resume-map truncation (oversize now throws), and per-check knowledge reconciliation (candidates generated once by run complete)', text_zh: '以 ralph 路径为锚简化 v3：移除 chain-proposal 应用、TC-P0-3 附加完成输入（--artifact/--note/--decision）、22 条退役 v2-only 子命令 stub、session fail/chain audit、resume-map 截断（超限改为抛错）与每次 check 的知识对账（候选改为 run complete 一次性生成）' },
+      { type: 'refactor', text_en: 'Batch B: drop the participant entity/commands (--participant option retained for injection compatibility), session identity_revision, status paused, and the gates system (gates_ref/blocking checks/run gate_refs); receipts now store participant_id = actorId; legacy v3 files read via strip-tolerant schemas with paused mapped to open', text_zh: '批次 B：移除 participant 实体与命令族（--participant option 保留兼容注入）、session identity_revision、paused 状态与 gates 系统（gates_ref/blocking 校验/run gate_refs）；receipt 改为存 participant_id = actorId；旧 v3 文件以 strip 宽容 schema 读取，paused 映射为 open' },
+      { type: 'chore', text_en: 'Add maestro config session-schema set/show for explicit writer switching; capabilities now declare writer-scoped session_schema_writes', text_zh: '新增 maestro config session-schema set/show 显式切换 writer；capabilities 改为声明 writer-scoped session_schema_writes' },
+    ],
+  },
+  {
+    version: '0.5.70',
+    date: '2026-08',
+    changes: [
+      { type: 'feat', text_en: 'Session/Run v3 minimal protocol: session/3.0 and run/3.0 state machines with independent identity, orchestration, activity and per-Run revisions; atomic chain advancement; participant identities; immutable request/transition receipts; strict run-response/1.2 envelopes; deterministic context resolution; and compact ResumeMapV1 projections', text_zh: 'Session/Run v3 最小协议：新增 session/3.0 与 run/3.0 状态机，分离 identity、orchestration、activity 与每个 Run 的 revision；支持原子 chain 推进、participant 身份、不可变 request/transition receipts、严格 run-response/1.2、确定性上下文解析与紧凑 ResumeMapV1 投影' },
+      { type: 'feat', text_en: 'Add fail-closed v3 CLI routing by workspace writer with session/run/participant commands, structured retirement responses for legacy Execution commands, machine-readable help and capabilities catalogs, and both split/equal --workflow-root support', text_zh: '新增按 workspace writer fail-closed 分发的 v3 CLI，提供 session/run/participant 命令、旧 Execution 命令的结构化退役响应、可机读 help/capabilities catalog，并同时支持分离式与等号式 --workflow-root' },
+      { type: 'fix', text_en: 'Harden v3 recovery and migration: failed/cancelled Runs close or requeue their chain steps, retry lineage and attempts derive from authoritative Runs, chain rewrites are pending-only, participant replay returns the original receipt result, and legacy Execution transitions migrate with source hashing and secret redaction', text_zh: '加固 v3 恢复与迁移：failed/cancelled Run 会关闭或重新排队对应 chain step，retry lineage 与 attempt 从权威 Run 派生，chain 改写仅限 pending，participant replay 返回原始 receipt 结果，旧 Execution transitions 以源哈希与敏感字段清理方式迁移' },
+      { type: 'chore', text_en: 'Expand release gates to 41 contract-parity checks and 31 build-backed v2/v3 behavior proofs, including writer routing, participant receipts, help compatibility, retired commands and explicit complete --advance semantics', text_zh: '扩展发布门禁至 41 项 contract parity 检查与 31 项 build-backed v2/v3 行为证明，覆盖 writer 路由、participant receipts、help 兼容、命令退役与显式 complete --advance 语义' },
+    ],
+  },
+  {
+    version: '0.5.69',
+    date: '2026-08',
+    changes: [
+      { type: 'feat', text_en: 'Knowledge graph: deterministic Objective-C/Swift structural resolution — exact-only resolution of inheritance, protocol conformance, extension ownership and contains relationships (never fuzzy), generated Swift-header identity via SWIFT_CLASS, opt-in external-surface manifest with validated project-relative header allowlist, hierarchy/impact/path queries with structured ambiguity errors, schema v8 migration with replayable structural refs, and hardened background sync leases', text_zh: '知识图谱：确定性 Objective-C/Swift 结构解析——继承/协议遵循/扩展归属/包含关系仅做精确解析（绝不模糊匹配），通过 SWIFT_CLASS 识别生成式 Swift 头身份，可选的 external-surfaces 清单以项目相对路径白名单校验外部头文件，层次/影响/路径查询返回结构化歧义错误，schema v8 迁移支持可重放结构引用，后台同步租约加固' },
+      { type: 'fix', text_en: 'Windows canonical-path parity: external-surface canonical paths and kg identity-path test expectations are now posix-form on win32, fixing kg sync failures (Invalid StructuralReference) on Windows', text_zh: 'Windows 规范路径对齐：external-surface 规范路径与 kg 身份路径测试期望在 win32 统一为 posix 形式，修复 Windows 上 kg sync 的 Invalid StructuralReference 失败' },
+    ],
+  },
+  {
+    version: '0.5.68',
+    date: '2026-08',
+    changes: [
+      { type: 'fix', text_en: 'Run-completion path resolution: --evidence/--artifact/--chain-proposal now accept shell-CWD-relative paths unambiguously when they land inside the Run directory (outputs/ for proposals), errors state the resolved path and the run-directory base, and a latent Windows cross-drive containment bypass is fixed', text_zh: 'Run 完成路径解析：--evidence/--artifact/--chain-proposal 在目标无歧义落在 Run 目录（proposal 为其 outputs/）内时接受 shell-CWD 相对路径，报错给出解析后路径与 Run 目录基准，并修复 Windows 跨盘符 containment 潜在绕过' },
+      { type: 'docs', text_en: 'Align skill-layer verification with evidence-reuse discipline: verify iron law becomes grounded evidence (live run or still-valid result under material invalidators), execute self-check scoped to changed surface, odyssey-review reuses test evidence across S_FIX/S_CONFIRM; evidence path base documented in run-mode and command-authoring', text_zh: '技能层验证与证据复用纪律对齐：verify 铁律改为 grounded evidence（本轮 live run 或失效条件内仍有效的结果），execute self-check 限定本次改动范围，odyssey-review 跨 S_FIX/S_CONFIRM 复用测试证据；run-mode 与 command-authoring 补充 evidence 路径基准文档' },
+    ],
+  },
+  {
+    version: '0.5.67',
+    date: '2026-08',
+    changes: [
+      { type: 'fix', text_en: 'Chain dispatch fixes: pass --arg through chain dispatch while keeping failed sessions canonical-reachable, preserve chain-file step args and explicit topic in chain start, and register projections on all session creation paths with enum argument validation plus session prune', text_zh: '链式调度修复：--arg 穿透链式调度且失败会话保持 canonical 可达，chain 启动时保留 chain-file 步骤参数与显式 topic，并在所有会话创建路径注册 projections、校验枚举参数并新增 session prune' },
+    ],
+  },
+  {
+    version: '0.5.66',
+    date: '2026-08',
+    changes: [
+      { type: 'fix', text_en: 'Support line-delimited artifact metadata: run check/done now reads _meta from the first line of .ndjson/.jsonl outputs, strips UTF-8 BOM from metadata-bearing files, registers application/x-ndjson media type, and adds skipArtifactMetadataValidation to downgrade contract metadata mismatches to warnings', text_zh: '支持行分隔的产物元数据：run check/done 可从 .ndjson/.jsonl 输出的首行读取 _meta，去除元数据文件的 UTF-8 BOM，新增 application/x-ndjson 媒体类型，并提供 skipArtifactMetadataValidation 将契约元数据不匹配降级为警告' },
+    ],
+  },
+  {
+    version: '0.5.65',
+    date: '2026-08',
+    changes: [
+      { type: 'feat', text_en: 'Capture transcript evidence snapshots in the knowledge lifecycle: harvest the K12–K17 window evidence flow and teach run-mode about it, recording exact source transcript evidence for promotion decisions', text_zh: '在知识生命周期中采集对话记录证据快照：收获 K12–K17 窗口证据流并教会 run-mode，为晋升决策记录精确的源对话记录证据' },
+    ],
+  },
+  {
+    version: '0.5.64',
+    date: '2026-08',
+    changes: [
+      { type: 'feat', text_en: 'Polish session/run lifecycle ergonomics and knowledge-flow UX from dual-model (gpt + qwen) and E2E walkthroughs: 16 friction points covering session done no-arg resolution, verbless fast-path verdicts, inline adjudication promotion, and reporting shorthand', text_zh: '基于双模型（gpt + qwen）与 E2E 演练打磨会话/运行生命周期易用性与知识流 UX，修复 16 个摩擦点：session done 无参解析、无动词快速路径的 verdict 尊重、内联裁决晋升与报告简写' },
+      { type: 'feat', text_en: 'Add prompt-facing quality gates: Staging Quality Bar, frontmatter quality gate blocking execution-state narration, Review Presentation Protocol (agent presents candidates, user decides), plus session-level knowledge governance', text_zh: '新增 prompt 质量门禁：Staging Quality Bar、阻断执行状态叙述的 frontmatter 质量门禁、Review Presentation Protocol（代理呈现候选、用户决策），以及会话级知识治理' },
+      { type: 'fix', text_en: 'Restore knowledge-graph code relation edges, FTS integrity, and multi-language extractors (TS/JS, Swift, Lua family) with a code-resolver for unresolved refs', text_zh: '修复知识图谱代码关系边、FTS 完整性与多语言抽取器（TS/JS、Swift、Lua 系列），并新增 unresolved refs 的 code-resolver' },
+      { type: 'fix', text_en: 'Accept legacy report.md frontmatter shorthand with auto-derived ids and actionable validation errors; bound explicit --verdict in verbless fast-path; harden ownership/governance boundaries', text_zh: '接受旧版 report.md 前置元数据简写并自动派生 id、给出可执行的校验错误；无动词快速路径尊重显式 --verdict；强化所有权与治理边界' },
+      { type: 'fix', text_en: 'Repair the broken wasm-copy step in the build script (missing closing quote introduced by the kg fix)', text_zh: '修复 build 脚本中损坏的 wasm 拷贝步骤（kg 修复引入的缺失引号）' },
+      { type: 'refactor', text_en: 'Migrate 22 command contracts to contract_version 2.1', text_zh: '将 22 个 command 契约迁移到 contract_version 2.1' },
+    ],
+  },
+  {
+    version: '0.5.63',
+    date: '2026-08',
+    changes: [
+      { type: 'fix', text_en: 'Resolve the sharp <0.35.0 vulnerability chain (GHSA-f88m-g3jw-g9cj: CVE-2026-33327/33328/35590/35591) by vendoring the unmodified Transformers.js 3.8.1 runtime and declaring its production dependencies directly with sharp ^0.35.3, removing the vulnerable transformers→sharp edge for all consumers', text_zh: '修复 sharp <0.35.0 漏洞链（GHSA-f88m-g3jw-g9cj：CVE-2026-33327/33328/35590/35591）：内置未修改的 Transformers.js 3.8.1 运行时并直接声明其生产依赖（sharp ^0.35.3），为所有消费者移除 transformers→sharp 漏洞依赖边' },
+    ],
+  },
+  {
+    version: '0.5.60',
+    date: '2026-08',
+    changes: [
+      { type: 'feat', text_en: 'Remove the Pi platform from the Maestro installer and direct users to the official pi-maestro-flow plugin, with TUI and install-guide reminders', text_zh: '从 Maestro 安装器移除 Pi 平台，引导用户安装官方 pi-maestro-flow 插件，并在 TUI 与安装指南中给出提示' },
+      { type: 'refactor', text_en: 'Reduce the arch-kb command surface to search/show/list, retiring the match, checklist, patterns, framework, and tech-select subcommands', text_zh: '精简 arch-kb 命令面为 search/show/list，移除 match、checklist、patterns、framework、tech-select 五个子命令' },
+      { type: 'fix', text_en: 'Harden storage identifier boundaries across embedding, CLI history, coordinator report paths, run IDs, and critique storage', text_zh: '加固存储标识符边界，覆盖 embedding、CLI 历史、协调器报告路径、run ID 与 critique 存储' },
+    ],
+  },
+  {
+    version: '0.5.59',
+    date: '2026-07',
+    changes: [
+      { type: 'refactor', text_en: 'Migrate dashboard and docs-site client routing from react-router-dom to wouter via a local alias shim, dropping a heavy dependency without changing call sites', text_zh: '将 dashboard 与 docs-site 客户端路由从 react-router-dom 迁移到 wouter，通过本地别名 shim 实现，移除重型依赖且无需改动调用点' },
+      { type: 'feat', text_en: 'Add dashboard resizable panels, context menu, and KaTeX math rendering in markdown', text_zh: 'dashboard 新增可调节面板、右键菜单与 Markdown 中的 KaTeX 数学公式渲染' },
+      { type: 'fix', text_en: 'Use forward-compatible schema version handling to prevent silent state.json downgrade', text_zh: '采用向前兼容的 schema 版本处理，防止 state.json 被静默降级' },
+      { type: 'chore', text_en: 'Upgrade @hono/node-server to 2.x and @modelcontextprotocol/sdk to 1.30, plus hono, vite, mermaid, ws, and tsx', text_zh: '升级 @hono/node-server 至 2.x、@modelcontextprotocol/sdk 至 1.30，并更新 hono、vite、mermaid、ws、tsx' },
+    ],
+  },
+  {
+    version: '0.5.58',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'Add a governed knowledge lifecycle from Run evidence capture through conservative promotion, deterministic audit, reconciliation, and reversible pruning', text_zh: '新增受治理的知识生命周期：从 Run 证据采集到保守晋升、确定性审计、协调与可回滚剪枝' },
+      { type: 'feat', text_en: 'Distinguish knowledge exposure from explicit consumption and record knowledge deltas with precise provenance across Session and Run execution', text_zh: '区分知识曝光与显式消费，并在 Session/Run 执行中记录带精确来源的知识增量' },
+      { type: 'feat', text_en: 'Add knowledge search diversity and exploration slots, unified KG identity and facets, plus an end-to-end knowledge review command', text_zh: '新增知识检索多样性与探索位、统一 KG 身份与 facets，并补齐端到端知识审查命令' },
+      { type: 'refactor', text_en: 'Migrate Ralph fully onto the canonical Run Executor and bind Pi skills to the Session/Run platform contract', text_zh: '将 Ralph 全面迁移到标准 Run Executor，并把 Pi skills 绑定到 Session/Run 平台契约' },
+      { type: 'fix', text_en: 'Harden promotion transactions, evidence validation, audit read-only guarantees, rollback safety, machine-mode stderr, and mutable command refresh', text_zh: '加固晋升事务、佐证校验、审计只读保证、回滚安全、机器模式 stderr 与可变命令刷新' },
+      { type: 'docs', text_en: 'Document the reconciled knowledge architecture and align command, workflow, skill, and Pi teammate-tool mirrors', text_zh: '沉淀协调后的知识系统架构，并对齐 command、workflow、skill 与 Pi teammate-tool 镜像' },
+    ],
+  },
+  {
+    version: '0.5.56',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'Unify Maestro and Ralph into a single Session chain protocol with Skill chain-proposal contract and atomic proposal application', text_zh: '统一 Maestro 与 Ralph 为单一 Session 链协议，新增 Skill 链提案契约与原子提案应用' },
+      { type: 'feat', text_en: 'Add session start command with run start deprecation and full reference migration; new prepare/maestro.md for intent classification and chain building', text_zh: '新增 session start 命令并废弃 run start，全量迁移引用；新建 prepare/maestro.md 意图分类与建链协议' },
+      { type: 'feat', text_en: 'Rewrite ralph prepare/workflow restoring Stage Mapping, Build Rules and state machine; align maestro prepare flags, decomposition protocol and invariants', text_zh: '重写 ralph prepare/workflow 恢复 Stage Mapping、Build Rules 与状态机；对齐 maestro prepare flags、分解协议与 invariants' },
+      { type: 'feat', text_en: 'Install entry commands converted to skill format with hub arrow and expanded step selection', text_zh: '安装入口命令转为 skill 格式，新增 hub 箭头与扩展步骤选择' },
+      { type: 'fix', text_en: 'Complete Run recovery loop, auto-continuation and decision closure; clean 82 files of residual command references', text_zh: '补全 Run 恢复闭环、自动续行与决策闭环；清理 82 个文件的残留命令引用' },
+      { type: 'fix', text_en: 'Fix ralph decision gate classification, evaluation flow and missing links; adapt run-executor for inline-brief forward flow', text_zh: '修复 ralph decision gate 分类、评估流程与缺失环节；适配 run-executor 的 inline-brief 前向流程' },
+      { type: 'refactor', text_en: 'Session/Run responsibility separation with full Ralph migration; unify orchestration into Run lifecycle; neutralize Run executor and evidence queries', text_zh: 'Session/Run 职责分离与 Ralph 完全迁移；统一编排到 Run 生命周期；中立化 Run executor 与 evidence 查询' },
+      { type: 'feat', text_en: 'Brief no longer injects full run-mode.md text, eliminating redundant executor loading', text_zh: 'brief 不再注入 run-mode.md 全文，消除执行器重复加载' },
+    ],
+  },
+  {
+    version: '0.5.55',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'Support HF_ENDPOINT / HF_MIRROR env vars to download embedding models from a mirror (e.g. hf-mirror.com) via @huggingface/transformers env.remoteHost', text_zh: 'embedding 支持通过 HF_ENDPOINT / HF_MIRROR 环境变量走镜像（如 hf-mirror.com）下载模型，经 @huggingface/transformers 的 env.remoteHost 透传' },
+      { type: 'chore', text_en: 'npm audit fix: patch transitive dependencies (ws, hono, body-parser, path-to-regexp, postcss, vite, etc.), reducing vulnerabilities from 15 to 5; remaining 5 are unpatched sharp/libvips CVEs via @huggingface/transformers', text_zh: 'npm audit fix：修补传递依赖（ws、hono、body-parser、path-to-regexp、postcss、vite 等），漏洞从 15 降至 5；剩余 5 个为 @huggingface/transformers 引入的 sharp/libvips CVE，暂无上游补丁' },
+    ],
+  },
+  {
+    version: '0.5.54',
+    date: '2026-07',
+    changes: [
+      { type: 'feat', text_en: 'Add degradation routing in execute when the current-plan artifact is absent, so execution continues gracefully instead of stalling', text_zh: 'execute 在缺少 current-plan 产物时新增降级路由，使执行优雅延续而非卡死' },
+      { type: 'feat', text_en: 'Streamline the run/session CLI surface and add a dedicated run command entry', text_zh: '精简 run/session CLI 面，并新增独立 run 命令入口' },
+      { type: 'fix', text_en: 'Repair the search ranking gap and improve result quality; optimize the UserPromptSubmit hook search hot path', text_zh: '修复搜索排序缺口并提升结果质量；优化 UserPromptSubmit hook 搜索热路径' },
+      { type: 'fix', text_en: 'Complete the install entry command steps', text_zh: '补全安装入口命令步骤' },
+      { type: 'refactor', text_en: 'Unify --tag and --keyword parameter semantics across search/load, remove redundant run-lifecycle I/O and optimize artifact traversal, fold quality-refactor and security-audit into the Odyssey system, and simplify Companion into a linear flow with an added explore phase', text_zh: '统一 search/load 的 --tag 与 --keyword 参数语义，消除 run 生命周期冗余 I/O 并优化 artifact 遍历，将 quality-refactor 与 security-audit 融入 Odyssey 体系，并精简 Companion 为线性流程、补充 explore 阶段' },
+      { type: 'docs', text_en: 'Convert instruction files to English and update Gate rule semantics; broaden test coverage across graph-walker, connection-pool, tenant-migrator, KG scoring/merge, and run-context', text_zh: 'instruction 文件转英文并更新 Gate rule 语义；补充 graph-walker、connection-pool、tenant-migrator、KG scoring/merge 与 run-context 等测试覆盖' },
+    ],
+  },
+  {
     version: '0.5.53',
     date: '2026-07',
     changes: [

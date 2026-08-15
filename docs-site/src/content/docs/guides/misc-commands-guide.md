@@ -16,7 +16,7 @@ Maestro 工作流中用于维护、发布和规范管理的辅助命令。
 ### 使用场景
 
 - `/maestro-ralph` 决策门控暴露了命令步骤缺失
-- `/maestro-ralph --engine swarm --script wf-review` 发现流程层面的不足
+- `review` 决策门（`post-review`）发现流程层面的不足
 - 工作流执行偏差，根因指向命令定义不完整
 - Issue 追踪显示同类问题反复出现
 
@@ -49,7 +49,7 @@ Maestro 工作流中用于维护、发布和规范管理的辅助命令。
 /maestro-overlay --amend --from-verify .workflow/phases/1    # 从验证结果中发现命令缺口
 /maestro-overlay --amend --from-review .workflow/phases/2    # 从审查结果中提取流程改进
 /maestro-overlay --amend --scan                               # 自动扫描所有信号
-/maestro-overlay --amend "maestro-ralph continue 缺少 CLI 编译验证步骤"  # 直接描述问题
+/maestro-overlay --amend "maestro-ralph -c 缺少 CLI 编译验证步骤"  # 直接描述问题
 /maestro-overlay --amend --dry-run                            # 预览模式（不安装）
 /maestro-overlay --amend -y                                   # 跳过确认
 ```
@@ -89,9 +89,9 @@ Maestro 工作流中用于维护、发布和规范管理的辅助命令。
 
 ---
 
-## 三、maestro-spec remove — 规范移除
+## 三、specs-remove — 规范移除
 
-从 specs 文件中移除指定的 `<spec-entry>` 条目。与 `/maestro-spec add` 对称，使用 `maestro wiki remove-entry` 原子删除并自动更新索引。
+从 specs 文件中移除指定的 `<spec-entry>` 条目。作为 `/maestro-spec`（录入）的对称操作，`specs-remove` 是编排器派发的 step，使用 `maestro wiki remove-entry` 原子删除并自动更新索引。
 
 ### Entry ID 格式
 
@@ -103,21 +103,21 @@ spec-{file-stem}-{NNN}  （如 spec-learnings-003）
 
 ```bash
 maestro wiki list --type spec --json    # 列出所有 spec 条目
-/maestro-spec load --keyword auth               # 按关键词搜索
-/maestro-spec remove spec-learnings-003          # 移除指定条目
+maestro spec load --keyword auth        # 按关键词搜索（CLI）
+specs-remove spec-learnings-003         # 移除指定条目（step，由编排器派发）
 ```
 
 ### 注意事项
 
-- 需先通过 `/maestro-spec setup` 初始化 `.workflow/specs/`
+- 需先通过 `maestro spec init` 初始化 `.workflow/specs/`
 - Entry ID 必须是 spec 类型子节点
-- 移除不可逆（建议先用 `/maestro-spec load` 预览）
+- 移除不可逆（建议先用 `maestro spec load` 预览）
 
 ---
 
-## 四、maestro-manage knowledge audit — 知识审计淘汰
+## 四、maestro-knowledge audit — 知识审计淘汰
 
-审计 spec / knowhow / artifact 三存储，识别矛盾、过期、孤立和元数据质量问题。与 `/maestro-manage knowledge harvest`（写入/提取）对称——harvest 积累知识，audit 清理知识。
+审计 spec / knowhow / artifact 三存储，识别矛盾、过期、孤立和元数据质量问题。与 `/maestro-knowledge harvest`（写入/提取）对称——harvest 积累知识，audit 清理知识。
 
 ### 审计场景（8 类 28 子场景）
 
@@ -165,11 +165,11 @@ maestro wiki list --type spec --json    # 列出所有 spec 条目
 ### 常见用法
 
 ```bash
-/maestro-manage knowledge audit --scope all              # 全量审计（交互式）
-/maestro-manage knowledge audit --scope spec --level P0  # 仅审计 P0 级 spec 问题
-/maestro-manage knowledge audit --scope knowhow --dry-run # 预览 knowhow 审计
-/maestro-manage knowledge audit --scope artifact --report # 仅生成 artifact 审计报告
-/maestro-manage knowledge audit --scope all --mark        # 非交互标记所有问题条目
+/maestro-knowledge audit --scope all              # 全量审计（交互式）
+/maestro-knowledge audit --scope spec --level P0  # 仅审计 P0 级 spec 问题
+/maestro-knowledge audit --scope knowhow --dry-run # 预览 knowhow 审计
+/maestro-knowledge audit --scope artifact --report # 仅生成 artifact 审计报告
+/maestro-knowledge audit --scope all --mark        # 非交互标记所有问题条目
 ```
 
 ---

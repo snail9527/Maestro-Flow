@@ -4,6 +4,9 @@ title: "搜索系统指南"
 
 Maestro 搜索系统基于 BM25F 算法，提供统一的知识搜索能力，支持 spec、knowhow、issue、domain 等多种数据源。
 
+检索在完整知识闭环中的职责、canonical identity 和防集中策略见
+[Maestro 知识系统架构](../docs/knowledge-system-architecture.md)。
+
 ---
 
 ## 概述
@@ -28,7 +31,7 @@ maestro search "jwt token" --type spec
 maestro search --category coding
 
 # 组合查询
-maestro search "oauth pkce" --type spec --category arch --limit 10
+maestro search "oauth pkce" --type spec --category arch
 
 # 代码搜索（需启用 MaestroGraph）
 maestro search "UserService" --code
@@ -37,7 +40,7 @@ maestro search "UserService" --code
 maestro search "UserService" --kg
 
 # 搜索所有来源（wiki + code），统一归一化排名
-maestro search "UserService" --all
+maestro search "UserService"
 
 # 跳过 embedding，仅用 BM25（避免 ONNX 冷启动）
 maestro search "jwt token" --no-emb
@@ -236,7 +239,7 @@ Claude Code 和 Codex 的 JSONL 会话转写被解析为轻量 note 条目（cat
 - **触发条件**：Write 或 Edit 工具调用后
 - **作用范围**：仅在工作区启用（`requiresWorkspace: true`）
 - **行为**：自动重建 WikiIndexer 索引，确保搜索结果反映最新文件内容
-- **持久化版本**：`search-cache.json` 当前为 **cache v3**（`version: 3`）；legacy cache generations 均拒绝复用并通过既有原子路径重建
+- **持久化版本**：`search-cache.json` 当前为 **cache v5**（`version: 5`）；legacy cache generations 均拒绝复用并通过既有原子路径重建
 
 该 hook 在标准 hook 集合中默认启用，无需手动配置。当通过 Write|Edit 修改 `.workflow/` 下的 spec/knowhow 等文件时，搜索索引会自动更新。
 
@@ -451,11 +454,11 @@ CJK 分词为 bigram + trigram 级别，短查询（2 字以下）可能匹配�
 
 ```bash
 # 统一搜索（推荐）
-maestro search <query> [--type <type>] [--category <cat>] [--kind <kind>] [--code] [--kg] [--all] [--no-emb] [--json]
+maestro search <query> [--type <type>] [--category <cat>] [--kind <kind>] [--code] [--kg] [--no-emb] [--json]
 
 # Wiki 系统搜索
 maestro wiki search <query> [--json]
-maestro wiki list [--type <type>] [--category <cat>] [--keyword <kw>]
+maestro wiki list [--type <type>] [--category <cat>] [-q <query>]
 
 # 知识图谱搜索（已废弃，使用 maestro search --kg 替代）
 maestro kg search <symbol>   # [deprecated] Use "maestro search --kg" instead
@@ -477,3 +480,5 @@ maestro wiki health
 # 知识健康检查（新鲜度、演化链完整性）
 maestro spec health
 ```
+
+`--kg` 与普通搜索共享 `--type`、`--category`、lifecycle 和 diversity 约束。KG 结果的 `id` 是可交给 `maestro load` 的 canonical ID，`graphId`/`aliases` 保留图遍历和历史兼容身份。

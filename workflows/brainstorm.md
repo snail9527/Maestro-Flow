@@ -73,7 +73,6 @@ All brainstorm output goes to scratch:
 - `--style-skill PKG`: validate `.claude/skills/style-{PKG}/SKILL.md` exists
 - Missing/empty args without flags = error
 
-**Session Resolution**: Runtime handles session resolution, artifact registration, and state updates. Contract inputs are resolved and injected by the runtime via `maestro run create`. `--session ID` is forwarded to the runtime for explicit selection.
 
 **Output Directory Resolution**:
 - Phase mode (number): resolve the plan artifact from the returned `upstream` map (ERROR if the required alias is absent).
@@ -246,6 +245,22 @@ Seven sub-phases producing guidance-specification.md:
 3. Record `design_system_established: true` in session metadata
 
 `--yes`: auto-selects variant 1.
+
+### Step 3.9: Architecture Knowledge Injection (arch-kb, Auto Mode)
+
+Query the isolated architecture knowledge base to seed the system-architect role:
+
+```bash
+# Match system type to architecture templates (thinking skeleton source)
+maestro arch-kb search "{guidance-specification one-liner}" --type template --json --limit 3
+
+# View matched template decision sections as reference architecture
+maestro arch-kb show <template-id> --section "关键架构决策与权衡"
+```
+
+- If search returns templates: inject matched template sections as **reference architecture** context for system-architect
+- arch-kb is isolated from `maestro search` — only triggered by this explicit call
+- Store as `arch_kb_context` (in-memory), passed to Step 4 system-architect agent prompt
 
 ### Step 4: Parallel Role Analysis (Auto Mode)
 
@@ -461,8 +476,6 @@ Write `{output_dir}/context-package.json` by extracting from session artifacts:
 - `insights[]`: from each `{role}/analysis.md` §3 Cross-Cutting subsections → `{ role, area, summary, ref: "{role}/analysis.md#§3-{heading}" }`
 - `open_questions[]`: from §4-N SHOULD/MAY items → `{ area, question, options[], ref }`
 - `references[]`: `{ type: "guidance", path: "guidance-specification.md" }` + `{ type: "role-analysis", path: "{role}/analysis.md" }` per role
-
-Artifact registration and state updates are handled by `maestro run complete`.
 
 **GATE Step 7.5→complete**: Glob `{output_dir}/context-package.json` MUST exist before workflow report; BLOCKED if missing.
 

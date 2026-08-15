@@ -1,7 +1,78 @@
 <!-- session-mode: none -->
 # Maestro
 
-- **Coding Philosophy**: @~/.maestro/workflows/coding-philosophy.md
+<!-- session-mode: none -->
+# Coding Philosophy
+
+## Core Beliefs
+
+- **Pursue good taste** - Eliminate edge cases to make code logic natural and elegant
+- **Embrace extreme simplicity** - Complexity is the root of all evil
+- **Be pragmatic** - Code must solve real-world problems, not hypothetical ones
+- **Data structures first** - Bad programmers worry about code; good programmers worry about data structures
+- **Never break backward compatibility** - Existing functionality is sacred and inviolable
+- **Incremental progress over big bangs** - Small changes that compile and pass tests
+- **Learning from existing code** - Study and plan before implementing
+- **Clear intent over clever code** - Be boring and obvious
+- **Follow existing code style** - Match import patterns, naming conventions, and formatting of existing codebase
+- **Minimize changes** - Only modify what's directly required; avoid refactoring, adding features, or "improving" code beyond the request
+- **No unsolicited documentation** - NEVER generate reports, documentation files, or summaries without explicit user request. When the active command requires a report, write it only to the current Run's `report.md` or declared typed output.
+
+## Simplicity Means
+
+- Single responsibility per function/class
+- Avoid premature abstractions
+- No clever tricks - choose the boring solution
+- If you need to explain it, it's too complex
+
+## Fix, Don't Hide
+
+**Solve problems, don't silence symptoms** - Skipped tests, `@ts-ignore`, empty catch, `as any`, excessive timeouts = hiding bugs, not fixing them
+
+**NEVER**:
+- Make assumptions - verify with existing code
+- Generate reports, summaries, or documentation files without explicit user request
+- Use suppression mechanisms (`skip`, `ignore`, `disable`) without fixing root cause
+
+**ALWAYS**:
+- Plan complex tasks thoroughly before implementation
+- Generate task decomposition for multi-module work (>3 modules or >5 subtasks)
+- Track progress using TODO checklists for complex tasks
+- Validate planning documents before starting development
+- Commit working code incrementally
+- Update plan documentation and progress tracking as you go
+- Learn from existing implementations
+- Stop after 3 failed attempts and reassess
+- **Edit fallback**: When Edit tool fails 2+ times on same file, try Bash sed/awk first, then Write to recreate if still failing
+
+## Learning the Codebase
+
+- Find 3 similar features/components
+- Identify common patterns and conventions
+- Use same libraries/utilities when possible
+- Follow existing test patterns
+
+## Tooling
+
+- Use project's existing build system
+- Use project's test framework
+- Use project's formatter/linter settings
+- Don't introduce new tools without strong justification
+
+## Content Uniqueness Rules
+
+- **Each layer owns its abstraction level** - no content sharing between layers
+- **Reference, don't duplicate** - point to other layers, never copy content
+- **Maintain perspective** - each layer sees the system at its appropriate scale
+- **Avoid implementation creep** - higher layers stay architectural
+
+# Context Requirements
+
+Before implementation, always:
+- Identify 3+ existing similar patterns
+- Map dependencies and integration points
+- Understand testing framework and coding conventions
+
 
 ## Delegate & CLI
 
@@ -14,7 +85,7 @@ Always `run_in_background: true`. Full guide: `cat ~/.maestro/workflows/delegate
 
 ## Explore
 
-Route code search by the Query Rules table (Knowledge System below) — it is the single source for tool selection. `maestro explore` is the default for usage sweeps and pattern scans: prefer it over Glob and broad Grep/Read, call it and stop to wait for results.
+Route code search by the Query Rules table (Knowledge System below) — it is the single source for tool selection. Use `maestro explore` only when the entry point is uncertain or a cross-file relationship needs evidence-backed synthesis. For exact text, regex, known files, or exhaustive call-site scans, use `rg`/Grep directly. When using `maestro explore`, call it and stop to wait for results.
 
 ```bash
 maestro explore "FIND: <target + condition>\nSCOPE: <paths>" [more prompts...] [options]
@@ -28,17 +99,17 @@ Lightweight read-only codebase search. 1 prompt = 1 agent. Not for write-mode/lo
 | `--all` | Fan out each prompt to all endpoints |
 | `--json` | Output results as JSON |
 
-长尾选项（`--max-turns`、`-f`、`--cd`）见 `maestro explore --help`。
+Long-tail options (`--max-turns`, `-f`, `--cd`) — see `maestro explore --help`.
 
 ### Context Injection
 
-Explore agent 无项目认知，调用前注入上下文：
+Explore agents have no project awareness — inject context before calling:
 
-| 注入项 | 写入字段 | 内容 |
-|--------|----------|------|
-| 结构 | SCOPE | 相关目录的具体路径（非通配泛扫） |
-| 领域 | SCOPE | `maestro search` 已返回的关键文件路径 |
-| 约束 | ATTENTION | 框架、语言、命名惯例 |
+| Injection | Field | Content |
+|-----------|-------|---------|
+| Structure | SCOPE | Concrete paths of relevant directories (no wildcard sweeps) |
+| Domain | SCOPE | Key file paths already returned by `maestro search` |
+| Constraints | ATTENTION | Framework, language, naming conventions |
 
 ```
 FIND: authentication middleware that validates JWT tokens
@@ -48,15 +119,15 @@ ATTENTION: Express.js, middleware files named *.middleware.ts
 
 ### Prompt Structure
 
-**FIND + SCOPE 为最低标准。** 每个字段一句陈述句，禁止嵌套条件。
+**FIND + SCOPE is the minimum bar.** One declarative sentence per field; no nested conditions.
 
 | Field | Required | Rule |
 |-------|----------|------|
-| `FIND` | **Yes** | 可判定的具体目标（什么 + 判定条件） |
-| `SCOPE` | **Yes** | 明确路径或 glob，禁止 `**/*` 泛扫 |
-| `EXCLUDE` | No | 要跳过的文件类型或目录 |
-| `ATTENTION` | No | 框架、命名惯例、已知陷阱 |
-| `EXPECTED` | Recommended | 输出格式：`file:line` 列表 / 摘要 / JSON |
+| `FIND` | **Yes** | Decidable concrete target (what + acceptance condition) |
+| `SCOPE` | **Yes** | Explicit paths or globs; `**/*` sweeps forbidden |
+| `EXCLUDE` | No | File types or directories to skip |
+| `ATTENTION` | No | Framework, naming conventions, known pitfalls |
+| `EXPECTED` | Recommended | Output format: `file:line` list / summary / JSON |
 
 ```
 FIND: Functions that call db.query() with string concatenation instead of $1/$2
@@ -67,25 +138,25 @@ EXPECTED: file:line list with the SQL string
 
 ### Cross-Search
 
-对重要搜索，用 2-3 个不同角度的 prompt 并发，结果由主 agent 交叉验证。
+For important searches, run 2-3 prompts from different angles concurrently; the main agent cross-validates results.
 
-**按角度拆分，不按关键词拆分：**
+**Split by angle, not by keyword:**
 
-| 角度 | Prompt A | Prompt B |
-|------|----------|----------|
-| 定义 vs 调用 | 找函数定义 | 找调用点 |
-| 正例 vs 反例 | 找正确用法 | 找遗漏用法 |
-| 入口 vs 实现 | 找 export/路由 | 找内部逻辑 |
-| 按文件类型 | .ts 中的用法 | .vue 中的用法 |
+| Angle | Prompt A | Prompt B |
+|-------|----------|----------|
+| Definition vs call sites | Find function definitions | Find call sites |
+| Positive vs negative | Find correct usage | Find missed usage |
+| Entry vs implementation | Find exports/routes | Find internal logic |
+| By file type | Usage in .ts | Usage in .vue |
 
-**结果置信度：**
-- 双命中 → 高置信，直接使用
-- 单命中 → 用 Grep/Read 二次确认
-- 零命中 → 换角度重搜或目标不存在
+**Result confidence:**
+- Both hit → high confidence, use directly
+- Single hit → verify with Grep/Read
+- Zero hits → retry from a different angle or target doesn't exist
 
 ### Execution
 
-Multi-prompt — background；single lookup — foreground：
+Multi-prompt — background; single lookup — foreground:
 
 ```
 Bash({ command: "maestro explore \"p1\" \"p2\" --json", run_in_background: true })
@@ -96,18 +167,31 @@ Session: `maestro explore show` / `maestro explore output <id>`
 
 ## Knowledge System
 
-**Gate rule**: run `maestro search` + `maestro load` BEFORE reading code or editing files. 空结果 ≠ 免检：返回 hint 时先执行 hint 再重试；确认无既有知识后照常推进，任务结束按 Record 补录。
+**Knowledge Gate (required)**: Resolve project knowledge before reading, analyzing, planning against, or modifying project files.
 
-**Re-search triggers**（任务中重新检索，换关键词不重复旧 query）：进入新模块/子系统边界；同一问题修复失败 2 次；架构/方案决策前。
+| Context | Required opening |
+|---------|------------------|
+| Standalone task | First project-related tool call: `maestro search "<1-3 task-specific keywords>" [--type <type>] --json` |
+| Fresh orchestrated Run | Inspect the injected birth packet and `knowledge_context`, then make the task-specific search the first project-related tool call |
+| Reattached/compacted Run | `maestro run brief <run-id>` may run first; inspect `knowledge_context`, then search/load before project-file access |
+
+This applies to process/ops, code changes, debugging, architecture, review, planning, and config/skill work. `git status`, file-name search, Grep/Read, and `rg '*knowhow*'` do not satisfy the Gate.
+
+When the user says "参考", "参照", `knowhow`, `spec`, or "reference the process", derive the query from the task subject and operation, add the named `--type`, and explicitly load every governing hit before file exploration. Search results, automatic injection, and `knowledge_context` are exposure only; explicit `maestro load` records consumption. `knowledge_context.run.knowledge_ids` lists consumed IDs, not full content: do not repeat load when the full entry is already in context, but reload when reattachment preserved only an ID or summary.
+
+Empty results permit normal discovery only after inspection. If search returns an initialization or recovery hint, execute it and retry first.
+
+**Re-search triggers** (re-query mid-task with new keywords, never repeat old queries): entering a new module/subsystem boundary; same fix failed twice; before architecture/approach decisions.
 
 ```bash
-maestro search "<query>" [--type <type>] [--category <cat>] [--kind <kind>] [--code] [--kg]
-maestro load --type <type> [--list] [--category <cat>] [--keyword <word>] [--id <id>]
+maestro search "<query>" [--type <type>] [--category <cat>] [--tag <tag>] [--keyword <word>] [--code] [--kg]
+maestro load --type <type> [--list] [--category <cat>] [--keyword <word>] [--tag <tag>] [--id <id>]
 ```
 
 **--type**: `spec`, `knowhow`, `domain`, `issue`, `session`, `scratch`, `note`, `project`, `roadmap`
 **--category** (spec only): `coding`, `arch`, `debug`, `test`, `review`, `learning`, `ui`
-**--kind**: sealed run 产物 kind 过滤（如 `diagnosis`, `review-findings`, `lessons`），仅 wiki 结果
+**--tag**: Filter by exact tag match (e.g. `diagnosis`, `review-findings`, `lessons`), wiki only
+**--keyword**: Filter by keyword in title/body (substring match), wiki only
 
 ### Query Rules
 
@@ -118,15 +202,16 @@ Separate concepts from symbols. Add `--kg` for full-source.
 |--------|------|
 | Known symbol → definition/signature | `maestro search "<Symbol>" --code` (file:line, no agent cost) |
 | Concept / knowledge / conventions | `maestro search "<keywords>"` |
-| Debug 症状 / review 教训（沉淀产物） | `maestro search "<关键词>" --kind diagnosis` / `--kind lessons` |
-| Usage sweep / pattern scan | `maestro explore` |
-| Exact regex / line content | Grep |
+| Debug symptoms / review lessons (sealed artifacts) | `maestro search "<keywords>" --tag diagnosis` / `--tag lessons` |
+| Exact text / regex / known-file search | `rg` / Grep |
+| Exhaustive usage sweep with a known symbol or syntax pattern | `rg` / Grep |
+| Unknown entry point / cross-file data flow / pattern needing an evidence-backed synthesis | `maestro explore` |
 
-**Association follow-through** — 命中后沿关联走一跳，优于重发大 query：
+**Association follow-through** — after a hit, walk one hop along relations instead of re-issuing broad queries:
 
-- 命中分块条目（id 带 `-NNN` 尾缀）→ `maestro load --type knowhow --id <父条目id>` 取全文
-- 顺藤摸瓜（谁引用它 / 它引用谁）→ `maestro wiki backlinks <id>` / `maestro wiki forward <id>`
-- 规则演化脉络 → `maestro spec history <sid>`
+- Hit a chunked entry (id with `-NNN` suffix) → `maestro load --type knowhow --id <parent-entry-id>` for full text
+- Trace references (who cites it / what it cites) → `maestro wiki backlinks <id>` / `maestro wiki forward <id>`
+- Rule evolution history → `maestro spec history <sid>`
 
 Zero code hits with a hint (e.g. `code index not initialized`) → run the hinted command, then retry — don't abandon code search.
 
@@ -140,26 +225,28 @@ maestro search "DetailedTopologySVG" --code
 maestro load --type spec --category coding
 ```
 
-### Record
+### Stable Run Knowledge Invariants
 
-| What | Command |
-|------|---------|
-| Spec | `maestro spec add <category> "title" "content" --keywords kw1,kw2 --description "summary"` |
-| Knowhow | `maestro knowhow add --type <type> --title "..." --body "..."` (`--spec-category <cat>` for agent injection) |
+Runtime birth packets, `maestro run brief`, completion receipts, and the `maestro run check` finish checklist are authoritative for Run-specific IDs, reconciliation state, and next commands. Static instructions own only these stable rules:
 
-Category routing: decisions→`arch`, patterns→`coding`, pitfalls→`debug`/`learning`, rules→`review`, tests→`test`.
-`session-mode: run` 命令在 `maestro run check` 全绿时会收到 finish 收口清单（handoff、补录、冲突标注、verdict）——逐项执行，不跳过。
+1. Search and automatic injection are exposure; explicit `load` records consumption.
+2. Put accepted decisions and locked constraints in `report.md` frontmatter; completion stages them automatically as pending candidates. Only reusable, prescriptive content belongs there — rules future work must follow. NEVER write execution-state narration as decisions/constraints (read-only declarations, worktree or audit-process observations, missing-file notes, routing memos such as "Read-only audit; preserve the existing dirty worktree" or "Debug investigation remained read-only"); seal auto-stages every accepted decision / locked constraint as a corpus candidate, so state narration pollutes the knowledge base.
+3. Stage reusable recipes or pitfalls with `maestro knowledge stage spec|knowhow "<title>" --content-file <path|-> --run <run-id> [--category <category>]`; write content to a temp file, never inline. Without a Run, session-source staging works the same way via `--session <session-id> --evidence <file:line,...>` (write authority resolves through identity tiers; with nothing running a daily synthetic knowledge Session is created). **Staging Quality Bar** — stage content only if future work can directly reuse it and at least one holds: (a) a pitfall warning ("when doing X, watch out for Y because Z" — non-obvious failure mode plus prevention); (b) a failure lesson (what failed, root cause, what worked instead); (c) a non-trivial trade-off (why A over B, with the constraints/context); (d) a newly established prescriptive constraint (spec). NEVER stage: process notes ("did X", "produced document Y"); re-descriptions of existing project patterns that code/config already documents; trivial or obvious operations; raw traces (tool outputs, log or error fragments) — distill traces into a lesson first, discard when nothing reusable can be distilled. **Zero candidates is a legitimate outcome** — never manufacture candidates to justify the pipeline.
+4. When staging content that cites, validates, or contradicts existing knowledge, add `--signal cited|validated|contradicted --signal-ids <comma-separated ids>` (space-separated values leak into positional arguments).
+5. Routine Run completion never writes project Spec/Knowhow directly and never promotes candidates.
+6. The finish checklist is soft guidance. Work through it and put intentionally unresolved items in `report.md` concerns. Unresolved reconciliation may be sealed but cannot be promoted.
+7. Review, resolve, promote, supersede, conflict marking, and audit are explicit governance actions. Execute them only when the user requests knowledge governance or a confirmed workflow step requires it.
 
-### Supersession & Conflict (dual-track)
+Outside a Run, governed staging remains available (see item 3); direct `maestro spec add` or `maestro knowhow add` writes stay reserved for explicit knowledge-management work. Category routing: decisions→`arch`, patterns→`coding`, pitfalls→`debug`/`learning`, rules→`review`, tests→`test`.
 
-| 关系 | 场景 | 命令 | 效果 |
-|------|------|------|------|
-| **supersede** | 新规则替代旧规则 | `maestro spec supersede <old-sid> --by <new-sid>` | 旧条目 `deprecated`，演化链保留 |
-| **conflict** | 两条规则均有道理 | `maestro spec conflict mark <file> <line> --note "<reason>"` | 旧条目 `contested`（search ×0.5），人裁决 |
+### Governance Boundary
 
-Confidence levels: `high` → `medium` (default) → `low` (`[LOW CONFIDENCE]`) → `contested` (`[CONTESTED]`).
-Resolution: `maestro run skill knowledge-audit`（加载审计工作流后执行）
+Use commands supplied by the current `knowledge_context`, completion receipt, and `run check` output; those Runtime surfaces override static examples here.
 
-### Health & Maintenance
-
-`maestro spec health` — 生命周期统计 + 演化链完整性。低频维护（`backfill-sid` 回填 sid、`history <sid>` 演化链）见 `maestro spec --help`。
+- `maestro knowledge review <session-id> --refresh` refreshes reconciliation; inline adjudication + promotion is one `maestro knowledge promote <session-id> --resolve <candidate-id> --as <choice> [--target <knowledge-id>] --reason "<reason>"` call (`review --resolve` remains a compatible fallback).
+- Review Presentation Protocol: when candidates need a disposition, the agent runs `review --json` itself, presents each candidate (title, content summary, evidence anchors, evidence-backed matches, recommended disposition + one-line rationale), collects the user's decisions, and only then executes the `promote --resolve` inline adjudication (or the `review --resolve` fallback). The user decides; the agent never hands over the raw review command as the whole task. Under `-y`, only verified clearly-unique candidates may be auto-resolved as `unique`.
+- Promotion requires eligible candidates with fresh receipts. Run-source candidates require every source Run sealed. A `session/2.0` session-source candidate does not require Session seal: it requires immutable candidate version/content hash, exact Session activity revision, non-empty evidence roots/hash, and a fresh session reconciliation receipt for the candidate snapshot and current corpus fingerprint, revalidated at final commit. Normal completion and Execution seal never imply approval or promotion.
+- Direct-write whitelist: only explicit knowledge-management commands may write the corpus directly (`maestro spec add`, `maestro knowhow add`, `maestro domain add`, and the knowhow/wiki maintenance commands). Content-producing workflows (retrospective, wiki-digest, wiki-connect, maestro-learn, ui-codify-knowhow, harvest, finish-work) MUST route knowledge through `stage → review → promote` — never direct `.workflow/specs/` or `.workflow/knowhow/` writes (the corpus is scanned, injected, and indexed; sid-less direct entries pollute it).
+- A pending backlog remains durable and visible; neither Run completion, Execution seal, nor legacy Session seal silently promotes or discards candidates.
+- Deprecated/superseded knowledge remains auditable and is excluded from normal search and injection.
+- Low exposure never triggers automatic deletion or pruning.
